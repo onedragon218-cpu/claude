@@ -1,0 +1,310 @@
+<meta name="dash-one-writer">
+<style>
+  .iv { display: grid; gap: var(--cds-gap-xl); font-family: var(--font-anthropic-sans); }
+  .iv-head { display: grid; gap: var(--cds-gap-xs); }
+  .iv-head h1 { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); text-wrap: balance; }
+  .iv-head p { margin: 0; color: var(--color-fg-muted); max-width: 70ch; }
+  .iv-cards { display: grid; gap: var(--cds-gap-md); grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); }
+  .iv-card, .iv-panel { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+  .iv-card h2, .iv-panel h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+  .iv-card dl { display: grid; grid-template-columns: auto 1fr; gap: var(--cds-gap-xs) var(--cds-gap-md); margin: var(--cds-gap-md) 0 0; align-items: baseline; }
+  .iv-card dt { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+  .iv-card dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .iv-card .iv-big { font-family: var(--font-anthropic-serif); font-size: var(--cds-font-size-title); font-weight: 400; }
+  .iv-card .iv-ratio.hi { color: var(--color-warn); }
+  .iv-card .iv-ratio.lo { color: var(--color-ok); }
+  .iv-note { margin: var(--cds-gap-xs) 0 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); max-width: 75ch; }
+  .iv-controls { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm) var(--cds-gap-lg); align-items: center; margin-top: var(--cds-gap-md); }
+  .iv-seg { display: inline-flex; border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); overflow: hidden; }
+  .iv-seg button { font: inherit; border: 0; background: transparent; color: var(--color-fg); padding: var(--cds-pad-xs) var(--cds-pad-md); cursor: pointer; }
+  .iv-seg button + button { border-left: 1px solid var(--color-border-line); }
+  .iv-seg button[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); }
+  .iv-seg button:focus-visible, .iv-legend input:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+  .iv-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-md); font-size: var(--cds-font-size-caption); }
+  .iv-legend label { display: inline-flex; align-items: center; gap: var(--cds-gap-xs); cursor: pointer; }
+  .iv-sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; background: var(--color-fg); }
+  .iv-sw.price { height: 8px; width: 8px; border-radius: 50%; }
+  .iv-chartbox { position: relative; margin-top: var(--cds-gap-md); min-height: 380px; }
+  .iv-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; white-space: nowrap; z-index: 2; }
+  .iv-tip .t { color: var(--cds-text-secondary); margin-bottom: 2px; }
+  .iv-tip .r { display: flex; gap: var(--cds-gap-sm); justify-content: space-between; }
+  .iv-tip .r span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+  .iv-tablewrap { overflow-x: auto; margin-top: var(--cds-gap-md); }
+  .iv-table { border-collapse: collapse; width: 100%; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .iv-table th, .iv-table td { padding: 6px 10px; border-bottom: 1px solid var(--color-border-line); text-align: right; white-space: nowrap; }
+  .iv-table th { color: var(--color-fg-muted); font-weight: var(--cds-font-weight-medium); }
+  .iv-table th:first-child, .iv-table td:first-child, .iv-table th:nth-child(2), .iv-table td:nth-child(2) { text-align: left; }
+  .iv-table tr.future td { color: var(--color-fg-muted); }
+  .iv-table tr.now td { font-weight: var(--cds-font-weight-medium); }
+  .iv-assume td { white-space: normal; text-align: left; vertical-align: top; }
+  .iv-assume td:first-child { white-space: nowrap; }
+  .iv-methods { display: grid; gap: var(--cds-gap-md); grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); margin-top: var(--cds-gap-md); }
+  .iv-methods h3 { margin: 0 0 4px; font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+  .iv-methods p { margin: 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); line-height: 1.55; }
+  [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+  [data-dash-source-state=empty] { color: transparent; }
+</style>
+
+<div class="iv">
+  <header class="iv-head">
+    <h1>본질가치 13년 추이</h1>
+    <p>LG전자·한솔제지·메디톡스의 주당 본질가치를 S-RIM, DCF, DDM, 상대가치 네 가지로 계산해 2016년부터 2029년까지 그렸습니다. 과거는 그해 말까지 공시된 숫자로 다시 계산한 값이고, 2027년 이후는 보수·기본·낙관 세 시나리오의 추정입니다.</p>
+  </header>
+
+  <section class="iv-cards" aria-label="올해 주가와 본질가치">
+    <article class="iv-card">
+      <h2>LG전자</h2>
+      <dl>
+        <dt>주가 (2026-11-03)</dt><dd><span data-draw="price" data-source="gap" data-field="price" data-where="company=LG전자">—</span>원</dd>
+        <dt>본질가치 종합</dt><dd class="iv-big"><span data-draw="value" data-source="gap" data-field="value" data-where="company=LG전자">—</span>원</dd>
+        <dt>주가 ÷ 본질가치</dt><dd><span class="iv-ratio" data-draw="ratio" data-source="gap" data-field="ratio" data-where="company=LG전자">—</span>배</dd>
+        <dt>2029년 기본 시나리오</dt><dd><span data-draw="base" data-source="gap" data-field="base2029" data-where="company=LG전자">—</span>원</dd>
+        <dt>2029년 범위</dt><dd><span data-draw="low" data-source="gap" data-field="low2029" data-where="company=LG전자">—</span> ~ <span data-draw="high" data-source="gap" data-field="high2029" data-where="company=LG전자">—</span>원</dd>
+      </dl>
+    </article>
+    <article class="iv-card">
+      <h2>한솔제지</h2>
+      <dl>
+        <dt>주가 (2026-11-03)</dt><dd><span data-draw="price" data-source="gap" data-field="price" data-where="company=한솔제지">—</span>원</dd>
+        <dt>본질가치 종합</dt><dd class="iv-big"><span data-draw="value" data-source="gap" data-field="value" data-where="company=한솔제지">—</span>원</dd>
+        <dt>주가 ÷ 본질가치</dt><dd><span class="iv-ratio" data-draw="ratio" data-source="gap" data-field="ratio" data-where="company=한솔제지">—</span>배</dd>
+        <dt>2029년 기본 시나리오</dt><dd><span data-draw="base" data-source="gap" data-field="base2029" data-where="company=한솔제지">—</span>원</dd>
+        <dt>2029년 범위</dt><dd><span data-draw="low" data-source="gap" data-field="low2029" data-where="company=한솔제지">—</span> ~ <span data-draw="high" data-source="gap" data-field="high2029" data-where="company=한솔제지">—</span>원</dd>
+      </dl>
+    </article>
+    <article class="iv-card">
+      <h2>메디톡스</h2>
+      <dl>
+        <dt>주가 (2026-11-03)</dt><dd><span data-draw="price" data-source="gap" data-field="price" data-where="company=메디톡스">—</span>원</dd>
+        <dt>본질가치 종합</dt><dd class="iv-big"><span data-draw="value" data-source="gap" data-field="value" data-where="company=메디톡스">—</span>원</dd>
+        <dt>주가 ÷ 본질가치</dt><dd><span class="iv-ratio" data-draw="ratio" data-source="gap" data-field="ratio" data-where="company=메디톡스">—</span>배</dd>
+        <dt>2029년 기본 시나리오</dt><dd><span data-draw="base" data-source="gap" data-field="base2029" data-where="company=메디톡스">—</span>원</dd>
+        <dt>2029년 범위</dt><dd><span data-draw="low" data-source="gap" data-field="low2029" data-where="company=메디톡스">—</span> ~ <span data-draw="high" data-source="gap" data-field="high2029" data-where="company=메디톡스">—</span>원</dd>
+      </dl>
+    </article>
+  </section>
+
+  <section class="iv-panel" id="chart">
+    <h2>주당 본질가치와 주가</h2>
+    <p class="iv-note">실선은 과거와 올해, 점선은 기본 시나리오, 옅은 띠는 종합값의 보수~낙관 범위입니다. 주가는 수정주가 연말 종가이고 2026년은 11월 3일 종가입니다.</p>
+    <div class="iv-controls">
+      <div class="iv-seg" role="group" aria-label="회사 고르기">
+        <button type="button" class="iv-co" data-co="LG전자" aria-pressed="true">LG전자</button>
+        <button type="button" class="iv-co" data-co="한솔제지" aria-pressed="false">한솔제지</button>
+        <button type="button" class="iv-co" data-co="메디톡스" aria-pressed="false">메디톡스</button>
+      </div>
+      <div class="iv-legend" aria-label="보일 선 고르기">
+        <label><input type="checkbox" id="iv-m-price" class="iv-m" data-m="price" checked><span class="iv-sw price" data-sw="price"></span>주가</label>
+        <label><input type="checkbox" id="iv-m-median" class="iv-m" data-m="median" checked><span class="iv-sw" data-sw="median"></span>종합(중앙값)</label>
+        <label><input type="checkbox" id="iv-m-srim" class="iv-m" data-m="srim" checked><span class="iv-sw" data-sw="srim"></span>S-RIM</label>
+        <label><input type="checkbox" id="iv-m-dcf" class="iv-m" data-m="dcf" checked><span class="iv-sw" data-sw="dcf"></span>DCF</label>
+        <label><input type="checkbox" id="iv-m-ddm" class="iv-m" data-m="ddm" checked><span class="iv-sw" data-sw="ddm"></span>DDM</label>
+        <label><input type="checkbox" id="iv-m-rel" class="iv-m" data-m="rel" checked><span class="iv-sw" data-sw="rel"></span>상대가치</label>
+      </div>
+    </div>
+    <div class="iv-chartbox" data-draw="chart" data-source="valuation"></div>
+  </section>
+
+  <section class="iv-panel" id="table">
+    <h2>연도별 계산값</h2>
+    <p class="iv-note">위에서 고른 회사의 값입니다. 단위는 원(주당), 요구수익률과 가중 ROE는 %. 빈칸은 그 방법으로 계산할 수 없던 해입니다.</p>
+    <div class="iv-tablewrap">
+      <table class="iv-table" data-source="valuation" data-row-key="company,year,scenario">
+        <thead><tr>
+          <th data-field="year">연도</th><th data-field="scenario">구분</th><th data-field="k">요구수익률</th><th data-field="roe_w">가중 ROE</th>
+          <th data-field="srim">S-RIM</th><th data-field="dcf">DCF</th><th data-field="ddm">DDM</th><th data-field="rel">상대가치</th><th data-field="median">종합</th><th data-field="price">주가</th>
+        </tr></thead>
+        <tbody data-draw="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="iv-panel" id="method">
+    <h2>계산 방법</h2>
+    <div class="iv-methods">
+      <div><h3>S-RIM</h3><p>지배자본에, 앞으로 벌 초과이익(ROE가 요구수익률을 넘는 부분)의 현재가치를 더합니다. 초과이익은 해마다 조금씩 줄어든다고 봅니다.</p></div>
+      <div><h3>DCF</h3><p>영업현금흐름에서 설비·무형자산 투자를 뺀 주주 몫 현금이 일정하게 늘어난다고 보고 할인합니다. 이 현금이 마이너스인 해는 계산하지 않습니다.</p></div>
+      <div><h3>DDM</h3><p>그해 현금배당 총액이 일정하게 늘어난다고 보고 할인합니다. 배당을 적게 주는 회사는 값이 낮게 나옵니다.</p></div>
+      <div><h3>상대가치</h3><p>시장 평균에 가까운 PER·PBR 배수를 순이익과 자본에 곱해 평균합니다. 업종 차이는 반영하지 않았습니다.</p></div>
+    </div>
+    <div class="iv-tablewrap">
+      <table class="iv-table iv-assume" data-source="assumptions" data-row-key="item">
+        <thead><tr><th data-field="item">항목</th><th data-field="value">값</th><th data-field="note">설명</th></tr></thead>
+        <tbody data-draw="assume"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+  window.IV = window.IV || { co: 'LG전자', show: { price: true, median: true, srim: true, dcf: true, ddm: true, rel: true } };
+  const IV = window.IV;
+  const num = (v) => (v === '' || v == null ? null : Number(v));
+  const fmt = d3.format(',');
+  const METHODS = [
+    { key: 'median', name: '종합(중앙값)', ci: 0, w: 3 },
+    { key: 'srim', name: 'S-RIM', ci: 1, w: 1.75 },
+    { key: 'dcf', name: 'DCF', ci: 2, w: 1.75 },
+    { key: 'ddm', name: 'DDM', ci: 3, w: 1.75 },
+    { key: 'rel', name: '상대가치', ci: 4, w: 1.75 },
+  ];
+  IV.METHODS = METHODS;
+  IV.num = num;
+  IV.fmt = fmt;
+
+  dash.calc('gap', {
+    inputs: ['valuation'],
+    title: '올해 주가 대비 본질가치',
+    description: '회사별 2026년 주가를 종합 본질가치로 나눈 배수와, 2029년 세 시나리오의 종합값',
+    fn: (valuation) => {
+      const n = (v) => (v === '' || v == null ? null : Number(v));
+      const cos = [...new Set(valuation.map((r) => r.company))];
+      return cos.map((company) => {
+        const rs = valuation.filter((r) => r.company === company);
+        const now = rs.find((r) => Number(r.year) === 2026 && r.scenario === '실적');
+        const f = (s) => n((rs.find((r) => Number(r.year) === 2029 && r.scenario === s) || {}).median);
+        const price = n(now.price), value = n(now.median);
+        return { company, price, value, ratio: Math.round((price / value) * 100) / 100, base2029: f('기본'), low2029: f('보수'), high2029: f('낙관') };
+      });
+    },
+  });
+
+  const cell = (field, f) => (el) => {
+    const g = dash.data('gap');
+    const co = new URLSearchParams(el.dataset.where).get('company');
+    const r = g.status === 'ok' ? g.data.find((x) => x.company === co) : null;
+    el.textContent = r && r[field] != null ? f(r[field]) : '—';
+    if (field === 'ratio') { el.classList.toggle('hi', !!r && r.ratio > 1); el.classList.toggle('lo', !!r && r.ratio < 1); }
+  };
+  dash.draw('price', cell('price', fmt));
+  dash.draw('value', cell('value', fmt));
+  dash.draw('ratio', cell('ratio', d3.format('.2f')));
+  dash.draw('base', cell('base2029', fmt));
+  dash.draw('low', cell('low2029', fmt));
+  dash.draw('high', cell('high2029', fmt));
+
+  const swatchColor = (k) => (k === 'price' ? 'var(--color-fg)' : dash.colors[METHODS.find((m) => m.key === k).ci]);
+  document.querySelectorAll('[data-sw]').forEach((s) => { s.style.background = swatchColor(s.dataset.sw); });
+
+  document.querySelectorAll('.iv-co').forEach((b) => b.addEventListener('click', () => {
+    IV.co = b.dataset.co;
+    document.querySelectorAll('.iv-co').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    dash.draw('chart'); dash.draw('rows');
+  }));
+  document.querySelectorAll('.iv-m').forEach((c) => c.addEventListener('change', () => { IV.show[c.dataset.m] = c.checked; dash.draw('chart'); }));
+</script>
+
+<script>
+  (() => {
+    const IV = window.IV, num = IV.num, fmt = IV.fmt, METHODS = IV.METHODS;
+    dash.draw('chart', (el) => {
+      const g = dash.data('valuation');
+      el.replaceChildren();
+      if (g.status !== 'ok') { el.textContent = '—'; return; }
+      const rows = g.data.filter((r) => r.company === IV.co).map((r) => ({ ...r, year: Number(r.year) }));
+      const hist = rows.filter((r) => r.scenario === '실적').sort((a, b) => a.year - b.year);
+      const now = hist.find((r) => r.year === 2026);
+      const fut = (s) => [now, ...rows.filter((r) => r.scenario === s).sort((a, b) => a.year - b.year)];
+      const base = fut('기본'), lo = fut('보수'), hi = fut('낙관');
+
+      const W = Math.max(300, el.clientWidth), H = 380;
+      const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', `${IV.co} 주당 본질가치와 주가 추이`);
+      const vals = [];
+      const shown = METHODS.filter((m) => IV.show[m.key]);
+      hist.forEach((r) => { shown.forEach((m) => vals.push(num(r[m.key]))); if (IV.show.price) vals.push(num(r.price)); });
+      [base, lo, hi].forEach((s) => s.forEach((r) => shown.forEach((m) => vals.push(num(r[m.key])))));
+      const vmax = d3.max(vals.filter((v) => v != null)) || 1;
+      const y = d3.scaleLinear([0, vmax * 1.05], [H - 28, 12]).nice();
+      const ticks = y.ticks(6);
+      const probe = svg.append('text').attr('font-size', 11).text(fmt(d3.max(ticks)));
+      const left = Math.ceil(probe.node().getComputedTextLength()) + 12; probe.remove();
+      const x = d3.scaleLinear([2016, 2029], [left, W - 14]);
+
+      svg.append('rect').attr('x', x(2026)).attr('y', 12).attr('width', x(2029) - x(2026)).attr('height', H - 40).attr('fill', 'var(--cds-chart-grid)').attr('opacity', 0.35);
+      svg.append('text').attr('x', x(2026) + 6).attr('y', 24).attr('font-size', 11).attr('fill', 'var(--color-fg-muted)').text('추정');
+      svg.append('g').selectAll('line').data(ticks).join('line').attr('x1', left).attr('x2', W - 14).attr('y1', y).attr('y2', y).attr('stroke', 'var(--cds-chart-grid)');
+      svg.append('g').selectAll('text').data(ticks).join('text').attr('x', left - 8).attr('y', (d) => y(d) + 4).attr('text-anchor', 'end').attr('font-size', 11).attr('fill', 'var(--color-fg-muted)').text(fmt);
+      const xt = W < 520 ? [2016, 2019, 2022, 2026, 2029] : d3.range(2016, 2030);
+      svg.append('g').selectAll('text').data(xt).join('text').attr('x', x).attr('y', H - 8).attr('text-anchor', 'middle').attr('font-size', 11).attr('fill', 'var(--color-fg-muted)').text((d) => (W < 520 ? d : `'${String(d).slice(2)}`));
+      svg.append('line').attr('x1', x(2026)).attr('x2', x(2026)).attr('y1', 12).attr('y2', H - 28).attr('stroke', 'var(--cds-chart-reference)').attr('stroke-dasharray', '3 3');
+
+      if (IV.show.median) {
+        const area = d3.area().x((d) => x(d.year)).y0((d) => y(num(d.lo))).y1((d) => y(num(d.hi)));
+        const band = lo.map((r, i) => ({ year: r.year, lo: r.median, hi: hi[i].median }));
+        svg.append('path').attr('d', area(band)).attr('fill', dash.colors[0]).attr('opacity', 0.14);
+      }
+      shown.forEach((m) => {
+        const line = d3.line().defined((d) => num(d[m.key]) != null).x((d) => x(d.year)).y((d) => y(num(d[m.key])));
+        const color = dash.colors[m.ci];
+        svg.append('path').attr('d', line(hist)).attr('fill', 'none').attr('stroke', color).attr('stroke-width', m.w).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round').attr('opacity', m.key === 'median' ? 1 : 0.85);
+        svg.append('path').attr('d', line(base)).attr('fill', 'none').attr('stroke', color).attr('stroke-width', m.w).attr('stroke-dasharray', '5 4').attr('opacity', m.key === 'median' ? 1 : 0.7);
+      });
+      if (IV.show.price) {
+        const pl = d3.line().x((d) => x(d.year)).y((d) => y(num(d.price)));
+        svg.append('path').attr('d', pl(hist)).attr('fill', 'none').attr('stroke', 'var(--color-fg)').attr('stroke-width', 1.25).attr('opacity', 0.6);
+        svg.append('g').selectAll('circle').data(hist).join('circle').attr('cx', (d) => x(d.year)).attr('cy', (d) => y(num(d.price))).attr('r', 3.5).attr('fill', 'var(--color-fg)');
+      }
+
+      const tip = document.createElement('div'); tip.className = 'iv-tip'; tip.hidden = true; el.appendChild(tip);
+      const hover = svg.append('line').attr('y1', 12).attr('y2', H - 28).attr('stroke', 'var(--cds-chart-axis)').attr('opacity', 0);
+      const years = d3.range(2016, 2030);
+      svg.append('rect').attr('x', left).attr('y', 0).attr('width', W - 14 - left).attr('height', H).attr('fill', 'transparent')
+        .on('pointermove', (ev) => {
+          const [px] = d3.pointer(ev);
+          const yr = years.reduce((a, b) => (Math.abs(x(b) - px) < Math.abs(x(a) - px) ? b : a));
+          const r = yr <= 2026 ? hist.find((d) => d.year === yr) : base.find((d) => d.year === yr);
+          if (!r) return;
+          hover.attr('x1', x(yr)).attr('x2', x(yr)).attr('opacity', 1);
+          tip.replaceChildren();
+          const t = document.createElement('div'); t.className = 't'; t.textContent = yr <= 2026 ? `${yr}년` : `${yr}년 · 기본 시나리오`; tip.appendChild(t);
+          const line = (name, color, v) => {
+            const d = document.createElement('div'); d.className = 'r';
+            const a = document.createElement('span'); const sw = document.createElement('i'); sw.style.cssText = `width:8px;height:8px;border-radius:50%;display:inline-block;background:${color}`; a.append(sw, name);
+            const b = document.createElement('span'); b.textContent = v == null ? '계산 불가' : `${fmt(v)}원`; d.append(a, b); tip.appendChild(d);
+          };
+          if (IV.show.price && yr <= 2026) line('주가', 'var(--color-fg)', num(r.price));
+          shown.forEach((m) => line(m.name, dash.colors[m.ci], num(r[m.key])));
+          if (yr > 2026 && IV.show.median) {
+            const l = lo.find((d) => d.year === yr), h = hi.find((d) => d.year === yr);
+            const d = document.createElement('div'); d.className = 't'; d.textContent = `종합 범위 ${fmt(num(l.median))} ~ ${fmt(num(h.median))}원`; tip.appendChild(d);
+          }
+          tip.hidden = false;
+          const tw = tip.offsetWidth, cx = x(yr);
+          tip.style.left = `${Math.min(Math.max(0, cx + 12 + tw > el.clientWidth ? cx - tw - 12 : cx + 12), Math.max(0, el.clientWidth - tw))}px`;
+          tip.style.top = '16px';
+        })
+        .on('pointerleave', () => { tip.hidden = true; hover.attr('opacity', 0); });
+    });
+
+    const pct = (v) => (v === '' || v == null ? '' : `${Number(v).toFixed(1)}%`);
+    const won = (v) => (v === '' || v == null ? '' : fmt(Number(v)));
+    dash.draw('rows', (tb) => {
+      const g = dash.data('valuation');
+      tb.replaceChildren();
+      if (g.status !== 'ok') return;
+      const order = { '실적': 0, '보수': 1, '기본': 2, '낙관': 3 };
+      g.data.filter((r) => r.company === IV.co)
+        .sort((a, b) => Number(a.year) - Number(b.year) || order[a.scenario] - order[b.scenario])
+        .forEach((r) => {
+          const tr = document.createElement('tr');
+          tr.dataset.key = [r.company, r.year, r.scenario].map(encodeURIComponent).join(',');
+          if (r.scenario !== '실적') tr.className = 'future';
+          if (Number(r.year) === 2026) tr.className = 'now';
+          [r.year, r.scenario, pct(r.k), pct(r.roe_w), won(r.srim), won(r.dcf), won(r.ddm), won(r.rel), won(r.median), won(r.price)]
+            .forEach((v) => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+          tb.appendChild(tr);
+        });
+    });
+
+    dash.draw('assume', (tb) => {
+      const g = dash.data('assumptions');
+      tb.replaceChildren();
+      if (g.status !== 'ok') return;
+      g.data.forEach((r) => {
+        const tr = document.createElement('tr');
+        [r.item, r.value, r.note].forEach((v) => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+        tb.appendChild(tr);
+      });
+    });
+  })();
+</script>
