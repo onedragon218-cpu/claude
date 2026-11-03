@@ -1,0 +1,66 @@
+:root{
+  --bg:#f7f6f2; --card:#ffffff; --ink:#1d1d1b; --ink2:#55534e; --muted:#8a877f; --line:#e3e0d8;
+  --acc:#2f5d9e; --acc-soft:#c9d8ef; --warn:#b4541f; --warn-soft:#f6e3d6; --good:#2f7d4f; --good-soft:#dcefe2;
+  --mid:#9a7b1c; --vio:#7a4fa3; --red:#c62828; --mid-soft:#f4ecd2; --grid:#ebe8e0;
+  --px:#1d1d1b; --iv:#0f7c7a; --iv-soft:#cfe9e7; --srim:#3f6fb5; --dcf:#a0622d; --ddm:#b0507a; --rel:#6b8a2a;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#16171a; --card:#1f2024; --ink:#ecebe7; --ink2:#bdbab2; --muted:#8c8981; --line:#34353a;
+    --acc:#7fa6dd; --acc-soft:#2b3a52; --warn:#e48a55; --warn-soft:#45291b; --good:#6cc08d; --good-soft:#1f3a2a;
+    --mid:#d6b453; --vio:#b48be0; --red:#ef6b6b; --mid-soft:#3d3419; --grid:#2c2d32;
+    --px:#ecebe7; --iv:#4fc7c1; --iv-soft:#18393a; --srim:#86aee8; --dcf:#d99a62; --ddm:#e08ab0; --rel:#a9c86a;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif}
+.wrap{max-width:920px;margin:0 auto;padding:24px 16px 64px}
+.disc{font-size:13px;color:var(--muted);text-align:center;margin:4px 0 18px}
+h1{font-size:26px;margin:0 0 4px}
+.sub{color:var(--ink2);font-size:14px;margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0}
+.hero{border-left:6px solid var(--acc)}
+.hero p{margin:6px 0}
+.big{font-size:19px;font-weight:700;line-height:1.55}
+h2{font-size:20px;margin:0 0 4px}
+.q{font-size:13px;color:var(--acc);font-weight:700;letter-spacing:.02em}
+.ans{font-size:17px;font-weight:600;margin:6px 0 12px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.tile{background:var(--bg);border-radius:10px;padding:12px}
+.tile .k{font-size:12.5px;color:var(--ink2)}
+.tile .v{font-size:22px;font-weight:750;margin-top:2px}
+.tile .n{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+@media (max-width:680px){.tiles{grid-template-columns:repeat(2,1fr)}}
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin:8px 0}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;color:var(--ink2);font-weight:600}
+.tag{display:inline-block;font-size:12.5px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap}
+.t-good{background:var(--good-soft);color:var(--good)}
+.t-warn{background:var(--warn-soft);color:var(--warn)}
+.t-mid{background:var(--mid-soft);color:var(--mid)}
+.t-acc{background:var(--acc-soft);color:var(--acc)}
+.note{font-size:13.5px;color:var(--ink2)}
+.so{background:var(--bg);border-radius:10px;padding:10px 14px;margin-top:10px;font-size:15px}
+.so b{color:var(--acc)}
+.clash{border-left:6px solid var(--warn)}
+.chartbox{position:relative;width:100%}
+svg{display:block;width:100%;height:auto}
+svg text{fill:var(--ink2);font-size:12px}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--card);font-size:13px;padding:6px 9px;border-radius:7px;opacity:0;transition:opacity .1s;white-space:nowrap;z-index:5}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:680px){.two{grid-template-columns:1fr}}
+.legend{font-size:13px;color:var(--ink2);margin:4px 0 2px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+ul.flat{margin:6px 0;padding-left:20px}
+ul.flat li{margin:3px 0}
+.step{display:grid;grid-template-columns:110px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.step:last-child{border-bottom:0}
+.step .d{font-weight:700;color:var(--acc)}
+details summary{cursor:pointer;font-weight:600}
+.small{font-size:13px;color:var(--muted)}
+.card{overflow-x:auto} /* v2: 폰 폭에서 표가 페이지를 넘지 않게 */
+
+.ctl{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.ctl button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bg);color:var(--ink2);border-radius:99px;padding:3px 10px;cursor:pointer}
+.ctl button.on{background:var(--card);color:var(--ink);border-color:var(--ink2);font-weight:700}
+.ctl .sw{margin-right:5px}

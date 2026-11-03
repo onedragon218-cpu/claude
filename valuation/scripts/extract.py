@@ -13,10 +13,11 @@ IDS = {
   "ocf": ["ifrs-full_CashFlowsFromUsedInOperatingActivities"],
   "capex_ppe": ["ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"],
   "capex_int": ["ifrs-full_PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities"],
+  "liab": ["ifrs-full_Liabilities"],
   "div_paid": ["ifrs-full_DividendsPaidClassifiedAsFinancingActivities", "ifrs-full_DividendsPaidToEquityHoldersOfParentClassifiedAsFinancingActivities"],
 }
 SJ = {"revenue":("IS","CIS"),"op":("IS","CIS"),"ni_owner":("IS","CIS"),"ni":("IS","CIS"),
-      "eq_owner":("BS",),"eq":("BS",),"ocf":("CF",),"capex_ppe":("CF",),"capex_int":("CF",),"div_paid":("CF",)}
+      "eq_owner":("BS",),"liab":("BS",),"eq":("BS",),"ocf":("CF",),"capex_ppe":("CF",),"capex_int":("CF",),"div_paid":("CF",)}
 
 NAMES = {"op":("영업이익","영업이익(손실)"), "capex_ppe":("유형자산의취득",), "capex_int":("무형자산의취득",),
          "div_paid":("배당금의지급","배당금지급","배당금의지급등"), "ni":("당기순이익","당기순이익(손실)")}

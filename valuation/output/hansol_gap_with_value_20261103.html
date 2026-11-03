@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한솔제지 간극 그래프 (본질가치 포함)</title>
+<style>:root{
+  --bg:#f7f6f2; --card:#ffffff; --ink:#1d1d1b; --ink2:#55534e; --muted:#8a877f; --line:#e3e0d8;
+  --acc:#2f5d9e; --acc-soft:#c9d8ef; --warn:#b4541f; --warn-soft:#f6e3d6; --good:#2f7d4f; --good-soft:#dcefe2;
+  --mid:#9a7b1c; --vio:#7a4fa3; --red:#c62828; --mid-soft:#f4ecd2; --grid:#ebe8e0;
+  --px:#1d1d1b; --iv:#0f7c7a; --iv-soft:#cfe9e7; --srim:#3f6fb5; --dcf:#a0622d; --ddm:#b0507a; --rel:#6b8a2a;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#16171a; --card:#1f2024; --ink:#ecebe7; --ink2:#bdbab2; --muted:#8c8981; --line:#34353a;
+    --acc:#7fa6dd; --acc-soft:#2b3a52; --warn:#e48a55; --warn-soft:#45291b; --good:#6cc08d; --good-soft:#1f3a2a;
+    --mid:#d6b453; --vio:#b48be0; --red:#ef6b6b; --mid-soft:#3d3419; --grid:#2c2d32;
+    --px:#ecebe7; --iv:#4fc7c1; --iv-soft:#18393a; --srim:#86aee8; --dcf:#d99a62; --ddm:#e08ab0; --rel:#a9c86a;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif}
+.wrap{max-width:920px;margin:0 auto;padding:24px 16px 64px}
+.disc{font-size:13px;color:var(--muted);text-align:center;margin:4px 0 18px}
+h1{font-size:26px;margin:0 0 4px}
+.sub{color:var(--ink2);font-size:14px;margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0}
+.hero{border-left:6px solid var(--acc)}
+.hero p{margin:6px 0}
+.big{font-size:19px;font-weight:700;line-height:1.55}
+h2{font-size:20px;margin:0 0 4px}
+.q{font-size:13px;color:var(--acc);font-weight:700;letter-spacing:.02em}
+.ans{font-size:17px;font-weight:600;margin:6px 0 12px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.tile{background:var(--bg);border-radius:10px;padding:12px}
+.tile .k{font-size:12.5px;color:var(--ink2)}
+.tile .v{font-size:22px;font-weight:750;margin-top:2px}
+.tile .n{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+@media (max-width:680px){.tiles{grid-template-columns:repeat(2,1fr)}}
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin:8px 0}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;color:var(--ink2);font-weight:600}
+.tag{display:inline-block;font-size:12.5px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap}
+.t-good{background:var(--good-soft);color:var(--good)}
+.t-warn{background:var(--warn-soft);color:var(--warn)}
+.t-mid{background:var(--mid-soft);color:var(--mid)}
+.t-acc{background:var(--acc-soft);color:var(--acc)}
+.note{font-size:13.5px;color:var(--ink2)}
+.so{background:var(--bg);border-radius:10px;padding:10px 14px;margin-top:10px;font-size:15px}
+.so b{color:var(--acc)}
+.clash{border-left:6px solid var(--warn)}
+.chartbox{position:relative;width:100%}
+svg{display:block;width:100%;height:auto}
+svg text{fill:var(--ink2);font-size:12px}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--card);font-size:13px;padding:6px 9px;border-radius:7px;opacity:0;transition:opacity .1s;white-space:nowrap;z-index:5}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:680px){.two{grid-template-columns:1fr}}
+.legend{font-size:13px;color:var(--ink2);margin:4px 0 2px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+ul.flat{margin:6px 0;padding-left:20px}
+ul.flat li{margin:3px 0}
+.step{display:grid;grid-template-columns:110px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.step:last-child{border-bottom:0}
+.step .d{font-weight:700;color:var(--acc)}
+details summary{cursor:pointer;font-weight:600}
+.small{font-size:13px;color:var(--muted)}
+.card{overflow-x:auto} /* v2: 폰 폭에서 표가 페이지를 넘지 않게 */
+
+.ctl{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.ctl button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bg);color:var(--ink2);border-radius:99px;padding:3px 10px;cursor:pointer}
+.ctl button.on{background:var(--card);color:var(--ink);border-color:var(--ink2);font-weight:700}
+.ctl .sw{margin-right:5px}
+</style></head><body><div class="wrap">
+<div class="disc">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님 · 한솔제지(213500) · LG전자 샘플과 같은 형식</div>
+<h1>간극 그래프 — 한솔제지</h1><div class="sub">2026-11-03 · 과거 10년 실적(DART 연결재무제표) + 2026년 최근 12개월 + 2027~2029년 기본 시나리오(컨센서스 아님) · 주가 = 11-03 종가</div>
+<div class="card hero"><p class="big">지금 주가 <b>6,610원</b>은 종합 본질가치 <b>16,718원</b>의 <span class="tag t-good">0.40배</span>입니다.</p>
+<p>2016~2025년 중 주가가 종합가치보다 낮았던 해는 <b>9번(2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025)</b>. 2029년 종합가치는 기본 시나리오 16,449원, 범위 12,617원~22,449원입니다. 시가총액 ÷ 최근 12개월 영업이익(간극)은 지금 <b>2.2배(25% 아래)</b>.</p></div>
+
+<div class="card"><h2>한 그래프 — 10년 + 3년</h2>
+<div class="note">규모 지표(매출·영업이익·순이익·시총·EPS)는 기준 연도 = 100인 지수(로그 눈금, 왼쪽 축)로, 비율 지표(영업이익률·ROE·부채비율)는 %(오른쪽 축)로 그렸습니다. 주가와 주당 본질가치(종합·S-RIM·DCF·DDM·상대가치)는 모두 <b>기준 연도의 주가 = 100</b>으로 나눠 같은 눈금에 올렸습니다. 그래서 가치선이 주가선보다 아래면 그해 주가가 가치보다 비쌌다는 뜻입니다. 버튼으로 켜고 끌 수 있습니다.</div>
+<div class="ctl" id="ctl"></div>
+<div class="ctl" id="base"><span class="note" style="align-self:center">기준 연도</span></div>
+<div class="chartbox" id="c1"></div>
+<p class="note">파란 칸 = 추정 구간(2027~2029 기본 시나리오, 점선) · 청록 띠 = 종합 본질가치의 보수~낙관 범위 · 매출·영업이익·시총·영업이익률·부채비율은 추정하지 않았습니다. 적자인 해는 로그 눈금에 그릴 수 없어 지수선이 끊깁니다. 기준 연도 값이 적자면 그 지표는 사라집니다.</p></div>
+
+<div class="card"><h2>간극 — 시가총액 ÷ 그해 영업이익(배)</h2><div class="chartbox" id="c2"></div>
+<p class="note">2016~2025년 간극의 25% 3.3배 · 가운데 3.9배 · 75% 5.3배 (최저 2.4 · 최고 9.3). 지금 시총 ÷ 최근 12개월 영업이익 = 2.2배(25% 아래). 시가총액 = 연말 수정주가 × 현재 상장주식 수(23,797,000주).</p></div>
+
+<div class="card"><h2>같은 잣대로 본 지금 — 방법별 주당 가치</h2>
+<table><tr><th>방법</th><th>뜻</th><th>2026 (최근 12개월)</th><th>주가 ÷ 가치</th><th>2029 기본</th></tr><tr><td>S-RIM</td><td class='note'>자본 + 초과이익의 현재가치</td><td>18,333원</td><td>0.36배</td><td>17,989원</td></tr><tr><td>DCF</td><td class='note'>주주 몫 현금흐름 할인</td><td>—</td><td>—</td><td>—</td></tr><tr><td>DDM</td><td class='note'>배당 할인</td><td>6,160원</td><td>1.07배</td><td>6,160원</td></tr><tr><td>상대가치</td><td class='note'>PER 10배·PBR 1.0배</td><td>16,718원</td><td>0.40배</td><td>16,449원</td></tr><tr><td>종합</td><td class='note'>네 방법의 중앙값</td><td>16,718원</td><td>0.40배</td><td>16,449원</td></tr></table>
+<p class="so">요구수익률 9.7%(국고채 10년 10월 평균 4.21% + 5.5%p) · 가중 ROE 1.0% · 주당 지배자본 30,389원. ROE가 요구수익률보다 낮으면 S-RIM 가치는 주당 자본보다 낮아집니다.</p></div>
+
+<div class="card"><h2>이 회사에서 읽을 때 주의할 점</h2><ul class="flat"><li>2015년 1월 한솔홀딩스에서 분할 신설된 회사라 2015년부터 자료가 있습니다. 2016년 값의 3년 가중평균에는 2015년만 들어갑니다.</li><li>2024년 지배순이익이 적자(−304억)라 순이익·EPS 지수선이 그해에 끊깁니다.</li><li>2022·2026년(최근 12개월)은 영업현금흐름이 약해 주주 몫 현금흐름이 음수가 되어 DCF를 계산하지 않았습니다.</li><li>2023년 이후 ROE가 요구수익률(8~10%)보다 크게 낮습니다. 그래서 S-RIM 가치가 장부가치보다 낮게 나옵니다. 낮은 주가가 '싸서'인지 '수익성이 낮아서'인지 함께 봐야 합니다.</li>
+<li>가정(세 회사 공통): 위험프리미엄 5.5%p, 영구성장률 1.5%, S-RIM 지속계수 0.9, 상대가치 PER 10배·PBR 1.0배. 시나리오는 ROE ±3%p, 요구수익률 ±0.5%p, 배당 ×0.7/×1.2.</li>
+<li>계산 코드와 원자료: 저장소 <code>valuation/</code> 폴더(scripts/model.py, scripts/sample_page.py).</li></ul></div>
+</div>
+<div class="tip" id="tip"></div>
+<script>const D={"series": {"year": [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029], "매출": [15305.4, 16014.2, 19766.1, 19125.9, 15098.7, 18342.2, 24579.5, 21941.0, 22157.9, 22900.4, 23019.5, null, null, null], "영업이익": [1221.1, 636.8, 1206.6, 1053.0, 945.6, 607.3, 1302.3, 472.4, 219.9, 499.3, 723.0, null, null, null], "순이익(지배)": [426.3, 420.3, 408.2, 400.2, 592.7, 136.7, 738.2, 17.6, -303.9, 38.9, 220.8, 74.1, 73.6, 73.1], "EPS": [1787, 1761, 1711, 1677, 2484, 573, 3094, 74, -1274, 163, 925, 310, 309, 307], "시가총액": [4688, 3332, 3950, 3439, 3296, 3213, 3153, 2532, 2049, 1978, 1573, null, null, null], "영업이익률": [7.98, 3.98, 6.1, 5.51, 6.26, 3.31, 5.3, 2.15, 0.99, 2.18, 3.14, null, null, null], "ROE": [11.14, 8.81, 7.49, 6.92, 9.67, 2.08, 10.38, 0.24, -4.31, 0.56, 3.1, 1.02, 1.02, 1.02], "부채비율": [216.1, 219.8, 205.1, 184.8, 174.1, 177.9, 197.6, 186.5, 193.5, 185.8, 192.4, null, null, null], "주가": [19700, 14000, 16600, 14450, 13850, 13500, 13250, 10640, 8610, 8310, 6610, null, null, null], "종합": [18339, 21407, 22469, 22966, 26152, 23271, 26318, 21945, 17470, 13226, 16718, 17555, 17066, 16449], "S-RIM": [20260, 23629, 24371, 25043, 28569, 25336, 29084, 22902, 16247, 15625, 18333, 19071, 18581, 17989], "DCF": [58610, 39140, 31645, 68046, 64689, 43106, null, 31784, 18693, 10828, null, null, null, null], "DDM": [10427, 9662, 9334, 10648, 12876, 10004, 9611, 6619, 7007, 7336, 6160, 6160, 6160, 6160], "상대가치": [16417, 19185, 20568, 20888, 23734, 21206, 26318, 20987, 28791, 29221, 16718, 17555, 17066, 16449]}, "vband": {"2027": {"lo": 14895, "hi": 20240}, "2028": {"lo": 14110, "hi": 21757}, "2029": {"lo": 12617, "hi": 22449}}, "gap": {"2016": 3.8390175985508574, "2017": 5.232055623998625, "2018": 3.273988429933105, "2019": 3.265543808967711, "2020": 3.4854459676570673, "2021": 5.290168227280631, "2022": 2.421262887688261, "2023": 5.35946723143992, "2024": 9.316967042884803, "2025": 3.960439260114652}, "G": {"p25": 3.3268528143640954, "med": 3.8997284293327548, "p75": 5.27564007646013, "lo": 2.421262887688261, "hi": 9.316967042884803}, "gap_now": 2.175527046137599};const UNIT='억';
+// LG전자 간극 그래프 샘플의 그리기 코드를 회사 공통으로 옮긴 것. D, UNIT은 페이지가 넣는다.
+const S=D.series, YR=S.year, N=YR.length, NOW=YR.indexOf(2026), XL=YR.map(y=>y>2026?String(y).slice(2)+'E':y===2026?'26(12M)':String(y).slice(2));
+const DEF=[{k:'매출',c:'acc',t:'i',u:UNIT,off:true},{k:'영업이익',c:'good',t:'i',u:UNIT},{k:'순이익(지배)',c:'mid',t:'i',u:UNIT},
+ {k:'시가총액',c:'warn',t:'i',u:UNIT,w:3},{k:'EPS',c:'vio',t:'i',u:'원',off:true},{k:'영업이익률',c:'ink2',t:'p',u:'%'},{k:'ROE',c:'red',t:'p',u:'%'},{k:'부채비율',c:'muted',t:'p',u:'%',off:true},
+ {k:'주가',c:'px',t:'v',u:'원',w:2.6},{k:'종합',c:'iv',t:'v',u:'원',w:3.2},{k:'S-RIM',c:'srim',t:'v',u:'원',w:1.5},{k:'DCF',c:'dcf',t:'v',u:'원',w:1.5},{k:'DDM',c:'ddm',t:'v',u:'원',w:1.5},{k:'상대가치',c:'rel',t:'v',u:'원',w:1.5}];
+const VK=DEF.filter(d=>d.t==='v').map(d=>d.k);
+const st={on:Object.fromEntries(DEF.map(d=>[d.k,d.t==='v'])),base:2016};
+const NS='http://www.w3.org/2000/svg', tip=document.getElementById('tip');
+const fmt=(v,u)=>v==null?'—':(u==='원'?Math.round(v).toLocaleString()+'원':u==='%'?v.toFixed(1)+'%':Math.round(v).toLocaleString()+u);
+function el(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e}
+function txt(p,x,y,s,a){const e=el('text',Object.assign({x,y},a||{}),p);e.textContent=s;return e}
+function ctl(){const c=document.getElementById('ctl');c.replaceChildren();
+ DEF.forEach(d=>{const b=document.createElement('button');b.className=st.on[d.k]?'on':'';const sw=document.createElement('span');sw.className='sw';sw.style.background=`var(--${d.c})`;b.append(sw,d.k);b.onclick=()=>{st.on[d.k]=!st.on[d.k];ctl();draw1()};c.appendChild(b)});
+ const vb=document.createElement('button');vb.textContent='주당 가치·주가만';vb.onclick=()=>{DEF.forEach(d=>st.on[d.k]=d.t==='v');ctl();draw1()};c.appendChild(vb);
+ const ab=document.createElement('button');ab.textContent='전부 켜기';ab.onclick=()=>{DEF.forEach(d=>st.on[d.k]=d.k!=='부채비율');ctl();draw1()};c.appendChild(ab);
+ const bb=document.getElementById('base');bb.querySelectorAll('button').forEach(x=>x.remove());
+ [2016,2020,2025].forEach(y=>{const b=document.createElement('button');b.className=st.base===y?'on':'';b.textContent=y+' = 100';b.onclick=()=>{st.base=y;ctl();draw1()};bb.appendChild(b)})}
+function draw1(){const box=document.getElementById('c1');box.replaceChildren();const W=880,H=440,L=56,R=58,T=20,B=34;
+ const s=el('svg',{viewBox:`0 0 ${W} ${H}`},box);const bi=YR.indexOf(st.base);const X=i=>L+(W-L-R)*i/(N-1);
+ const den=k=>VK.includes(k)?S['주가'][bi]:S[k][bi];
+ const idx=(k,v)=>{const b=den(k);return v==null||b==null||b<=0||v<=0?null:v/b*100};
+ let iv=[],pv=[];
+ DEF.forEach(d=>{if(!st.on[d.k])return;S[d.k].forEach(v=>{if(v==null)return;if(d.t==='p')pv.push(v);else{const z=idx(d.k,v);if(z)iv.push(z)}})});
+ if(st.on['종합'])Object.values(D.vband).forEach(b=>{iv.push(idx('종합',b.lo),idx('종합',b.hi))});
+ if(!iv.length)iv=[50,200];
+ const lo=Math.min(...iv)*.85,hi=Math.max(...iv)*1.15,Y=v=>T+(H-T-B)*(1-(Math.log(v)-Math.log(lo))/(Math.log(hi)-Math.log(lo)));
+ const pmin=Math.min(0,...pv),pmax=pv.length?Math.max(...pv)*1.12:10,P=v=>T+(H-T-B)*(1-(v-pmin)/(pmax-pmin));
+ el('rect',{x:X(NOW+.5),y:T,width:X(N-1)-X(NOW+.5)+8,height:H-T-B,style:'fill:var(--acc-soft);opacity:.35'},s);
+ txt(s,(X(NOW+.5)+X(N-1))/2,T+14,'추정(기본 시나리오)',{'text-anchor':'middle',style:'fill:var(--acc);font-size:12px'});
+ const step=Math.pow(10,Math.floor(Math.log10(lo)));[1,2,5].forEach(m=>{for(let v=step*m;v<hi;v*=10){if(v<lo)continue;el('line',{x1:L,x2:W-R,y1:Y(v),y2:Y(v),style:'stroke:var(--grid)'},s);txt(s,L-6,Y(v)+4,v>=1000?(v/1000)+'천':String(+v.toPrecision(3)),{'text-anchor':'end',style:'fill:var(--muted);font-size:11px'})}});
+ if(pv.length){const span=pmax-pmin,ps=span>120?50:span>40?10:span>16?5:2;for(let v=Math.ceil(pmin/ps)*ps;v<pmax;v+=ps)txt(s,W-R+6,P(v)+4,v+'%',{style:'fill:var(--muted);font-size:11px'})}
+ XL.forEach((l,i)=>txt(s,X(i),H-B+18,l,{'text-anchor':'middle',style:'fill:var(--ink2);font-size:12px'}));
+ if(st.on['종합']){const v=S['종합'],up=[[X(NOW),Y(idx('종합',v[NOW]))]],dn=[[X(NOW),Y(idx('종합',v[NOW]))]];
+  Object.keys(D.vband).forEach(y=>{const i=YR.indexOf(+y);up.push([X(i),Y(idx('종합',D.vband[y].hi))]);dn.unshift([X(i),Y(idx('종합',D.vband[y].lo))])});
+  if(idx('종합',v[NOW]))el('polygon',{points:up.concat(dn).map(p=>p.join(',')).join(' '),style:'fill:var(--iv-soft);opacity:.8'},s)}
+ DEF.forEach(d=>{if(!st.on[d.k])return;const v=S[d.k],f=i=>{if(d.t==='p')return v[i]==null?null:P(v[i]);const z=idx(d.k,v[i]);return z?Y(z):null};
+  const main=d.k==='주가'||d.k==='종합',wd=d.w||(d.t==='p'?1.6:2.4);
+  const run=(a,b,dash)=>{let pts=[];const flush=()=>{if(pts.length>1)el('polyline',{points:pts.map(p=>p.join(',')).join(' '),style:`fill:none;stroke:var(--${d.c});stroke-width:${wd};stroke-linecap:round;stroke-linejoin:round;${dash?'stroke-dasharray:6 4;':''}${main||d.t==='i'?'':'opacity:.8'}`},s);pts=[]};
+   for(let i=a;i<=b;i++){const y=f(i);if(y!=null)pts.push([X(i),y]);else flush()}flush()};
+  run(0,NOW,d.t==='p');run(NOW,N-1,true);
+  for(let i=0;i<=NOW;i++){const y=f(i);if(y!=null)el('circle',{cx:X(i),cy:y,r:d.k==='주가'?3.6:d.k==='종합'?3.4:d.t==='p'?2.4:2.6,style:`fill:var(--${d.c})`},s)}
+  if(d.k==='주가'){const y=f(NOW);if(y)txt(s,X(NOW)+8,y+16,'주가',{style:'fill:var(--px);font-weight:700;font-size:12px'})}
+  if(d.k==='종합'){const y=f(N-1);if(y)txt(s,X(N-1)-4,y-8,'종합가치',{'text-anchor':'end',style:'fill:var(--iv);font-weight:700;font-size:11px'})}});
+ const vl=el('line',{y1:T,y2:H-B,style:'stroke:var(--ink2);opacity:0'},s);
+ s.addEventListener('mousemove',e=>{const r=s.getBoundingClientRect(),x=(e.clientX-r.left)*W/r.width,i=Math.max(0,Math.min(N-1,Math.round((x-L)/(W-L-R)*(N-1))));
+  vl.setAttribute('x1',X(i));vl.setAttribute('x2',X(i));vl.style.opacity=.4;
+  const lines=DEF.filter(d=>st.on[d.k]&&S[d.k][i]!=null).map(d=>`${d.k} ${fmt(S[d.k][i],d.u)}`);
+  if(i>NOW&&st.on['종합'])lines.push(`종합가치 범위 ${fmt(D.vband[YR[i]].lo,'원')}~${fmt(D.vband[YR[i]].hi,'원')}`);
+  tip.replaceChildren();const h=document.createElement('b');h.textContent=`${YR[i]}${i>NOW?'E (기본 시나리오)':i===NOW?' 최근 12개월':''}`;tip.appendChild(h);
+  lines.forEach(t=>{tip.appendChild(document.createElement('br'));tip.appendChild(document.createTextNode(t))});
+  if(VK.some(k=>st.on[k])){tip.appendChild(document.createElement('br'));const n=document.createElement('span');n.style.opacity=.75;n.textContent=`주당 지표는 ${st.base}년 주가 ${fmt(S['주가'][bi],'원')} = 100`;tip.appendChild(n)}
+  tip.style.opacity=1;tip.style.left=Math.min(e.pageX+14,window.innerWidth-260)+'px';tip.style.top=(e.pageY+10)+'px'});
+ s.addEventListener('mouseleave',()=>{tip.style.opacity=0;vl.style.opacity=0})}
+function draw2(){const box=document.getElementById('c2');const W=880,H=260,L=40,R=120,T=16,B=40;const s=el('svg',{viewBox:`0 0 ${W} ${H}`},box);
+ const ys=Object.keys(D.gap),g=ys.map(y=>D.gap[y]),lab=ys.map(y=>y.slice(2));if(D.gap_now!=null){g.push(D.gap_now);lab.push('지금/12M')}
+ const mx=Math.max(...g,D.G.p75)*1.15,n=g.length,bw=(W-L-R)/n,Y=v=>T+(H-T-B)*(1-v/mx);
+ const gs=mx>60?20:mx>24?10:mx>12?4:2;for(let v=gs;v<mx;v+=gs){el('line',{x1:L,x2:W-R,y1:Y(v),y2:Y(v),style:'stroke:var(--grid)'},s);txt(s,L-6,Y(v)+4,v+'배',{'text-anchor':'end',style:'fill:var(--muted);font-size:11px'})}
+ g.forEach((v,i)=>{const isNow=D.gap_now!=null&&i===n-1;el('rect',{x:L+bw*i+bw*.18,y:Y(v),width:bw*.64,height:H-B-Y(v),rx:3,style:`fill:var(--${isNow?'warn':'acc'});opacity:${isNow?.85:.75}`},s);
+  txt(s,L+bw*i+bw/2,Y(v)-5,v.toFixed(1),{'text-anchor':'middle',style:'fill:var(--ink2);font-size:11.5px'});txt(s,L+bw*i+bw/2,H-B+16,lab[i],{'text-anchor':'middle',style:'fill:var(--ink2);font-size:11px'})});
+ let ly=[];[['p25','25%'],['med','가운데'],['p75','75%']].forEach(([k,nm])=>{const v=D.G[k];el('line',{x1:L,x2:W-R,y1:Y(v),y2:Y(v),style:'stroke:var(--warn);stroke-dasharray:5 4'},s);let y=Y(v)+4;while(ly.some(q=>Math.abs(q-y)<13))y-=13;ly.push(y);txt(s,W-R+6,y,`${nm} ${v.toFixed(1)}배`,{style:'fill:var(--warn);font-size:11.5px'})})}
+ctl();draw1();draw2();
+</script></body></html>

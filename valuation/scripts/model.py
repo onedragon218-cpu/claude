@@ -138,7 +138,7 @@ def run(key):
             f = 0.5 * (f_now or 0) + 0.5 * ni  # 현금흐름은 현재 수준과 이익 경로의 중간으로 가정
             hist_roe.insert(0, r_); hist_ni.insert(0, ni); hist_f.insert(0, f)
             v, d = value_all(B_new, hist_roe[:3], hist_ni[:3], hist_f[:3], div, k)
-            out.append({"year": y, "kind": f"미래-{s}", "k": k, "B": B_new, **d, "value": v})
+            out.append({"year": y, "kind": f"미래-{s}", "k": k, "B": B_new, "ni": ni, "roe": r_, **d, "value": v})
             B = B_new
         scen_rows[s] = out
 
