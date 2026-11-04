@@ -8,7 +8,12 @@
 
 1. Python 3.10 이상 설치: https://www.python.org/downloads/
    - 설치 첫 화면에서 **Add python.exe to PATH** 를 체크합니다.
-2. 이 `fin_tracker` 폴더를 PC의 원하는 곳에 둡니다(예: `D:\fintrack_app`).
+2. 프로그램 내려받기
+   - 아래 주소를 브라우저에 붙여 넣으면 ZIP 파일이 바로 내려받아집니다(로그인 불필요, 공개 저장소).
+     `https://github.com/onedragon218-cpu/claude/archive/refs/heads/claude/magical-bell-qydkjr.zip`
+   - 내려받은 ZIP을 **오른쪽 클릭 → 속성 → 아래쪽 '차단 해제' 체크 → 확인**(인터넷에서 받은 .bat 실행 경고 방지).
+   - 오른쪽 클릭 → **압축 풀기** → 풀린 폴더 안의 `fin_tracker` 폴더를 원하는 곳으로 옮깁니다(예: `D:\fintrack_app`).
+   - 웹 화면에서 받으려면: https://github.com/onedragon218-cpu/claude/tree/claude/magical-bell-qydkjr → 초록색 **Code** 버튼 → **Download ZIP**.
 3. `setup_windows.bat` 더블클릭 → 라이브러리를 설치합니다(2~3분).
 4. `run_fintrack.bat` 더블클릭 → 처음 한 번 **작업 폴더 선택 창**이 뜹니다(예: `D:\투자\fintrack_data`).
 5. 브라우저에 화면이 열리면 오른쪽 위 **설정** → **DART 인증키** 입력 → **저장**.
