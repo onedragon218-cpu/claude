@@ -1,6 +1,6 @@
 """명령줄 실행.
 
-  python -m analyzer analyze 213500 [--base-year 2026] [--offline]
+  python -m analyzer analyze 213500 [005930 ...] [--base-year 2026] [--offline]
   python -m analyzer update-all              # DB에 있는 모든 기업을 갱신(자동 실행용)
   python -m analyzer report 213500           # 수집 없이 화면만 다시 만들기
   python -m analyzer status 213500
@@ -63,7 +63,7 @@ def main(argv=None):
     _log_when_windowless()
     ap = argparse.ArgumentParser(prog="analyzer")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    a = sub.add_parser("analyze"); a.add_argument("code"); a.add_argument("--base-year", type=int); a.add_argument("--offline", action="store_true")
+    a = sub.add_parser("analyze"); a.add_argument("codes", nargs="+"); a.add_argument("--base-year", type=int); a.add_argument("--offline", action="store_true")
     u = sub.add_parser("update-all"); u.add_argument("--base-year", type=int); u.add_argument("codes", nargs="*")
     r = sub.add_parser("report"); r.add_argument("code"); r.add_argument("--base-year", type=int)
     s = sub.add_parser("status"); s.add_argument("code")
@@ -73,8 +73,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
-        conn = db.connect(); code = resolve(conn, args.code); conn.close()
-        do_analyze(code, args.base_year, args.offline)
+        conn = db.connect(); codes = [resolve(conn, c) for c in args.codes]; conn.close()
+        for code in codes:   # 여러 종목을 한 번에 추가할 수 있음
+            do_analyze(code, args.base_year, args.offline)
     elif args.cmd == "update-all":
         conn = db.connect()
         codes = args.codes or [r["stock_code"] for r in conn.execute("SELECT stock_code FROM companies")]

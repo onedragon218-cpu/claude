@@ -33,7 +33,10 @@ $pyw = Get-Pythonw $py
 $keyDir = Join-Path $env:APPDATA 'corp-analyzer'
 $keyFile = Join-Path $keyDir 'dart_api_key.txt'
 $old = if (Test-Path $keyFile) { "$(Get-Content $keyFile -Raw)".Trim() } else { '' }
-if ($old) { Write-Host "[2/5] 저장된 DART 인증키가 있습니다(끝 4자리 ...$($old.Substring([Math]::Max(0,$old.Length-4))))." }
+$envKey = [Environment]::GetEnvironmentVariable('DART_API_KEY', 'User')
+if (-not $envKey) { $envKey = [Environment]::GetEnvironmentVariable('DART_API_KEY', 'Machine') }
+if ($envKey -and -not $old) { $old = $envKey.Trim(); Write-Host "[2/5] 환경변수 DART_API_KEY를 사용합니다(끝 4자리 ...$($old.Substring([Math]::Max(0,$old.Length-4))))." -ForegroundColor Green }
+elseif ($old) { Write-Host "[2/5] 저장된 DART 인증키가 있습니다(끝 4자리 ...$($old.Substring([Math]::Max(0,$old.Length-4))))." }
 $k = Read-Host '[2/5] DART 인증키 40자리를 붙여 넣으세요(바꾸지 않으려면 그냥 Enter, 나중에 넣으려면 Enter)'
 $k = "$k".Trim()
 if ($k) {
