@@ -1,2 +1,3 @@
-@echo off
-start "" http://localhost:8765
+@echo off
+chcp 65001 >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0open.ps1" %*

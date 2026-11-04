@@ -42,14 +42,18 @@ function Test-Server {
 }
 
 function Start-Server([string]$python) {
-    if (Test-Server) { return }
+    # 1) 작업 스케줄러 작업으로 켜 보고 2) 안 되면 파이썬을 직접 실행(창 없이)한다
+    if (Test-Server) { return $true }
     if (Get-ScheduledTask -TaskName $TaskServer -ErrorAction SilentlyContinue) {
-        Start-ScheduledTask -TaskName $TaskServer
-    } else {
+        Start-ScheduledTask -TaskName $TaskServer -ErrorAction SilentlyContinue
+        for ($i = 0; $i -lt 25 -and -not (Test-Server); $i++) { Start-Sleep -Milliseconds 400 }
+    }
+    if (-not (Test-Server) -and $python) {
         Start-Process -FilePath (Get-Pythonw $python) -ArgumentList '-m', 'analyzer', 'serve', '--port', $Port `
             -WorkingDirectory $Root -WindowStyle Hidden
+        for ($i = 0; $i -lt 40 -and -not (Test-Server); $i++) { Start-Sleep -Milliseconds 400 }
     }
-    for ($i = 0; $i -lt 20 -and -not (Test-Server); $i++) { Start-Sleep -Milliseconds 300 }
+    return (Test-Server)
 }
 
 function Stop-Server {

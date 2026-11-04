@@ -73,6 +73,25 @@ class H(BaseHTTPRequestHandler):
             self._send(500, json.dumps({"error": repr(e)}, ensure_ascii=False), "application/json")
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = False   # 윈도우에서 같은 포트를 두 프로그램이 함께 잡지 않도록
+
+
 def serve(port=8765):
-    print(f"http://localhost:{port}  (종료: Ctrl+C)")
-    ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
+    """포트가 잠깐 잡혀 있으면(이전 서버 종료 중) 최대 15초 동안 다시 시도한다."""
+    import time
+    from . import __version__
+    last = None
+    for _ in range(15):
+        try:
+            httpd = Server(("127.0.0.1", port), H)
+            break
+        except OSError as e:
+            last = e
+            time.sleep(1)
+    else:
+        print(f"[오류] {port} 포트를 열 수 없습니다: {last}. 다른 프로그램이 이 포트를 쓰고 있는지 확인하세요.")
+        raise SystemExit(2)
+    print(f"화면 서버 시작: http://localhost:{port}  버전 {__version__}  데이터 {config.DATA_DIR}  (종료: Ctrl+C)", flush=True)
+    httpd.serve_forever()

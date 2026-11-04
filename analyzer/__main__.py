@@ -52,6 +52,57 @@ def _log_when_windowless():
         sys.stdout = sys.stderr = f
 
 
+def doctor(port=8765):
+    """설치 상태 진단: 화면이 안 열릴 때 원인을 찾는다."""
+    import glob
+    import platform
+    import socket
+    import traceback
+    from . import __version__
+    ok = lambda b: "정상" if b else "문제"
+    print(f"== 재무분석 진단  버전 {__version__}")
+    print(f"파이썬: {sys.executable} ({platform.python_version()})")
+    print(f"프로그램 폴더: {config.ROOT}")
+    print(f"데이터 폴더: {config.DATA_DIR}  [{ok(os.path.isdir(config.DATA_DIR))}]")
+    print(f"DB: {config.DB_PATH}  [{ok(os.path.exists(config.DB_PATH))}]")
+    tpl = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
+    print(f"화면 틀: {tpl}  [{ok(os.path.exists(tpl))}]")
+    from .collectors import dart
+    print(f"DART 키: {'있음' if dart.has_key() else '없음'}")
+    s = socket.socket()
+    try:
+        s.settimeout(1)
+        busy = s.connect_ex(("127.0.0.1", port)) == 0
+    finally:
+        s.close()
+    print(f"{port} 포트: {'서버가 응답 중' if busy else '응답 없음(서버 꺼짐)'}")
+    try:
+        conn = db.connect()
+        rows = conn.execute("SELECT stock_code, name FROM companies").fetchall()
+        print(f"DB 기업 수: {len(rows)}  {[(r['stock_code'], r['name']) for r in rows][:10]}")
+        if rows:
+            report.render(report.payload(conn, rows[0]["stock_code"]))
+            print("화면 만들기 시험: 정상")
+        conn.close()
+    except Exception:
+        print("화면 만들기 시험: 실패 ↓")
+        traceback.print_exc(file=sys.stdout)
+    logs = sorted(glob.glob(os.path.join(config.DATA_DIR, "logs", "run_*.log")))
+    if logs:
+        print(f"== 최근 기록 {logs[-1]} (마지막 30줄)")
+        with open(logs[-1], encoding="utf-8", errors="replace") as f:
+            print("".join(f.readlines()[-30:]))
+    if not busy:
+        print("== 서버를 이 창에서 직접 켜 봅니다(오류가 나면 아래에 보입니다)")
+        try:
+            s = socket.socket()
+            s.bind(("127.0.0.1", port))
+            s.close()
+            print(f"{port} 포트 열기: 정상")
+        except OSError as e:
+            print(f"{port} 포트 열기 실패: {e}")
+
+
 def main(argv=None):
     _log_when_windowless()
     ap = argparse.ArgumentParser(prog="analyzer")
@@ -63,6 +114,7 @@ def main(argv=None):
     c = sub.add_parser("import-consensus"); c.add_argument("code"); c.add_argument("csv")
     v = sub.add_parser("reverify"); v.add_argument("code"); v.add_argument("--year", type=int)
     sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=8765)
+    dc = sub.add_parser("doctor"); dc.add_argument("--port", type=int, default=8765)
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
@@ -112,6 +164,8 @@ def main(argv=None):
                      "('dart_report','dart_shares','dart_disclosures')", (pat, pat + ":%"))
         conn.commit()
         print(f"{len(ids)}개 값을 STALE로 표시했습니다. 다음 analyze 실행 때 해당 자료를 다시 받아 비교합니다.")
+    elif args.cmd == "doctor":
+        doctor(args.port)
     elif args.cmd == "serve":
         from . import server
         server.serve(args.port)
