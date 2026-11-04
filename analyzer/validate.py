@@ -31,11 +31,15 @@ def validate_accounts(conn, code, P):
             a, l, e = (by.get((y, per, k)) for k in ("acc_assets", "acc_liab", "acc_eq"))
             ident = None if not (a and l and e) else _rel(a["value"], l["value"] + e["value"])
             others = [o for o in db.observations(conn, code, y, m, per)
-                      if o["source"] != "DART" and _rel(o["value"], r["value"]) > TOL]
+                      if o["source"] != "DART" and _rel(o["value"], r["value"]) > TOL
+                      and abs(o["value"] - r["value"]) > 6e6]   # 억원 단위 반올림(±0.05억) 차이는 무시
             if others:
                 db.set_status(conn, r["id"], "CONFLICT", f"{others[0]['source']} 값 {others[0]['value']:,.0f}와 불일치")
             elif ident is not None and ident > TOL:
                 db.set_status(conn, r["id"], "CONFLICT", f"자산≠부채+자본(차이 {ident:.2%})")
+            elif ident is not None and ident <= TOL and any(
+                    o["source"] != "DART" for o in db.observations(conn, code, y, m, per)):
+                db.set_status(conn, r["id"], "VERIFIED", "회계 등식 일치 · 다른 출처(WiseReport)와 일치")
             elif ident is None:
                 db.set_status(conn, r["id"], "UNVERIFIED", (r["status_note"] or "") + " · 회계 등식 확인 불가")
             else:

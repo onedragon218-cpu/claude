@@ -225,6 +225,7 @@ const VMET = [
 const XMET = MET.concat(VMET);
 const MNAME = Object.fromEntries(XMET.map(m=>[m.key,m.name]));
 const MUNIT = Object.fromEntries(XMET.map(m=>[m.key,m.unit]));
+const CONS_NAME = {op_income:'영업이익', net_income:'당기순이익', per:'PER', pbr:'PBR', ev_ebitda:'EV/EBITDA', target_price:'목표주가'};
 const ACC = D.accounts;
 let BY = D.periods.base_year;
 const visible = new Set(MET.map(m=>m.key).concat(['v_srim','v_dcf','v_roic','v_wacc']));
@@ -525,7 +526,7 @@ function renderStatic(){
     D.fetch_log.map(r=>`<tr><td class="l">${esc(r.fetched_at)}</td><td class="l">${esc(r.source)}</td><td class="l">${esc(r.key)}</td><td class="l">${r.ok?badge('OK'):badge('MISSING')}</td><td>${r.n_items}</td><td class="l">${esc(String(r.note||'').slice(0,90))}</td></tr>`).join('');
   // E consensus
   $('#cons').innerHTML = D.consensus.length ? '<tr><th class="l">수집 기준일</th><th>대상 연도</th><th class="l">지표</th><th>값</th><th class="l">단위</th><th class="l">증권사</th><th>추정 개수</th><th class="l">제공기관</th><th class="l">기준</th></tr>' +
-    D.consensus.map(c=>`<tr><td class="l">${esc(c.as_of)}</td><td>${c.target_year}</td><td class="l">${esc(MNAME[c.metric]||c.metric)}</td><td>${fmt(c.value,c.unit)}</td><td class="l">${esc(c.unit)}</td><td class="l">${esc(c.broker)}</td><td>${c.n_estimates??'–'}</td><td class="l">${esc(c.provider)}</td><td class="l">${esc(c.basis)}</td></tr>`).join('')
+    D.consensus.map(c=>`<tr><td class="l">${esc(c.as_of)}</td><td>${c.target_year}</td><td class="l">${esc(MNAME[c.metric]||CONS_NAME[c.metric]||c.metric)}</td><td>${fmt(c.value,c.unit)}</td><td class="l">${esc(c.unit)}</td><td class="l">${esc(c.broker)}</td><td>${c.n_estimates??'–'}</td><td class="l">${esc(c.provider)}</td><td class="l">${esc(c.basis)}</td></tr>`).join('')
     : '<tr><td class="l">저장된 컨센서스가 없습니다(미확보). 자동 수집(FnGuide 공개 화면)이 성공하거나 CSV를 넣으면 여기에 시점별로 쌓입니다.</td></tr>';
   // F
   const vs = {}; D.validation.forEach(v=>vs[v.level]=(vs[v.level]||0)+1);

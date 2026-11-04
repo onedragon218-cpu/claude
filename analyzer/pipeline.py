@@ -12,7 +12,7 @@ import re
 import statistics
 
 from . import config, db
-from .collectors import dart, fnguide, manual, naver, prices
+from .collectors import dart, fnguide, manual, naver, prices, wisereport
 
 CORE_ACC = ["acc_revenue", "acc_op", "acc_ni_owner", "acc_eq_owner", "acc_eq", "acc_liab", "acc_eps_basic"]
 ACC_UNIT = {k: ("원" if k != "acc_eps_basic" else "원/주") for k in dart.ALL_KEYS}
@@ -336,14 +336,17 @@ def collect(conn, code, P, stats, offline=False):
             db.log_fetch(conn, "price", f"{code}:asof", code, False, 0, str(e))
             stats.notes.append(f"주가 미확보: {e}")
 
-    # 6) 컨센서스: OpenDART에는 컨센서스가 없다. FnGuide(최대 3년) → 실패하면 네이버 금융(보통 1~2년) 순서로 시도.
+    # 6) 컨센서스: OpenDART에는 컨센서스가 없다. WiseReport(네이버 기업정보, 3년) → FnGuide → 네이버 금융 순서로 시도.
     #    성공한 뒤 7일 동안은 다시 받지 않고, 실패하면 다음 실행 때 다시 시도한다. 시점별로 새 스냅숏을 쌓는다.
     if need["consensus"]:
         got, errs = 0, []
-        for name, mod in (("FnGuide", fnguide), ("Naver", naver)):
+        for name, mod in (("WiseReport", wisereport), ("FnGuide", fnguide), ("Naver", naver)):
             try:
                 stats.req(name)
-                url, items = mod.fetch(code)
+                res = mod.fetch(code)
+                url, items = res[0], res[1]
+                if name == "WiseReport" and len(res) > 2:
+                    record_cross_check(conn, code, res[2], url)
                 if not items:
                     raise mod.ConsensusUnavailable("표는 읽었지만 추정치(E) 열이 없음")
                 n = ingest_consensus(conn, code, items, name, db.today(), url)
@@ -359,6 +362,17 @@ def collect(conn, code, P, stats, offline=False):
         if not got:
             stats.notes.append("컨센서스 미확보(다음 실행 때 다시 시도): " + " / ".join(errs))
     return need
+
+
+def record_cross_check(conn, code, actuals, url):
+    """WiseReport의 과거 실적(매출액·영업이익)을 교차 검증용 관측값으로 저장한다(검증 항목 10)."""
+    for a in actuals:
+        key = {"revenue": "acc_revenue", "op_income": "acc_op"}.get(a["metric"])
+        if key:
+            db.add_observation(conn, code, a["target_year"], key, a["value"] * 1e8, unit="원",
+                               basis=a.get("basis"), source="WiseReport", source_ref=url.split("&sDT")[0],
+                               report_year=None, col="실적(억원 반올림)")
+    conn.commit()
 
 
 def check_disclosures(conn, code, lst):

@@ -132,6 +132,23 @@ class T(unittest.TestCase):
         db.log_fetch(self.conn, "consensus", "213500", "213500", True, 5)
         self.assertTrue(db.fetched_recently(self.conn, "consensus", "213500", 7, ok_only=True))
 
+    def test_wisereport_parser(self):
+        from analyzer.collectors import wisereport
+        sample = ('{"JsonData":[{"YYMM":"2025.12(A)","SALES":"22,900.4","OP":"499.3","NP":"38.9","EPS":"163","BPS":"29,322",'
+                  '"PER":"50.89","PBR":"0.28","ROE":"0.56","EV":"8.00","MAIN":"IFRS연결"},'
+                  '{"YYMM":"2027.12(E)","SALES":"24,465.5","OP":"742.5","NP":"202.5","EPS":"851","BPS":"25,624",'
+                  '"PER":"7.77","PBR":"0.26","ROE":"3.36","EV":"7.68","MAIN":"IFRS연결"}]}')
+        est, act, basis = wisereport.parse_data(sample)
+        e = {(x["target_year"], x["metric"]): x["value"] for x in est}
+        self.assertEqual(e[(2027, "eps")], 851.0)
+        self.assertEqual(e[(2027, "revenue")], 24465.5)
+        self.assertAlmostEqual(e[(2027, "op_margin")], 742.5 / 24465.5 * 100)
+        self.assertEqual({x["target_year"] for x in act}, {2025})
+        self.assertEqual(basis, "IFRS연결")
+        page = "<table><tr><th>투자의견</th><th>목표주가</th><th>EPS</th><th>PER</th><th>추정기관수</th></tr>" \
+               "<tr><td>4.00</td><td>10,250</td><td>1,073</td><td>6.16</td><td>2</td></tr></table>"
+        self.assertEqual(wisereport.parse_opinion(page)["n"], 2)
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>
