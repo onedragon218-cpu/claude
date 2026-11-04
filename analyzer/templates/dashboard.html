@@ -125,7 +125,15 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div id="runresult"></div>
   </div>
   <div class="card">
-    <h2>데이터베이스에 있는 기업</h2>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">데이터베이스에 있는 기업</h2>
+      <div class="row" style="align-items:center">
+        <label style="flex-direction:row;align-items:center;gap:6px" title="체크하지 않으면 빠진 값·새 공시와 기한(컨센서스 7일, 주가 1일)이 지난 자료만 받습니다"><input type="checkbox" id="ufresh"> 컨센서스·주가 지금 새로 받기</label>
+        <button class="primary" id="uall">전체 갱신</button>
+      </div>
+    </div>
+    <p class="muted" style="margin:6px 0 10px">전체 갱신: DB의 모든 기업에 대해 빠진 값, 새 공시·정정 공시, 컨센서스, 기준일 주가를 확인합니다. 이미 검증된 DART 실적은 다시 받지 않습니다.</p>
+    <div id="ustatus"></div>
     <div class="tablewrap"><table id="comps"></table></div>
   </div>
 </section>
@@ -762,6 +770,31 @@ async function runAnalyze(){
   } catch(e){ $('#runresult').textContent = '실패: ' + e.message; }
 }
 $('#run').onclick = runAnalyze;
+
+// ---- 전체 갱신 ----
+function renderJob(j){
+  const rows = (j.results||[]).map(r=>`<tr><td class="l">${esc(r.name||'')} (${esc(r.code)})</td><td class="l">${r.ok?badge('OK'):badge('ERROR')}</td><td>${r.ok?r.requests:'–'}</td><td>${r.ok?r.new:'–'}</td><td>${r.ok?r.changed:'–'}</td><td class="l" style="white-space:normal">${esc(r.ok?(r.notes||[]).join(' / '):r.error)}</td></tr>`).join('');
+  const head = j.running ? `갱신 중… ${j.done} / ${j.total} ${j.current?'· 지금: '+esc(j.current):''}` : (j.finished_at ? `갱신 완료 (${j.done} / ${j.total}, ${esc(j.finished_at)})` : '');
+  $('#ustatus').innerHTML = head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head}${j.fresh?' · 컨센서스·주가 새로 받기':''}</div>` +
+    (rows ? `<div class="tablewrap"><table><tr><th class="l">기업</th><th class="l">결과</th><th>외부 요청</th><th>신규 값</th><th>변경 값</th><th class="l">메모</th></tr>${rows}</table></div>` : '') : '';
+}
+async function pollJob(){
+  try { const j = await (await fetch('/api/job')).json(); renderJob(j);
+    if (j.running) setTimeout(pollJob, 1500);
+    else if (j.finished_at){ $('#uall').disabled = false; $('#uall').textContent = '전체 갱신';
+      $('#ustatus').insertAdjacentHTML('beforeend', '<p class="muted">3초 뒤 화면을 새로 고칩니다.</p>'); setTimeout(()=>location.reload(), 3000); }
+  } catch(e){ $('#ustatus').textContent = '진행 상황을 읽지 못했습니다: ' + e.message; $('#uall').disabled = false; }
+}
+$('#uall').onclick = async () => {
+  if (!SERVED){ $('#ustatus').innerHTML = `<div class="warnbox">저장된 화면 파일에서는 갱신할 수 없습니다. 바탕화면 '재무분석 지금 갱신.bat'을 실행하거나 '재무분석 열기.bat'으로 연 화면에서 누르세요.</div>`; return; }
+  const n = D.companies.length;
+  if (!confirm(`DB의 기업 ${n}곳을 모두 갱신합니다. 기업 수에 따라 몇 분 걸릴 수 있습니다. 진행할까요?`)) return;
+  $('#uall').disabled = true; $('#uall').textContent = '갱신 중…';
+  try { const j = await (await fetch(`/api/update-all?base_year=${BY}&fresh=${$('#ufresh').checked?1:0}`, {method:'POST'})).json();
+    renderJob(j); setTimeout(pollJob, 1000);
+  } catch(e){ $('#ustatus').textContent = '시작 실패: ' + e.message; $('#uall').disabled = false; $('#uall').textContent = '전체 갱신'; }
+};
+if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } }).catch(()=>{});
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
 renderAll();
 </script>

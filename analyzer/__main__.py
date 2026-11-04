@@ -24,9 +24,9 @@ def resolve(conn, q):
         raise SystemExit(str(e))
 
 
-def do_analyze(code, base_year=None, offline=False, quiet=False):
+def do_analyze(code, base_year=None, offline=False, quiet=False, fresh=False):
     conn = db.connect()
-    res = pipeline.analyze(code, base_year, offline=offline, conn=conn)
+    res = pipeline.analyze(code, base_year, offline=offline, conn=conn, fresh=fresh)
     out = os.path.join(config.OUTPUT_DIR, f"{code}.html")
     report.render(report.payload(conn, code, base_year, last_run=res["stats"]), out)
     conn.close()
@@ -108,7 +108,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="analyzer")
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("analyze"); a.add_argument("codes", nargs="+"); a.add_argument("--base-year", type=int); a.add_argument("--offline", action="store_true")
-    u = sub.add_parser("update-all"); u.add_argument("--base-year", type=int); u.add_argument("codes", nargs="*")
+    u = sub.add_parser("update-all"); u.add_argument("--base-year", type=int); u.add_argument("--fresh", action="store_true"); u.add_argument("codes", nargs="*")
     r = sub.add_parser("report"); r.add_argument("code"); r.add_argument("--base-year", type=int)
     s = sub.add_parser("status"); s.add_argument("code")
     c = sub.add_parser("import-consensus"); c.add_argument("code"); c.add_argument("csv")
@@ -129,7 +129,7 @@ def main(argv=None):
             raise SystemExit("DB에 기업이 없습니다. 종목코드를 함께 입력하세요. 예: update-all 213500")
         summary = {}
         for code in codes:
-            res = do_analyze(code, args.base_year)
+            res = do_analyze(code, args.base_year, fresh=args.fresh)
             summary[code] = res["stats"]
         os.makedirs(config.OUTPUT_DIR, exist_ok=True)
         json.dump(summary, open(os.path.join(config.OUTPUT_DIR, "last_update.json"), "w", encoding="utf-8"),

@@ -235,9 +235,12 @@ def _asof_age(conn, code, cur):
     return (dt.date.today() - dt.date.fromisoformat(r["as_of"])).days
 
 
-def collect(conn, code, P, stats, offline=False):
+def collect(conn, code, P, stats, offline=False, fresh=False):
     """빠진 항목만 수집한다. offline=True면 바깥 요청 없이 DB만 사용."""
     need = plan(conn, code, P)
+    if fresh:   # 사용자가 '지금 새로 받기'를 고른 경우: 컨센서스·기준일 주가는 기한과 관계없이 받는다
+        need["consensus"] = True
+        need["asof_price"] = True
     stats.notes.append("수집 필요 항목: " + json.dumps({k: v for k, v in need.items() if v}, ensure_ascii=False))
     if offline:
         return need
@@ -549,7 +552,7 @@ def compute(conn, code, P, stats=None):
 
 
 # ---------------------------------------------------------------- 전체 실행
-def analyze(code, base_year=None, offline=False, conn=None, use_seed=True):
+def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh=False):
     from . import validate
     P = config.periods(base_year)
     own = conn is None
@@ -563,7 +566,7 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True):
     if reparse_cached(conn, code, stats):
         stats.notes.append(f"해석 규칙 v{dart.PARSER_VERSION}로 보관 원본 재해석(외부 요청 없음)")
     stats.reused = existed
-    need = collect(conn, code, P, stats, offline=offline)
+    need = collect(conn, code, P, stats, offline=offline, fresh=fresh)
     validate.validate_accounts(conn, code, P)
     compute(conn, code, P, stats)
     report = validate.run(conn, code, P)

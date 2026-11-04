@@ -5,6 +5,38 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import config, db, pipeline, report
+import threading
+import traceback
+
+# 전체 갱신 작업 상태(서버 안에서 하나만 돈다)
+JOB = {"running": False, "total": 0, "done": 0, "current": None, "results": [], "started_at": None,
+       "finished_at": None, "fresh": False}
+JOB_LOCK = threading.Lock()
+
+
+def _update_all(codes, base_year, fresh):
+    for code, name in codes:
+        with JOB_LOCK:
+            JOB["current"] = f"{name or ''}({code})"
+        item = {"code": code, "name": name}
+        try:
+            conn = db.connect()
+            res = pipeline.analyze(code, base_year, conn=conn, fresh=fresh)
+            report.render(report.payload(conn, code, base_year, last_run=res["stats"]),
+                          os.path.join(config.OUTPUT_DIR, f"{code}.html"))
+            conn.close()
+            st = res["stats"]
+            item.update(ok=True, requests=st["total_requests"], new=st["new_facts"], changed=st["changed_facts"],
+                        notes=[n for n in st["notes"] if "수집 필요" not in n][:6])
+        except Exception as e:  # 한 기업이 실패해도 나머지는 계속
+            item.update(ok=False, error=repr(e), trace=traceback.format_exc()[-800:])
+        with JOB_LOCK:
+            JOB["results"].append(item)
+            JOB["done"] += 1
+    with JOB_LOCK:
+        JOB["running"] = False
+        JOB["current"] = None
+        JOB["finished_at"] = db.now()
 
 
 class H(BaseHTTPRequestHandler):
@@ -27,6 +59,9 @@ class H(BaseHTTPRequestHandler):
                 from . import __version__
                 return self._send(200, json.dumps({"version": __version__, "root": config.ROOT, "data": config.DATA_DIR},
                                                   ensure_ascii=False), "application/json")
+            if u.path == "/api/job":
+                with JOB_LOCK:
+                    return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
             if u.path == "/api/search":
                 from . import search
                 res = search.search(conn, q.get("q", [""])[0], limit=12)
@@ -46,6 +81,20 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
+        if u.path == "/api/update-all":
+            with JOB_LOCK:
+                if JOB["running"]:
+                    return self._send(200, json.dumps(dict(JOB, already=True), ensure_ascii=False), "application/json")
+                conn = db.connect()
+                codes = [(r["stock_code"], r["name"]) for r in
+                         conn.execute("SELECT stock_code, name FROM companies ORDER BY name")]
+                conn.close()
+                by = int(q["base_year"][0]) if q.get("base_year") else None
+                fresh = q.get("fresh", ["0"])[0] == "1"
+                JOB.update(running=True, total=len(codes), done=0, current=None, results=[], started_at=db.now(),
+                           finished_at=None, fresh=fresh)
+            threading.Thread(target=_update_all, args=(codes, by, fresh), daemon=True).start()
+            return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
         if u.path != "/api/analyze":
             return self._send(404, "not found")
         try:
