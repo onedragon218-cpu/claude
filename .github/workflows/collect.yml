@@ -43,7 +43,7 @@ jobs:
           # 입력값은 숫자만 허용(셸 주입 방지)
           ARGS=()
           if [[ "$IN_BASE_YEAR" =~ ^[0-9]{4}$ ]]; then ARGS+=(--base-year "$IN_BASE_YEAR"); fi
-          for c in $IN_CODES; do if [[ "$c" =~ ^[0-9]{6}$ ]]; then ARGS+=("$c"); fi; done
+          for c in $IN_CODES; do if [[ "$c" =~ ^[0-9][0-9A-Z]{5}$ ]]; then ARGS+=("$c"); fi; done
           # 종목코드를 비우면 DB에 저장된 모든 기업을 갱신한다
           python -m analyzer update-all "${ARGS[@]}"
           python -m unittest discover -s analyzer/tests -t . -v

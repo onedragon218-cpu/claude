@@ -141,6 +141,14 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div id="ustatus"></div>
     <div class="tablewrap"><table id="comps"></table></div>
   </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">기본 종목 목록 <span class="muted" id="ucount"></span></h2>
+      <label style="flex-direction:row;align-items:center;gap:6px">목록에서 찾기 <input id="ufilter" placeholder="이름 또는 코드" style="width:180px"></label>
+    </div>
+    <p class="muted" style="margin:6px 0 10px">컨센서스가 있는 상장기업 목록입니다. <b>목록만 들어 있고 자동으로 수집하지 않습니다.</b> 수집된 기업은 눌러서 바로 보고, 미수집 기업은 눌러서 확인하면 그 기업만 수집합니다. [전체 갱신]과 평일 자동 수집은 위 'DB에 있는 기업'만 대상입니다.</p>
+    <div class="tablewrap" style="max-height:420px;overflow:auto"><table id="utable"></table></div>
+  </div>
 </section>
 
 <section id="B">
@@ -836,7 +844,7 @@ function renderH(){
   $('#hsrc').innerHTML = `회사 값: DART 연결재무제표로 계산. 부채비율 = 부채총계 ÷ 자본총계, 이자보상배율 = 영업이익 ÷ 이자지급(현금흐름표, 영업·재무활동 분류 합계), 순차입금 = 차입금·사채·리스부채 − 현금·단기금융상품. 업종 평균: ${esc(ind.source||'')} · 한국은행 이자보상비율은 손익계산서의 이자비용 기준이라 회사 값(현금 이자지급 기준)과 정의가 조금 다릅니다. 업종 평균은 가장 최근 공표 연도까지만 있습니다.`;
 }
 
-function renderAll(){ renderStatic(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
@@ -846,10 +854,34 @@ document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
 $('#ffilter').onchange = renderFacts;
 $('#by').onchange = () => { const v = parseInt($('#by').value); if (v>1990 && v<2100){ BY=v; renderAll(); } };
 // ---- 기업 검색: 종목코드·종목명 모두 받음 ----
+function renderUniverse(){
+  const U = D.universe||[]; const inDb = new Set(D.companies.filter(c=>c.n>0).map(c=>c.stock_code));
+  const f = ($('#ufilter').value||'').trim().toLowerCase().replace(/\s/g,'');
+  const rows = U.filter(u => !f || u.code.toLowerCase().startsWith(f) || u.name.toLowerCase().replace(/\s/g,'').includes(f));
+  $('#ucount').textContent = `(${U.length}곳 · 수집됨 ${U.filter(u=>inDb.has(u.code)).length}곳)`;
+  $('#utable').innerHTML = '<tr><th class="l">종목코드</th><th class="l">기업명</th><th class="l">상태</th><th class="l"></th></tr>' +
+    rows.map(u=>`<tr class="clickrow" data-code="${esc(u.code)}" data-name="${esc(u.name)}" tabindex="0"><td class="l">${esc(u.code)}</td><td class="l">${esc(u.name)}</td><td class="l">${inDb.has(u.code)?badge('OK')+' 수집됨':'<span class="muted">미수집</span>'}</td><td class="l">${inDb.has(u.code)?'열기 →':'수집하기'}</td></tr>`).join('');
+  document.querySelectorAll('#utable tr.clickrow').forEach(tr=>{
+    const go = ()=>{
+      const code = tr.dataset.code;
+      if (inDb.has(code)) { location.href = companyUrl(code); return; }
+      if (!SERVED){ alert('저장된 화면 파일에서는 수집할 수 없습니다. 재무분석 열기.bat 으로 연 화면에서 누르세요.'); return; }
+      if (!confirm(`${tr.dataset.name}(${code})의 자료를 지금 수집할까요? DART·컨센서스·주가를 받습니다(1~2분).`)) return;
+      $('#q').value = code; window.scrollTo(0,0); runAnalyze();
+    };
+    tr.onclick = go; tr.onkeydown = e => { if (e.key==='Enter') go(); };
+  });
+}
+$('#ufilter').addEventListener('input', renderUniverse);
+
 function localSearch(q){
   const nq = q.replace(/\s/g,'').toLowerCase();
-  return D.companies.filter(c => c.stock_code.startsWith(q) || (c.name||'').replace(/\s/g,'').toLowerCase().includes(nq))
-    .map(c=>({code:c.stock_code, name:c.name, in_db:true}));
+  const uq = q.toUpperCase(), seen = new Set(), out = [];
+  D.companies.filter(c => c.stock_code.startsWith(uq) || (c.name||'').replace(/\s/g,'').toLowerCase().includes(nq))
+    .forEach(c=>{ seen.add(c.stock_code); out.push({code:c.stock_code, name:c.name, in_db:c.n>0}); });
+  (D.universe||[]).filter(u => !seen.has(u.code) && (u.code.startsWith(uq) || u.name.replace(/\s/g,'').toLowerCase().includes(nq)))
+    .forEach(u=>out.push({code:u.code, name:u.name, in_db:false}));
+  return out.slice(0, 12);
 }
 function showSuggest(list, q){
   if (!list.length){ $('#suggest').innerHTML = q ? `<span class="muted">'${esc(q)}' 검색 결과 없음${SERVED?'':' (저장된 화면에서는 DB에 있는 기업만 찾습니다)'}</span>` : ''; return; }
@@ -870,7 +902,7 @@ $('#q').addEventListener('keydown', e=>{ if (e.key==='Enter') runAnalyze(); });
 async function runAnalyze(){
   let q = $('#q').value.trim() || D.company.code; const by = parseInt($('#by').value) || BY;
   if (!SERVED){
-    const hit = /^\d{6}$/.test(q) ? D.companies.find(c=>c.stock_code===q) : localSearch(q)[0];
+    const hit = /^[0-9][0-9A-Z]{5}$/i.test(q) ? D.companies.find(c=>c.stock_code===q.toUpperCase()) : localSearch(q)[0];
     if (hit && (hit.stock_code||hit.code)){ location.href = companyUrl(hit.stock_code||hit.code); return; }
     $('#runresult').innerHTML = `<p>새 종목은 프로그램 화면(바탕화면 '재무분석 열기')에서 분석하거나, 터미널에서 실행하세요: <code>python -m analyzer analyze ${esc(q)} --base-year ${by}</code></p>`; return; }
   $('#runresult').textContent = `분석 중… '${q}' (DB에 없는 자료만 수집합니다. 새 종목은 1~2분 걸릴 수 있습니다)`;

@@ -178,6 +178,16 @@ class T(unittest.TestCase):
         self.assertLess(r24["icr"], 1)
         self.assertTrue(any("1배 미만" in w for w in st["warnings"]))
 
+    def test_universe_list_only(self):
+        from analyzer import search, universe
+        u = universe.load()
+        self.assertEqual(len(u), 281)
+        self.assertIn(("0126Z0", "삼성에피스홀딩스"), u)                    # 영문이 섞인 종목코드
+        self.assertEqual(search.resolve(self.conn, "0126z0"), "0126Z0")
+        self.assertEqual(search.resolve(self.conn, "스튜디오드래곤"), "253450")   # 키 없이도 목록에서 이름 검색
+        # 목록은 DB에 넣지 않는다(자동 수집 대상 아님)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0], 0)
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>

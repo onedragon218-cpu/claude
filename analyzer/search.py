@@ -1,6 +1,7 @@
 """종목코드·종목명 검색. DB에 있는 기업과 DART 상장사 목록(data/corp_codes.json)을 함께 찾는다."""
 import re
 
+from . import universe
 from .collectors import dart
 
 
@@ -20,6 +21,7 @@ def search(conn, q, limit=10):
     except dart.DartUnavailable:
         corp = {}
     names = dict((c, v["name"]) for c, v in corp.items())
+    names.update({c: n for c, n in universe.load()})          # 기본 종목 목록(키가 없어도 이름 검색 가능)
     names.update({c: n for c, n in db_rows.items() if n})
 
     def add(code, name, score):
@@ -27,12 +29,13 @@ def search(conn, q, limit=10):
             seen.add(code)
             out.append({"code": code, "name": name, "in_db": code in db_rows, "score": score})
 
-    if q.isdigit():
+    uq = q.upper()
+    if re.match(r"^[0-9][0-9A-Z]{0,5}$", uq):
         for c, n in names.items():
-            if c.startswith(q):
-                add(c, n, 0 if c == q else 1)
-        if len(q) == 6 and q not in seen:
-            add(q, db_rows.get(q) or "", 0)
+            if c.startswith(uq):
+                add(c, n, 0 if c == uq else 1)
+        if universe.is_code(uq) and uq not in seen:
+            add(uq, db_rows.get(uq) or "", 0)
     else:
         for c, n in names.items():
             nn = _norm(n)
@@ -56,8 +59,8 @@ class Ambiguous(Exception):
 def resolve(conn, q):
     """종목코드 또는 종목명 → 종목코드. 정확히 같은 이름이 하나면 그것, 후보가 하나뿐이면 그것."""
     q = (q or "").strip()
-    if q.isdigit() and len(q) == 6:
-        return q
+    if universe.is_code(q):
+        return q.upper()
     cands = search(conn, q, limit=20)
     exact = [c for c in cands if c["score"] == 0]
     if len(exact) == 1:

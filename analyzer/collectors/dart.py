@@ -238,7 +238,7 @@ def corp_list(refresh_days=30, allow_download=True):
     xml = z.read(z.namelist()[0]).decode("utf-8")
     m = {}
     for blk in re.findall(r"<list>(.*?)</list>", xml, re.S):
-        sc = re.search(r"<stock_code>\s*(\d{6})\s*</stock_code>", blk)
+        sc = re.search(r"<stock_code>\s*([0-9][0-9A-Z]{5})\s*</stock_code>", blk)
         if sc:
             m[sc.group(1)] = {"corp_code": re.search(r"<corp_code>(\d+)</corp_code>", blk).group(1),
                               "name": re.search(r"<corp_name>(.*?)</corp_name>", blk).group(1).strip()}
