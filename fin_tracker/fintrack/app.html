@@ -324,9 +324,9 @@ function chartOpts({combined, unit}){
         label: it => { const m = it.dataset._obj; const y = YEARS[it.dataIndex]; const p = m[it.dataset._slot][y] || (it.dataset._slot==='partial'? null : null);
           const raw = it.dataset._raw[it.dataIndex];
           const prevY = YEARS[it.dataIndex-1]; const prev = m.actual[prevY]?.v ?? m.consensus[prevY]?.v;
-          if(m.group) return ` ${m.name}: ${fmt(raw,m.unit)}  ${it.dataset._slot==='actual'?'과거 계산':'전망 계산'}${p? ' · 입력 '+(ST_KO[p.status]||p.status):''}`;
+          if(m.group) return ` ${m.name}: ${fmt(raw,m.unit)}  ${it.dataset._slot==='actual'?'과거 계산':'전망 계산'}${p? ' · 입력 '+(ST_KO[p.status]||p.status):''}${p?.flag? ' · 그래프 범위 밖(▲▼ 위치는 표시용)':''}`;
           return ` ${m.name}: ${fmt(raw,m.unit)}  ${KIND_KO[it.dataset._slot]}${p? ' · '+(ST_KO[p.status]||p.status):''}  ${yoyTxt(raw,prev,m.unit)}`; },
-        afterLabel: it => { const m = it.dataset._obj; const p = m[it.dataset._slot][YEARS[it.dataIndex]]; return (!combined && p)? `   ${p.formula}${p.as_of? ' · 기준 '+p.as_of:''}`:''; } }}},
+        afterLabel: it => { const m = it.dataset._obj; const p = m[it.dataset._slot][YEARS[it.dataIndex]]; return p?.flag ? `   ${p.flag}` : (!combined && p)? `   ${p.formula}${p.as_of? ' · 기준 '+p.as_of:''}`:''; } }}},
     scales:{x:{grid:{display:false}, ticks:{color:ink2, font:{family:'IBM Plex Mono', size:11}}, border:{color:css('--line')}},
       y:{grid:{color:line}, border:{display:false}, ticks:{color:ink3, font:{family:'IBM Plex Mono', size:11}, maxTicksLimit:6,
         callback: v => combined? v : (unit==='%'? v+'%' : Number(v).toLocaleString('ko-KR'))}}}};
@@ -345,7 +345,13 @@ function hexA(hex, a){ const h = hex.replace('#',''); const n = parseInt(h.lengt
 function onMap(view){ state.onv = state.onv || {}; if(!state.onv[view]){ const keys = view==='fin'? D.metrics.map(m=>m.key) : view==='val'? D.valuation.map(m=>m.key)
     : [...D.metrics.map(m=>m.key), ...VIEW_DEFAULT.ovl]; state.onv[view] = Object.fromEntries([...D.metrics, ...D.valuation].map(m=>[m.key, keys.includes(m.key)])); }
   return state.onv[view]; }
-function vals(m){ const s = seriesOf(m); const out = [...s.a, ...s.c, ...(state.unv? s.u:[])];
+function ptAt(m, i){ const y = YEARS[i]; return m.actual[y] || m.consensus[y]; }
+function clipDisp(m, arr){ return arr.map((v,i)=>{ const p = ptAt(m,i); if(v==null || !p?.flag) return v; return v<=0 ? 0 : (p.cap ? Math.min(v, p.cap) : v); }); }
+function flagStyle(m, arr, normal){ return { pointStyle: arr.map((v,i)=> ptAt(m,i)?.flag && v!=null ? 'triangle' : normal),
+  pointRotation: arr.map((v,i)=> ptAt(m,i)?.flag && v!=null && v<=0 ? 180 : 0),
+  pointRadius: arr.map((v,i)=> ptAt(m,i)?.flag && v!=null ? 6 : 2.5) }; }
+function vals(m){ const s0 = seriesOf(m); const s = m.key==='dcf' ? {a:clipDisp(m,s0.a), c:clipDisp(m,s0.c), u:s0.u} : s0;
+  const out = [...s.a, ...s.c, ...(state.unv? s.u:[])];
   if(m.key==='srim') YEARS.forEach(y=>{ const p = m.actual[y]||m.consensus[y]; if(p){ out.push(p.lo, p.hi); } });
   return out.filter(v=>v!=null && isFinite(v)); }
 function groupScaler(ms, mode){
@@ -370,8 +376,9 @@ function valDatasets(view, mode, scales){
     if(m.key==='srim'){ const lo = YEARS.map(y=>(m.actual[y]||m.consensus[y])?.lo ?? null), hi = YEARS.map(y=>(m.actual[y]||m.consensus[y])?.hi ?? null);
       ds.push({label:'S-RIM 상단', data:hi.map(f), borderWidth:0, pointRadius:0, fill:'+1', backgroundColor:hexA(css(VAL_COL.srim), ovl? .08:.14), _band:true, _obj:m, spanGaps:false});
       ds.push({label:'S-RIM 하단', data:lo.map(f), borderWidth:0, pointRadius:0, fill:false, _band:true, _obj:m, spanGaps:false}); }
-    ds.push({...base, label:m.name, data:s.a.map(f), _slot:'actual', _raw:s.a});
-    if(s.c.some(v=>v!=null)) ds.push({...base, _end:false, label:m.name+' 전망', data:s.c.map(f), borderDash:DASH_C, pointStyle:'rectRot', pointRadius:4, _slot:'consensus', _raw:s.c});
+    const isD = m.key==='dcf', da = isD? clipDisp(m, s.a) : s.a, dc = isD? clipDisp(m, s.c) : s.c;
+    ds.push({...base, label:m.name, data:da.map(f), _slot:'actual', _raw:s.a, ...(isD? flagStyle(m, s.a, 'circle') : {})});
+    if(s.c.some(v=>v!=null)) ds.push({...base, _end:false, label:m.name+' 전망', data:dc.map(f), borderDash:DASH_C, pointStyle:'rectRot', pointRadius:4, _slot:'consensus', _raw:s.c, ...(isD? flagStyle(m, s.c, 'rectRot') : {})});
   });
   return {ds, sc};
 }
@@ -448,7 +455,21 @@ function drawValCards(){
     <div class="card wide"><div class="hd"><h3>ROIC와 WACC <span class="faint" style="font-weight:400">%</span></h3><span class="v" id="v-spread"></span></div>
       <div class="sub"><span id="s-spread"></span><span class="faint">막대 = ROIC − WACC</span></div>
       <div class="mini" style="height:260px"><canvas id="c-rw" aria-label="ROIC와 WACC"></canvas></div><div class="src">ROIC = 세후 영업이익 ÷ 평균 투하자본(자본총계 + 차입부채 − 현금성자산) · WACC = 시가총액·차입부채 가중 평균 자본비용(Ke = 국고채 10년 + ${(D.assumptions.ERP*100).toFixed(1)}%p)</div></div>`;
+  wrap.insertAdjacentHTML('beforeend', `<div class="card wide"><div class="hd"><h3>DCF 원래 값 <span class="faint" style="font-weight:400">원 · 잘리지 않은 값</span></h3><span class="v" id="v-dcf"></span></div>
+      <div class="sub"><span id="s-dcf"></span><span class="faint">${D.assumptions.hamada? '부채 반영 β(하마다) 적용':'β 1 고정(부채 미반영)'}</span></div>
+      <div class="mini" style="height:220px"><canvas id="c-dcf" aria-label="DCF 원래 값"></canvas></div>
+      <div class="src">위 '주가와 주당 가치' 그래프에서는 주가의 ${D.assumptions.dcf_cap}배를 넘거나 0 이하인 DCF를 범위 끝(▲▼)에 고정해 보여 줍니다. 이 그래프는 실제 계산값 그대로입니다. 범위 밖 값은 적정가 중앙값에서 뺍니다.</div></div>`);
   $('#cards').appendChild(wrap);
+  { const dm = D.valuation.find(m=>m.key==='dcf'), pm = D.valuation.find(m=>m.key==='price'); const sd = seriesOf(dm), sp0 = seriesOf(pm);
+    const o3 = chartOpts({combined:false, unit:'원'}); o3.layout = {padding:{right:60}};
+    mini.push(new Chart($('#c-dcf'), {type:'line', data:{labels:YEARS, datasets:[
+      {label:'DCF', data:sd.a, borderColor:css('--s3'), backgroundColor:css('--s3'), borderWidth:2, pointRadius:3, _obj:dm, _slot:'actual', _raw:sd.a, _end:true},
+      {label:'DCF 전망', data:sd.c, borderColor:css('--s3'), backgroundColor:css('--s3'), borderDash:DASH_C, pointStyle:'rectRot', pointRadius:4, _obj:dm, _slot:'consensus', _raw:sd.c},
+      {label:'주가', data:sp0.a, borderColor:css('--ink'), backgroundColor:css('--ink'), borderWidth:2.5, pointRadius:2.5, _obj:pm, _slot:'actual', _raw:sp0.a, _end:true}]}, options:o3, plugins:[endLabels]}));
+    const fl = Object.values(dm.actual).filter(p=>p.flag).length + Object.values(dm.consensus).filter(p=>p.flag).length;
+    const n = Object.keys(dm.actual).length + Object.keys(dm.consensus).length;
+    $('#v-dcf').textContent = `${n}개 중 ${fl}개 범위 밖`;
+    $('#s-dcf').textContent = n? `최소 ${fmt(Math.min(...[...sd.a,...sd.c].filter(v=>v!=null)),'원')} · 최대 ${fmt(Math.max(...[...sd.a,...sd.c].filter(v=>v!=null)),'원')}` : '계산된 연도 없음'; }
   const ps = valDatasets('val', 'raw', false).ds.filter(d=>d._obj.group==='ps');
   const o1 = chartOpts({combined:false, unit:'원'}); o1.layout = {padding:{right:84}};
   mini.push(new Chart($('#c-val'), {type:'line', data:{labels:YEARS, datasets:ps}, options:o1, plugins:[endLabels]}));
@@ -468,17 +489,17 @@ function drawValCards(){
     $('#s-fairgap').textContent = `적정가 중앙값 ${fmt(fNow.v,'원')} vs 주가 ${fmt(pNow.v,'원')}(${pNow===price.actual[B]? '기준일':la+' 연말'})`; }
   const lastSp = [...sp].reverse().find(v=>v!=null);
   if(lastSp!=null){ $('#v-spread').textContent = `${lastSp>=0?'+':''}${lastSp.toFixed(2)}%p`; $('#s-spread').textContent = `${la}년 ${lastSp>=0? '자본비용보다 더 범(가치 창출)':'자본비용보다 덜 범(가치 훼손)'}`; }
-  const ex = Object.entries(D.valTable).filter(([y,t])=>t.dcf_excluded);
+  const ex = Object.entries(D.valTable).filter(([y,t])=>t.dcf_flag);
   $('#r-val').innerHTML = `상대가치 기준 배수(과거 10년 중앙값) PER ${D.assumptions.multiples.per?.toFixed(2) ?? '–'}배 · PBR ${D.assumptions.multiples.pbr?.toFixed(2) ?? '–'}배 · PSR ${D.assumptions.multiples.psr?.toFixed(3) ?? '–'}배`
-    + (ex.length? `<br>DCF 제외 ${ex.length}개 연도(${ex.map(([y])=>y).join(', ')}): 주가의 ${D.assumptions.dcf_cap}배를 넘거나 0 이하. 아래 '가치평가 계산표'에 값과 이유가 있습니다.`:'');
+    + (ex.length? `<br>DCF ▲▼ ${ex.length}개 연도(${ex.map(([y])=>y).join(', ')}): 주가의 ${D.assumptions.dcf_cap}배를 넘거나 0 이하라 범위 끝에 표시하고 적정가 중앙값에서는 뺐습니다. 실제 값은 'DCF 원래 값' 그래프와 계산표에 있습니다.`:'');
 }
 function drawValTable(){
   const T = D.valTable, ys = Object.keys(T).sort(); const pc = v => v==null? '–' : (v*100).toFixed(2)+'%';
   const eok = v => v==null? '–' : Math.round(v/1e8).toLocaleString('ko-KR')+'억';
   $('#t-val').innerHTML = `<tr><th>연도</th><th class="n">국고채</th><th class="n">Ke</th><th class="n">세율</th><th class="n">Kd</th><th class="n">WACC</th><th class="n">ROIC</th><th class="n">FCFF</th><th class="n">PER</th><th class="n">PBR</th><th class="n">PSR</th><th>DCF 메모</th></tr>`
-    + ys.map(y=>{ const t=T[y]; return `<tr class="${+y>=B?'fut':''}"><td class="y">${y}</td><td class="n">${pc(t.rf)}</td><td class="n">${pc(t.ke)}</td><td class="n">${t.tax!=null? pc(t.tax)+(t.tax_how==='기본세율'?'*':''):'–'}</td><td class="n">${pc(t.kd)}</td><td class="n">${pc(t.wacc)}</td><td class="n">${pc(t.roic)}</td><td class="n">${eok(t.fcff)}</td>
+    + ys.map(y=>{ const t=T[y]; return `<tr class="${+y>=B?'fut':''}"><td class="y">${y}</td><td class="n">${pc(t.rf)}</td><td class="n">${pc(t.ke)}</td><td class="n">${t.tax!=null? pc(t.tax)+(t.tax_how==='기본세율'?'*':''):'–'}</td><td class="n">${pc(t.kd)}</td><td class="n">${pc(t.wacc)}${t.ke_levered? `<br><span class="faint">Ke ${pc(t.ke_levered)}</span>`:''}</td><td class="n">${pc(t.roic)}</td><td class="n">${eok(t.fcff)}</td>
       <td class="n">${t.per? t.per.toFixed(1):'–'}</td><td class="n">${t.pbr? t.pbr.toFixed(2):'–'}</td><td class="n">${t.psr? t.psr.toFixed(3):'–'}</td>
-      <td style="min-width:280px">${t.dcf_excluded? `<b>제외</b> ${fmt(t.dcf_excluded.v,'원')} · ${esc(t.dcf_excluded.why)}<br><span class="faint">${esc(t.dcf_excluded.formula)}</span>` : esc(t.dcf_note||'')}</td></tr>`; }).join('');
+      <td style="min-width:280px">${t.dcf_flag? `<b>범위 밖</b> ${fmt(t.dcf_flag.v,'원')} · ${esc(t.dcf_flag.why)}<br>` : ''}<span class="faint">${esc(t.dcf_note||'')}</span></td></tr>`; }).join('');
   const A = D.assumptions;
   $('#val-assume').innerHTML = `가정: 위험 프리미엄 ${(A.ERP*100).toFixed(1)}%p(β=1) · 영구성장률 ${(A.g*100).toFixed(1)}% · S-RIM w ${A.w.join('/')}(대표 ${A.w_main}) · 세전이익이 0 이하인 해의 세율 ${(A.tax_default*100).toFixed(1)}%(*) · 상대가치 기준 = 과거 10년 연말 배수 중앙값(표본 PER ${A.multiples_n.per}·PBR ${A.multiples_n.pbr}·PSR ${A.multiples_n.psr}개년, 과거 연도에는 사후적 기준) · 금리: ${esc(A.rf_source)}. 바꾸려면 작업 폴더 <span class="mono">manual\\assumptions.json</span>.`;
 }

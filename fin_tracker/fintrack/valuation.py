@@ -73,6 +73,10 @@ def build(store, code, periods, metrics, w=None):
 
     # ---------- 과거 연도 ----------
     fcff_hist = {}
+    for y in periods["helper"]:          # 보조연도 현금흐름(첫해 DCF 3년 평균용)
+        t0, _ = tax(y)
+        if None not in (v(y, "ocf"), v(y, "capex_ppe")):
+            fcff_hist[y] = v(y, "ocf") + (v(y, "interest_paid") or 0) * (1 - t0) - v(y, "capex_ppe") - (v(y, "capex_int") or 0)
     for y in periods["actual"]:
         row = {}
         rf, rf_y = _rf(a, y); ke = rf + erp
@@ -96,10 +100,14 @@ def build(store, code, periods, metrics, w=None):
         mcap = metrics["market_cap"]["actual"].get(y)
         E = mcap["v"] * EOK if mcap else v(y, "eq")
         if E and d1 is not None and E > 0:
-            wacc = E / (E + d1) * ke + d1 / (E + d1) * kd * (1 - t)
+            ke_w = ke
+            if a.get("DCF_하마다_베타"):   # β 1을 무부채 베타로 보고 부채비율만큼 올림
+                ke_w = rf + (1 + (1 - t) * d1 / E) * erp
+                row["ke_levered"] = ke_w
+            wacc = E / (E + d1) * ke_w + d1 / (E + d1) * kd * (1 - t)
             row.update(kd=kd, kd_how=kd_how, E=E, D=d1, wacc=wacc, E_how="시가총액" if mcap else "장부 자본")
             out["wacc"]["actual"][y] = pt(wacc * 100, worst(st(y, "debt"), mcap["status"] if mcap else "UNVERIFIED"), "계산", None,
-                                          f"E {E/EOK:,.0f}억×Ke {ke*100:.2f}% + D {d1/EOK:,.0f}억×Kd {kd*100:.2f}%×(1−{t*100:.1f}%) ÷ {(E+d1)/EOK:,.0f}억")
+                                          f"E {E/EOK:,.0f}억×Ke {ke_w*100:.2f}% + D {d1/EOK:,.0f}억×Kd {kd*100:.2f}%×(1−{t*100:.1f}%) ÷ {(E+d1)/EOK:,.0f}억")
         # FCFF
         if None not in (v(y, "ocf"), v(y, "capex_ppe")):
             fcff_hist[y] = v(y, "ocf") + (ip or 0) * (1 - t) - v(y, "capex_ppe") - (v(y, "capex_int") or 0)
@@ -211,7 +219,8 @@ def build(store, code, periods, metrics, w=None):
         E = mc["v"] * EOK if mc else row["E"]
         rf, _ = _rf(a, b); ke = rf + erp
         D = v(last, "debt")
-        wacc_b = E / (E + D) * ke + D / (E + D) * row["kd"] * (1 - row["tax"])
+        ke_b = rf + (1 + (1 - row["tax"]) * D / E) * erp if a.get("DCF_하마다_베타") else ke
+        wacc_b = E / (E + D) * ke_b + D / (E + D) * row["kd"] * (1 - row["tax"])
         r0, r2 = metrics["revenue"]["actual"].get(last), metrics["revenue"]["consensus"].get(b + 1)
         gs = ((r2["v"] / r0["v"]) ** 0.5 - 1) if (r0 and r2 and r0["v"] > 0) else 0.0
         gs = _clip(gs, -0.1, 0.15)
@@ -220,20 +229,20 @@ def build(store, code, periods, metrics, w=None):
         if val is not None:
             out["dcf"]["consensus"][b] = pt(val, worst(mc["status"] if mc else None, "UNVERIFIED" if not r2 else r2["status"]),
                                             "계산(기준일)", None, how)
-    # ---------- DCF 이상치 제외(가정 민감) ----------
+    # ---------- DCF 범위 밖 표시(지우지 않음) ----------
     lim = a.get("DCF_주가대비_상한", 3.0)
     for slot in ("actual", "consensus"):
-        for y in list(out["dcf"][slot]):
-            p = out["dcf"][slot][y]
+        for y, p in out["dcf"][slot].items():
             ref = price.get(y)
             why = None
             if p["v"] <= 0:
-                why = "주주가치 0 이하(순차입금이 기업가치보다 큼)"
+                why = "주주가치 0 이하: 순차입금이 계산된 기업가치보다 큼"
             elif ref and p["v"] > lim * ref["value"]:
-                why = f"주가의 {p['v']/ref['value']:.1f}배 > 상한 {lim:.0f}배: WACC와 영구성장률 차이가 작아 결과가 과도하게 민감"
+                why = f"주가의 {p['v']/ref['value']:.1f}배(표시 상한 {lim:.0f}배 초과): WACC와 영구성장률 차이가 작고 차입이 많아 결과가 과도하게 민감"
             if why:
-                table.setdefault(y, {})["dcf_excluded"] = {"v": p["v"], "why": why, "formula": p["formula"]}
-                del out["dcf"][slot][y]
+                p["flag"] = why
+                p["cap"] = lim * ref["value"] if ref else None
+                table.setdefault(y, {})["dcf_flag"] = {"v": p["v"], "why": why}
 
     # ---------- 적정가 중앙값 ----------
     for slot in ("actual", "consensus"):
@@ -241,12 +250,13 @@ def build(store, code, periods, metrics, w=None):
         for k in ("srim", "dcf", "per_v", "pbr_v", "psr_v"):
             ys |= set(out[k][slot])
         for y in ys:
-            got = [(k, out[k][slot][y]) for k in ("srim", "dcf", "per_v", "pbr_v", "psr_v") if y in out[k][slot]]
+            got = [(k, out[k][slot][y]) for k in ("srim", "dcf", "per_v", "pbr_v", "psr_v")
+                   if y in out[k][slot] and not out[k][slot][y].get("flag")]   # 범위 밖 DCF는 중앙값에서 뺌
             if len(got) >= 2:
                 m = statistics.median([p["v"] for _, p in got])
                 out["fair"][slot][y] = pt(m, worst(*[p["status"] for _, p in got]), "계산", None,
                                           f"{len(got)}개 방법 중앙값: " + ", ".join(f"{dict((k2, n) for k2, n, *_ in VAL_METRICS)[k]} {p['v']:,.0f}" for k, p in got))
     assumptions = {"ERP": erp, "g": g, "w": a["S-RIM_지속계수_w"], "w_main": a["S-RIM_대표_w"], "tax_default": a["기본_세율"],
-                   "dcf_cap": lim, "multiples": med, "multiples_n": {k: len(vs) for k, vs in mult.items()},
+                   "dcf_cap": lim, "hamada": bool(a.get("DCF_하마다_베타")), "multiples": med, "multiples_n": {k: len(vs) for k, vs in mult.items()},
                    "rf_source": a["국고채10년_연평균"].get("_출처", "")}
     return out, table, assumptions

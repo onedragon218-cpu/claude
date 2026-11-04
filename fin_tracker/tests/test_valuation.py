@@ -40,17 +40,31 @@ class T(unittest.TestCase):
         self.assertAlmostEqual(self.v["per_v"]["consensus"][2027]["v"], 1260 * med, places=3)   # 가상 화면 2027E EPS 1,260원
         self.assertIn(2028, self.v["psr_v"]["consensus"])
 
-    def test_dcf_outliers_excluded_with_reason(self):
-        ex = {y: r["dcf_excluded"] for y, r in self.t.items() if "dcf_excluded" in r}
-        self.assertTrue(ex)
-        for y, e in ex.items():
-            self.assertNotIn(y, self.v["dcf"]["actual"])
-            self.assertTrue(e["why"])
+    def test_dcf_is_a_flow_with_flags(self):
+        # 범위 밖 값도 지우지 않고 표시만 한다 → 과거 10개년 모두 이어진 선(2016은 2015 현금흐름 포함 평균)
+        self.assertEqual(sorted(self.v["dcf"]["actual"]), self.p["actual"])
+        flagged = {y: r["dcf_flag"] for y, r in self.t.items() if "dcf_flag" in r}
+        self.assertTrue(flagged)
+        for y, f in flagged.items():
+            pnt = self.v["dcf"]["actual"].get(y) or self.v["dcf"]["consensus"].get(y)
+            self.assertEqual(pnt["flag"], f["why"])
+
+    def test_hamada_option_raises_wacc(self):
+        import json
+        with open(os.path.join(self.w.manual, "assumptions.json"), "w", encoding="utf-8") as f:
+            json.dump({"DCF_하마다_베타": True}, f)
+        try:
+            _, t2, a2 = valuation.build(self.s, "213500", self.p, self.m, self.w)
+        finally:
+            os.remove(os.path.join(self.w.manual, "assumptions.json"))
+        self.assertTrue(a2["hamada"])
+        self.assertGreater(t2[2025]["wacc"], self.t[2025]["wacc"])
 
     def test_fair_is_median(self):
         import statistics
         y = 2025
-        parts = [self.v[k]["actual"][y]["v"] for k in ("srim", "dcf", "per_v", "pbr_v", "psr_v") if y in self.v[k]["actual"]]
+        parts = [self.v[k]["actual"][y]["v"] for k in ("srim", "dcf", "per_v", "pbr_v", "psr_v")
+                 if y in self.v[k]["actual"] and not self.v[k]["actual"][y].get("flag")]
         self.assertAlmostEqual(self.v["fair"]["actual"][y]["v"], statistics.median(parts), places=6)
 
 
