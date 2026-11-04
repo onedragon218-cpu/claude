@@ -240,6 +240,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
         <button class="primary" id="sstart">목록 만들기·갱신</button>
       </div>
     </div>
+    <p class="muted" style="margin:6px 0"><b>상장 유지 위험</b>: 컨센서스가 있는 종목마다 DART 거래소 공시(최근 12개월)와 최근 보고서 주요계정으로 관리종목·상장폐지/실질심사·거래정지·감사의견 비적정·회생/파산·투자주의환기종목·자본잠식 50% 이상(한국거래소 관리종목 기준)은 <b>제외</b>, 관리종목 지정 우려·부분 자본잠식은 <b>주의</b>로 표시합니다(해제·상장유지 공시가 뒤에 있으면 풀린 것으로 봄). DART 키가 없으면 '미확인'입니다.</p>
     <p class="muted" style="margin:6px 0">한국거래소 전체 상장 종목에서 <b>우선주·스팩·리츠·인프라펀드</b>를 빼고, 남은 종목마다 WiseReport(네이버 기업정보)에 증권사 추정치(컨센서스)가 있는지 확인합니다. <b>재무 자료는 받지 않습니다</b>(있는지 여부와 요약 숫자만). 약 2,700종목이라 처음에는 20~30분 걸리고, 이후에는 7일이 지난 종목만 다시 확인합니다.</p>
     <div id="sstatus"></div>
     <div class="tiles" id="stiles" style="margin-top:10px"></div>
@@ -251,6 +252,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
         <label>시장<select id="smkt"><option value="">전체</option><option>KOSPI</option><option>KOSDAQ</option><option>KOSDAQ GLOBAL</option><option>KONEX</option></select></label>
         <label>최소 추정기관 수<input id="smin" type="number" min="0" value="0" style="width:90px"></label>
         <label>표시<select id="sshow"><option value="all">전체</option><option value="new">기본 목록에 없는 것만</option><option value="univ">기본 목록에 있는 것만</option></select></label>
+        <label title="관리종목·상장폐지/실질심사·거래정지·감사의견 비적정·회생/파산·투자주의환기·자본잠식 50% 이상">위험 종목<select id="srisk"><option value="hide">빼기(기본)</option><option value="hidecaution">주의까지 빼기</option><option value="show">함께 보기</option><option value="only">위험·주의만 보기</option></select></label>
       </div>
       <div class="row">
         <button id="sadd" class="primary">체크한 종목 기본 목록에 추가</button>
@@ -882,12 +884,13 @@ let SCREEN = D.screen || {rows:[], summary:{}};
 let sSort = {k:'n_estimates', dir:-1};
 const sChecked = new Set();
 const S_COLS = [['sel','',null],['code','코드','s'],['name','종목명','s'],['market','시장','s'],['wics','업종(WICS)','s'],['n_estimates','추정기관','n'],
-  ['first_year','추정 연도','n'],['revenue','매출액E(억)','n'],['op_income','영업이익E(억)','n'],['opm','영업이익률E','n'],['eps','EPS E(원)','n'],['roe','ROE E','n'],['target_price','목표주가','n'],['state','상태','s'],['act','',null]];
+  ['first_year','추정 연도','n'],['revenue','매출액E(억)','n'],['op_income','영업이익E(억)','n'],['opm','영업이익률E','n'],['eps','EPS E(원)','n'],['roe','ROE E','n'],['target_price','목표주가','n'],['risk_level','위험','s'],['state','상태','s'],['act','',null]];
 function sRows(){
-  const q = ($('#sq').value||'').trim().toLowerCase().replace(/\s/g,''), mk = $('#smkt').value, mn = +($('#smin').value||0), show = $('#sshow').value;
+  const q = ($('#sq').value||'').trim().toLowerCase().replace(/\s/g,''), mk = $('#smkt').value, mn = +($('#smin').value||0), show = $('#sshow').value, rk = $('#srisk').value;
   return (SCREEN.rows||[]).map(r=>Object.assign({opm: r.revenue && r.op_income!=null ? r.op_income/r.revenue*100 : null, state: r.in_db?'DB':(r.in_universe?'기본 목록':'')}, r))
     .filter(r => (!q || r.code.toLowerCase().startsWith(q) || (r.name||'').toLowerCase().replace(/\s/g,'').includes(q) || (r.wics||'').includes(q) || (r.krx_sector||'').includes(q))
-      && (!mk || r.market===mk) && ((r.n_estimates||0) >= mn) && (show==='all' || (show==='new' ? !r.in_universe : r.in_universe)))
+      && (!mk || r.market===mk) && ((r.n_estimates||0) >= mn) && (show==='all' || (show==='new' ? !r.in_universe : r.in_universe))
+      && (rk==='show' || (rk==='hide' && r.risk_level!=='제외') || (rk==='hidecaution' && r.risk_level!=='제외' && r.risk_level!=='주의') || (rk==='only' && (r.risk_level==='제외'||r.risk_level==='주의'))))
     .sort((a,b)=>{ const k=sSort.k, x=a[k], y=b[k]; if (x==null && y==null) return 0; if (x==null) return 1; if (y==null) return -1;
       return (typeof x==='string' ? x.localeCompare(y,'ko') : x-y) * sSort.dir; });
 }
@@ -896,6 +899,7 @@ function renderScreen(){
   const exTxt = Object.entries(ex).map(([k,v])=>`${k} ${v}`).join(' · ');
   $('#stiles').innerHTML = [['전체 상장 종목', sm.total_listed||'–'],['제외', Object.values(ex).reduce((a,b)=>a+b,0)||'–'],['확인한 종목', sm.checked||'–'],['컨센서스 있음', sm.with_consensus||'–'],['마지막 완료', sm.finished_at||'아직 없음']]
     .map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v" style="${typeof v==='string'&&v.length>6?'font-size:15px':''}">${v}</div></div>`).join('') +
+    (sm.risk ? `<div class="muted" style="grid-column:1/-1">상장 유지 위험(컨센서스 있는 종목 기준): 제외 ${sm.risk['제외']||0} · 주의 ${sm.risk['주의']||0} · 정상 ${sm.risk['정상']||0} · 미확인 ${sm.risk['미확인']||0}${sm.risk['미확인']?' (DART 키가 있어야 점검)':''}</div>` : '') +
     (exTxt ? `<div class="muted" style="grid-column:1/-1">제외 내역: ${esc(exTxt)} · 목록 출처: ${esc(sm.source||'–')}${sm.errors?` · 확인 실패 ${sm.errors}종목(다음 갱신 때 다시 확인)`:''}</div>` : '');
   const rows = sRows();
   $('#scount').textContent = `${rows.length}종목 표시 (컨센서스 있는 ${(SCREEN.rows||[]).length}종목 중) · 열 제목을 누르면 정렬 · 체크 ${sChecked.size}종목`;
@@ -904,7 +908,7 @@ function renderScreen(){
       `<th class="${t==='s'?'l':''}" ${t?`data-k="${k}" style="cursor:pointer"`:''}>${n}${sSort.k===k?(sSort.dir>0?' ▲':' ▼'):''}</th>`).join('') + '</tr>' +
     rows.slice(0, 1500).map(r=>`<tr><td><input type="checkbox" class="schk" data-code="${esc(r.code)}" data-name="${esc(r.name)}" ${sChecked.has(r.code)?'checked':''} ${r.in_universe?'disabled title="이미 기본 목록"':''}></td>`+
       `<td class="l">${esc(r.code)}</td><td class="l">${esc(r.name)}</td><td class="l">${esc(r.market||'')}</td><td class="l">${esc(r.wics||r.krx_sector||'')}</td><td>${r.n_estimates??'–'}</td>`+
-      `<td>${r.first_year?r.first_year+'~'+(r.years||[]).slice(-1)[0]:'–'}</td><td>${f2(r.revenue,1)}</td><td>${f2(r.op_income,1)}</td><td>${r.opm==null?'–':r.opm.toFixed(1)+'%'}</td><td>${f2(r.eps)}</td><td>${r.roe==null?'–':r.roe.toFixed(1)+'%'}</td><td>${f2(r.target_price)}</td>`+
+      `<td>${r.first_year?r.first_year+'~'+(r.years||[]).slice(-1)[0]:'–'}</td><td>${f2(r.revenue,1)}</td><td>${f2(r.op_income,1)}</td><td>${r.opm==null?'–':r.opm.toFixed(1)+'%'}</td><td>${f2(r.eps)}</td><td>${r.roe==null?'–':r.roe.toFixed(1)+'%'}</td><td>${f2(r.target_price)}</td><td class="l" title="${esc((r.risk_flags||[]).map(f=>f.type+': '+f.detail+(f.date?' ('+f.date+')':'')).join('\n') || r.risk_note || '')}">${r.risk_level==='제외'?'<span class="badge b-ERROR">제외</span>':r.risk_level==='주의'?'<span class="badge b-WARN">주의</span>':r.risk_level==='정상'?'<span class="muted">정상</span>':'<span class="muted">미확인</span>'} <span class="muted" style="font-size:12px">${esc((r.risk_flags||[]).map(f=>f.type).join(', '))}</span></td>`+
       `<td class="l">${r.in_db?badge('OK')+' DB':(r.in_universe?'기본 목록':'')}</td><td class="l">${r.in_db?`<a href="${companyUrl(r.code)}">열기</a>`:`<a href="#" class="scollect" data-code="${esc(r.code)}" data-name="${esc(r.name)}">수집</a>`}</td></tr>`).join('');
   document.querySelectorAll('#stable th[data-k]').forEach(th=>th.onclick=()=>{ const k=th.dataset.k; sSort = {k, dir: sSort.k===k ? -sSort.dir : (['name','code','market','wics','state'].includes(k)?1:-1)}; renderScreen(); });
   document.querySelectorAll('#stable .schk').forEach(cb=>cb.onchange=()=>{ cb.checked ? sChecked.add(cb.dataset.code) : sChecked.delete(cb.dataset.code); $('#scount').textContent = $('#scount').textContent.replace(/체크 \d+종목/, `체크 ${sChecked.size}종목`); });
@@ -914,10 +918,10 @@ function renderScreen(){
     if (!confirm(`${a.dataset.name}(${a.dataset.code})의 자료를 지금 수집할까요? (DART·컨센서스·주가, 1~2분)`)) return;
     document.querySelector('#tabs button[data-s="A"]').click(); $('#q').value = a.dataset.code; runAnalyze(); });
 }
-['#sq','#smkt','#smin','#sshow'].forEach(id=>$(id).addEventListener('input', renderScreen));
+['#sq','#smkt','#smin','#sshow','#srisk'].forEach(id=>$(id).addEventListener('input', renderScreen));
 $('#scsv').onclick = () => {
-  const rows = sRows(); const head = ['코드','종목명','시장','업종(WICS)','추정기관수','추정시작연도','매출액E(억)','영업이익E(억)','EPS_E','ROE_E','목표주가','기본목록','DB'];
-  const csv = [head].concat(rows.map(r=>[r.code,r.name,r.market,r.wics,r.n_estimates,r.first_year,r.revenue,r.op_income,r.eps,r.roe,r.target_price,r.in_universe?'Y':'',r.in_db?'Y':''])).map(a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const rows = sRows(); const head = ['코드','종목명','시장','업종(WICS)','추정기관수','추정시작연도','매출액E(억)','영업이익E(억)','EPS_E','ROE_E','목표주가','위험','위험사유','기본목록','DB'];
+  const csv = [head].concat(rows.map(r=>[r.code,r.name,r.market,r.wics,r.n_estimates,r.first_year,r.revenue,r.op_income,r.eps,r.roe,r.target_price,r.risk_level,(r.risk_flags||[]).map(f=>f.type+': '+f.detail).join(' / '),r.in_universe?'Y':'',r.in_db?'Y':''])).map(a=>a.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const blob = new Blob(['﻿'+csv], {type:'text/csv'}); const u = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = u; a.download = `컨센서스종목_${(SCREEN.summary||{}).finished_at||'목록'}.csv`.replace(/[: ]/g,'-'); a.click(); URL.revokeObjectURL(u);
 };

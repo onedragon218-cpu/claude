@@ -266,11 +266,16 @@ def fetch_shares(corp, year, reprt="11011"):
     return get_json("stockTotqySttus.json", corp_code=corp, bsns_year=str(year), reprt_code=reprt)
 
 
-def fetch_disclosures(corp, bgn_de, end_de=None):
-    """정기공시(A) 목록. 정정 공시는 report_nm 앞에 [기재정정] 등이 붙는다."""
+def fetch_main_accounts(corp, year, reprt="11011"):
+    """단일회사 주요계정(fnlttSinglAcnt): 자본금·자본총계 등(연결·별도 모두)"""
+    return get_json("fnlttSinglAcnt.json", corp_code=corp, bsns_year=str(year), reprt_code=reprt)
+
+
+def fetch_disclosures(corp, bgn_de, end_de=None, pblntf_ty="A", max_pages=10):
+    """공시 목록. pblntf_ty: A=정기공시, I=거래소공시(관리종목·매매거래정지·상장폐지 등). 정정 공시는 [기재정정] 등이 붙는다."""
     out, page = [], 1
-    while True:
-        p = dict(corp_code=corp, bgn_de=bgn_de, pblntf_ty="A", page_no=page, page_count=100)
+    while page <= max_pages:
+        p = dict(corp_code=corp, bgn_de=bgn_de, pblntf_ty=pblntf_ty, page_no=page, page_count=100)
         if end_de:
             p["end_de"] = end_de
         d = get_json("list.json", **p)
@@ -278,3 +283,4 @@ def fetch_disclosures(corp, bgn_de, end_de=None):
         if page >= int(d.get("total_page") or 1):
             return out
         page += 1
+    return out

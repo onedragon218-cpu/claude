@@ -11,6 +11,8 @@
      ('바이오인프라'·'NICE인프라' 같은 일반 기업은 제외하지 않음)
 3) 남은 종목마다 WiseReport 컨센서스 자료에 추정치(E)가 있는지 확인(가벼운 요청 1건).
    있는 종목만 기업개요를 한 번 더 읽어 시장·업종·추정기관 수·목표주가를 붙인다.
+3-1) 컨센서스가 있는 종목은 DART로 상장 유지 위험을 점검한다(risk.py: 관리종목·투자주의환기·상장폐지·실질심사·
+   거래정지·감사의견 비적정·회생·파산·자본잠식 50% 이상은 '제외', 관리종목 지정 우려·부분 자본잠식은 '주의').
 4) 결과는 data/consensus_scan.json 에 저장. 7일 안에 확인한 종목은 다시 묻지 않는다(중간에 끊겨도 이어서 진행).
 
 재무 자료를 DB에 넣지 않는다. DB에 넣는 것은 사용자가 고른 종목만(기본 목록 추가 또는 수집).
@@ -113,7 +115,9 @@ def run(full=False):
         data.update(total_listed=total, excluded=excl, source=src,
                     started_at=data.get("started_at") or dt.datetime.now().isoformat(" ", "seconds"))
         markets = {c: m for c, _, m in cands}
-        todo = [(c, n) for c, n, _ in cands if full or not _fresh(data["checked"].get(c, {}))]
+        key = dart.has_key()
+        todo = [(c, n) for c, n, _ in cands if full or not _fresh(data["checked"].get(c, {}))
+                or (key and data["checked"][c].get("has") and not (data["checked"][c].get("risk") or {}).get("checked"))]
         lim = int(os.environ.get("ANALYZER_SCAN_LIMIT", "0") or 0)   # 시험용: 앞의 N종목만
         if lim:
             keep = {"213500", "253450", "086900", "005930", "0126Z0", "060310", "035720"}
@@ -126,14 +130,28 @@ def run(full=False):
             with LOCK:
                 JOB["current"] = f"{name}({code})"
             item = {"name": name, "checked_at": dt.date.today().isoformat(), "market": markets.get(code)}
+            prev = data["checked"].get(code, {})
             try:
-                item.update(wisereport.check(code))
-                time.sleep(DELAY)
-                if item.get("has"):
-                    item.update(wisereport.profile(code))
+                if not full and _fresh(prev) and prev.get("has"):
+                    item.update({k: v for k, v in prev.items() if k != "risk"})   # 위험 점검만 새로
+                else:
+                    item.update(wisereport.check(code))
                     time.sleep(DELAY)
+                    if item.get("has"):
+                        item.update(wisereport.profile(code))
+                        time.sleep(DELAY)
             except wisereport.ConsensusUnavailable as e:
                 item.update(has=False, error=str(e)[:120])
+            # 상장 유지 위험(관리종목·상장폐지·거래정지·자본잠식 등): 컨센서스가 있는 종목만, DART 키가 있을 때
+            if item.get("has"):
+                from . import risk
+                if key:
+                    try:
+                        item["risk"] = risk.assess(dart.corp_code(code)["corp_code"])
+                    except Exception as e:   # DART 응답 문제는 '미확인'으로 남김(제외하지 않음)
+                        item["risk"] = {"checked": False, "level": "미확인", "note": str(e)[:120]}
+                else:
+                    item["risk"] = {"checked": False, "level": "미확인", "note": "DART 키 없음"}
             data["checked"][code] = item
             with LOCK:
                 JOB["done"] += 1
@@ -176,7 +194,10 @@ def results(conn=None):
     for code, v in data.get("checked", {}).items():
         if not v.get("has"):
             continue
-        rows.append(dict(code=code, name=v.get("name"), market=v.get("market"), wics=v.get("wics"),
+        rk = v.get("risk") or {"level": "미확인"}
+        rows.append(dict(risk_level=rk.get("level", "미확인"), risk_flags=rk.get("flags", []), risk_note=rk.get("note"),
+                         impairment=rk.get("impairment"),
+                         code=code, name=v.get("name"), market=v.get("market"), wics=v.get("wics"),
                          krx_sector=v.get("krx_sector"), n_estimates=v.get("n_estimates"),
                          target_price=v.get("target_price"), years=v.get("years"), first_year=v.get("first_year"),
                          revenue=v.get("revenue"), op_income=v.get("op_income"), eps=v.get("eps"), roe=v.get("roe"),
@@ -187,4 +208,5 @@ def results(conn=None):
         "excluded": {k: len(v) for k, v in data.get("excluded", {}).items()},
         "checked": len(checked), "with_consensus": len(rows),
         "errors": sum(1 for v in checked.values() if v.get("error")),
+        "risk": {lv: sum(1 for r in rows if r["risk_level"] == lv) for lv in ("제외", "주의", "정상", "미확인")},
         "finished_at": data.get("finished_at")}}

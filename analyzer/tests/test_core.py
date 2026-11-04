@@ -212,6 +212,26 @@ class T(unittest.TestCase):
             with self.assertRaises(krx.KrxUnavailable):
                 krx.fetch()
 
+    def test_risk_rules(self):
+        from analyzer import risk
+        # 실제 공시 제목(2026-03-24, 코스닥시장본부)
+        real = [{"report_nm": "주권매매거래정지기간변경              (상장폐지 사유 발생)", "rcept_dt": "20260324", "rcept_no": "1"},
+                {"report_nm": "기타시장안내              (상장폐지 관련)", "rcept_dt": "20260324", "rcept_no": "2"},
+                {"report_nm": "기타시장안내(관리종목지정우려종목)              (거래량 미달)", "rcept_dt": "20260324", "rcept_no": "3"}]
+        self.assertEqual({k for k, *_ in risk.from_disclosures(real)}, {"상장폐지·실질심사", "거래정지", "관리종목 지정 우려"})
+        cleared = [{"report_nm": "주권매매거래정지", "rcept_dt": "20260101", "rcept_no": "1"},
+                   {"report_nm": "주권매매거래정지해제", "rcept_dt": "20260102", "rcept_no": "2"},
+                   {"report_nm": "관리종목지정(감사의견 거절)", "rcept_dt": "20260301", "rcept_no": "3"},
+                   {"report_nm": "관리종목지정해제", "rcept_dt": "20260601", "rcept_no": "4"}]
+        self.assertEqual(risk.from_disclosures(cleared), [])
+        acc = [{"fs_div": "CFS", "sj_div": "BS", "account_nm": "자본금", "thstrm_amount": "119,013,080,000"},
+               {"fs_div": "CFS", "sj_div": "BS", "account_nm": "자본총계", "thstrm_amount": "697,642,267,848"}]
+        ratio, cap, eq, basis = risk.from_accounts(acc)          # 한솔제지 2025 연결: 잠식 없음
+        self.assertLess(ratio, 0); self.assertEqual(basis, "연결")
+        acc2 = [{"fs_div": "OFS", "sj_div": "BS", "account_nm": "자본금", "thstrm_amount": "100"},
+                {"fs_div": "OFS", "sj_div": "BS", "account_nm": "자본총계", "thstrm_amount": "40"}]
+        self.assertAlmostEqual(risk.from_accounts(acc2)[0], 0.6)
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>
