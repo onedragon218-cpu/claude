@@ -1,0 +1,361 @@
+<title>__TITLE__</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* 레이아웃: 위에서 아래로 요약 → 통합 → 개별 → 원본 → 검증. 상단 고정 목차로 이동. */
+:root{
+  --bg:#f4f6f7; --surface:#ffffff; --ink:#14191e; --ink-2:#4d5864; --ink-3:#77818c; --line:#dde2e6; --line-2:#eef1f3;
+  --accent:#0d6b74; --accent-soft:#e3f0f1;
+  --good:#1d7f47; --good-bg:#e5f3ea; --warn:#9a6300; --warn-bg:#fbf0d9; --bad:#b93a0b; --bad-bg:#fbe7de; --none:#77818c; --none-bg:#eceff1;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6;
+  --f-body:"IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --f-data:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#111417; --surface:#191d21; --ink:#e9edf0; --ink-2:#aab4be; --ink-3:#7f8a95; --line:#2a3137; --line-2:#20262b;
+  --accent:#5bb8c1; --accent-soft:#16343a;
+  --good:#58c487; --good-bg:#16301f; --warn:#e2ac4f; --warn-bg:#352813; --bad:#f2814f; --bad-bg:#3a1d12; --none:#8b96a1; --none-bg:#23292e;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --bg:#111417; --surface:#191d21; --ink:#e9edf0; --ink-2:#aab4be; --ink-3:#7f8a95; --line:#2a3137; --line-2:#20262b;
+  --accent:#5bb8c1; --accent-soft:#16343a;
+  --good:#58c487; --good-bg:#16301f; --warn:#e2ac4f; --warn-bg:#352813; --bad:#f2814f; --bad-bg:#3a1d12; --none:#8b96a1; --none-bg:#23292e;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; color-scheme:dark; }
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--ink); font-family:var(--f-body); font-size:14px; line-height:1.55; margin:0}
+.wrap{max-width:1180px; margin:0 auto; padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px)); padding-block:20px 56px; display:flex; flex-direction:column; gap:28px}
+h1,h2,h3{text-wrap:balance; margin:0}
+h1{font-size:26px; font-weight:700; letter-spacing:-.01em}
+h2{font-size:18px; font-weight:700}
+h3{font-size:14px; font-weight:600}
+.num,td.n,.mono{font-family:var(--f-data); font-variant-numeric:tabular-nums}
+.muted{color:var(--ink-2)} .faint{color:var(--ink-3)}
+.label{font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3); font-weight:600}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+body::before{content:""; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top, 0px); z-index:10; background:var(--surface)}
+nav.toc{position:sticky; top:env(safe-area-inset-top, 0px); z-index:5; background:var(--surface); border-bottom:1px solid var(--line)}
+nav.toc .in{max-width:1180px; margin:0 auto; padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px)); padding-block:8px; display:flex; gap:4px; overflow-x:auto; white-space:nowrap}
+nav.toc a{color:var(--ink-2); text-decoration:none; padding:6px 10px; border-radius:6px; font-size:13px}
+nav.toc a:hover{background:var(--line-2); color:var(--ink)}
+
+header.top{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px 24px; align-items:end}
+header.top .meta{display:flex; flex-wrap:wrap; gap:6px 16px; color:var(--ink-2); font-size:13px}
+.periods{display:flex; gap:0; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--surface)}
+.periods div{padding:8px 14px; border-right:1px solid var(--line); min-width:0}
+.periods div:last-child{border-right:0}
+.periods b{display:block; font-family:var(--f-data); font-weight:500; font-size:15px}
+@media (max-width:720px){ header.top{grid-template-columns:1fr} }
+
+section{display:flex; flex-direction:column; gap:14px; scroll-margin-top:60px}
+.sec-head{display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:8px 16px}
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0}
+
+.chip{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap; line-height:1.6}
+.chip::before{content:""; width:6px; height:6px; border-radius:50%; background:currentColor}
+.st-VERIFIED{color:var(--good); background:var(--good-bg)}
+.st-UNVERIFIED,.st-STALE,.st-WARN{color:var(--warn); background:var(--warn-bg)}
+.st-CONFLICT,.st-FAIL{color:var(--bad); background:var(--bad-bg)}
+.st-CORRECTED{color:var(--accent); background:var(--accent-soft)}
+.st-MISSING{color:var(--none); background:var(--none-bg)}
+.st-PASS{color:var(--good); background:var(--good-bg)}
+
+.stats{display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px}
+.stat{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:2px}
+.stat b{font-family:var(--f-data); font-size:22px; font-weight:500}
+.two{display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:14px}
+@media (max-width:860px){ .two{grid-template-columns:1fr} }
+
+.controls{display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center}
+.seg{display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden}
+.seg button{font:inherit; font-size:13px; border:0; background:var(--surface); color:var(--ink-2); padding:6px 12px; cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent); color:var(--surface)}
+label.tg{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--ink-2); cursor:pointer}
+.legend{display:flex; flex-wrap:wrap; gap:6px}
+.legend button{font:inherit; font-size:12.5px; display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--ink); cursor:pointer}
+.legend button i{width:14px; height:3px; border-radius:2px; display:inline-block}
+.legend button[aria-pressed="false"]{color:var(--ink-3); opacity:.6}
+.legend button[aria-pressed="false"] i{background:var(--ink-3)!important}
+.legend small{color:var(--ink-3); font-size:11px}
+.keys{display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12px; color:var(--ink-2)}
+.keys span{display:inline-flex; align-items:center; gap:6px}
+.keys svg{flex:none}
+.chart-box{position:relative; height:420px}
+@media (max-width:600px){ .chart-box{height:330px} }
+.note{font-size:12.5px; color:var(--ink-2); background:var(--line-2); border-radius:8px; padding:10px 12px}
+
+.grid7{display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:14px}
+@media (max-width:420px){ .grid7{grid-template-columns:1fr} }
+.card{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; min-width:0}
+.card .hd{display:flex; justify-content:space-between; align-items:baseline; gap:8px}
+.card .hd .v{font-family:var(--f-data); font-size:18px; font-weight:500}
+.card .sub{display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--ink-2)}
+.card .mini{position:relative; height:190px}
+.card .src{font-size:11.5px; color:var(--ink-3); border-top:1px solid var(--line-2); padding-top:8px}
+
+.tbl{overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:12.5px}
+th,td{padding:7px 10px; border-bottom:1px solid var(--line-2); text-align:left; vertical-align:top}
+th{font-weight:600; color:var(--ink-2); background:var(--surface); position:sticky; top:0; white-space:nowrap}
+td.n,th.n{text-align:right; white-space:nowrap}
+tr.fut td{background:var(--line-2)}
+td.y{font-family:var(--f-data); font-weight:500}
+.cell-st{display:block; font-size:10.5px; margin-top:1px}
+details{background:var(--surface); border:1px solid var(--line); border-radius:10px}
+details>summary{cursor:pointer; padding:12px 16px; font-weight:600}
+details>div{padding:0 16px 16px}
+pre.cmd{font-family:var(--f-data); font-size:12.5px; background:var(--line-2); padding:10px 12px; border-radius:8px; overflow-x:auto; margin:0}
+ul.plain{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:4px}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important; animation:none!important} }
+</style>
+
+<nav class="toc" aria-label="목차"><div class="in">
+  <a href="#status">수집 현황</a><a href="#combined">통합 그래프</a><a href="#each">개별 그래프</a>
+  <a href="#rawdata">원본 데이터</a><a href="#report">검증 보고서</a><a href="#howto">실행 방법</a>
+</div></nav>
+
+<div class="wrap">
+  <header class="top">
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <span class="label" id="h-eyebrow"></span>
+      <h1 id="h-name"></h1>
+      <div class="meta" id="h-meta"></div>
+    </div>
+    <div class="periods" id="h-periods"></div>
+  </header>
+
+  <section id="status">
+    <div class="sec-head"><h2>수집 현황</h2><span class="muted" id="st-dates"></span></div>
+    <div class="stats" id="st-cards"></div>
+    <div class="two">
+      <div class="panel"><h3 style="margin-bottom:8px">실행 기록 · 재사용 확인</h3><div id="st-runs"></div></div>
+      <div class="panel"><h3 style="margin-bottom:8px">아직 비어 있는 칸</h3><div id="st-gaps"></div></div>
+    </div>
+  </section>
+
+  <section id="combined">
+    <div class="sec-head"><h2>통합 그래프</h2><span class="muted">7개 지표의 방향과 변화 폭을 한 축에서 비교</span></div>
+    <div class="panel" style="display:flex;flex-direction:column;gap:12px">
+      <div class="controls">
+        <div class="seg" role="group" aria-label="환산 방식">
+          <button id="m-spec" aria-pressed="true">지표별 방식</button><button id="m-mm" aria-pressed="false">모두 0~100</button>
+        </div>
+        <label class="tg"><input type="checkbox" id="t-unv"> 미검증 전망 함께 보기</label>
+      </div>
+      <div class="legend" id="lg"></div>
+      <div class="chart-box"><canvas id="c-all" aria-label="7개 지표 통합 추이"></canvas></div>
+      <div class="keys" id="keys"></div>
+      <div class="note" id="norm-note"></div>
+    </div>
+  </section>
+
+  <section id="each">
+    <div class="sec-head"><h2>개별 그래프</h2><span class="muted">지표마다 원래 단위 그대로</span></div>
+    <div class="grid7" id="cards"></div>
+  </section>
+
+  <section id="rawdata">
+    <div class="sec-head"><h2>원본 데이터</h2><span class="muted">연결 기준 · 금액 억원 · 칸 아래 글자는 검증 상태</span></div>
+    <div class="tbl"><table id="t-metrics"></table></div>
+    <details><summary>DART 계정 원값(원 단위 → 억원)과 접수번호</summary><div><div class="tbl"><table id="t-raw"></table></div></div></details>
+  </section>
+
+  <section id="report">
+    <div class="sec-head"><h2>검증 보고서</h2><span class="muted" id="rp-sum"></span></div>
+    <div class="tbl" style="max-height:460px"><table id="t-checks"></table></div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="panel"><h3 style="margin-bottom:8px">컨센서스 시점별 기록</h3><div class="tbl"><table id="t-snap"></table></div></div>
+      <div class="panel"><h3 style="margin-bottom:8px">변경 이력</h3><div id="t-chg"></div></div>
+    </div>
+  </section>
+
+  <section id="howto">
+    <div class="sec-head"><h2>실행 방법</h2></div>
+    <div class="panel" style="display:flex;flex-direction:column;gap:10px">
+      <pre class="cmd">python3 -m fintrack run 213500                # 기준 연도 = 올해 자동
+python3 -m fintrack run 213500 --base-year 2027
+python3 -m fintrack run 005930                # 다른 종목 (data/companies.json에 먼저 등록)</pre>
+      <p class="muted" style="margin:0">같은 종목을 다시 실행하면 DB에서 검증된 값을 먼저 꺼내고, 없는 연도·지표와 갱신 주기가 지난 컨센서스만 새로 조회합니다.</p>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const D = __DATA__;
+const $ = s => document.querySelector(s);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SLOT = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
+const ST_KO = {VERIFIED:'검증 완료',UNVERIFIED:'미검증',CONFLICT:'불일치',CORRECTED:'정정됨',STALE:'갱신 필요',MISSING:'미확보',PASS:'통과',WARN:'주의',FAIL:'실패'};
+const KIND_KO = {actual:'확정 실적',partial:'올해 부분 실적',consensus:'컨센서스',unverified:'미검증 전망'};
+const B = D.base, YEARS = [...D.actualYears, B, ...D.futureYears];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const chip = st => `<span class="chip st-${st}">${ST_KO[st]||st}</span>`;
+function fmt(v, unit){ if(v==null||isNaN(v)) return '–';
+  if(unit==='%') return v.toFixed(2)+'%';
+  if(unit==='억원') return Math.round(v).toLocaleString('ko-KR')+'억';
+  return Math.round(v).toLocaleString('ko-KR')+'원'; }
+function yoy(cur, prev){ if(cur==null||prev==null||prev===0) return null; return (cur-prev)/Math.abs(prev)*100; }
+const yoyTxt = (c,p,unit) => { if(c==null||p==null) return '';
+  if(unit==='%') { const d=c-p; return `전년 대비 ${d>=0?'+':''}${d.toFixed(2)}%p`; }
+  const r=yoy(c,p); return r==null?'':`전년 대비 ${r>=0?'+':''}${r.toFixed(1)}%`; };
+let state = {mode:'spec', unv:false, on:Object.fromEntries(D.metrics.map(m=>[m.key,true]))};
+try{ const s=JSON.parse(localStorage.getItem('fintrack-view')||'null'); if(s) state={...state,...s}; }catch(e){}
+const save = () => { try{ localStorage.setItem('fintrack-view', JSON.stringify(state)); }catch(e){} };
+
+/* ---------- 머리말 ---------- */
+$('#h-eyebrow').textContent = `${D.company.market} · ${D.company.code} · 연결 기준`;
+$('#h-name').textContent = D.company.name;
+$('#h-meta').innerHTML = `<span>기준 연도 <b class="num">${B}</b></span><span>마지막 수집 <span class="num">${esc((D.lastCollected||'').slice(0,10))}</span></span><span>마지막 검증 <span class="num">${esc((D.lastVerified||'').slice(0,10))}</span></span>`;
+$('#h-periods').innerHTML = `<div><span class="label">확정 실적</span><b>${D.actualYears[0]}–${D.actualYears.at(-1)}</b></div><div><span class="label">올해</span><b>${B}</b></div><div><span class="label">컨센서스</span><b>${D.futureYears[0]}–${D.futureYears.at(-1)}</b></div>`;
+
+/* ---------- 수집 현황 ---------- */
+(function(){
+  const c = Object.fromEntries(D.counts.map(r=>[r.status,r.n])); const tot = D.counts.reduce((a,r)=>a+r.n,0);
+  const missingCells = D.gaps.length;
+  const cards = [['저장된 값',tot,'현재 버전 기준'],['검증 완료',c.VERIFIED||0,'재사용 대상'],['미검증',c.UNVERIFIED||0,'단일 출처·원문 미확인'],['불일치',c.CONFLICT||0,'출처 간 차이'],['미확보 칸',missingCells,`${B}–${D.futureYears.at(-1)} 전망`]];
+  $('#st-cards').innerHTML = cards.map(([k,v,s])=>`<div class="stat"><span class="label">${k}</span><b>${v}</b><span class="faint" style="font-size:12px">${s}</span></div>`).join('');
+  $('#st-dates').textContent = `실행 ${D.runs.length}회`;
+  const ch = {'raw-cache':'보관 원본','api':'API','web':'웹 조회','manual':'수동 입력','skipped-reuse':'재사용'};
+  $('#st-runs').innerHTML = D.runs.slice(-3).map((r,i,arr)=>{ const s=r.summary||{};
+    return `<div style="display:flex;flex-direction:column;gap:6px;${i? 'border-top:1px solid var(--line-2);padding-top:10px;margin-top:10px':''}">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b class="num">${esc(r.started_at)}</b>
+      <span class="muted">조회 <b class="num">${s['외부·원본 조회']??'-'}</b> · 재사용 <b class="num">${s['재사용(조회 생략)']??'-'}</b> · 신규 저장 <b class="num">${s['신규 저장']??'-'}</b></span></div>
+      <ul class="plain" style="font-size:12px">${r.fetches.map(f=>`<li><span class="chip ${f.channel==='skipped-reuse'?'st-VERIFIED':f.result==='ok'?'st-CORRECTED':'st-FAIL'}">${ch[f.channel]||f.channel}</span> ${esc(f.source)} · ${esc(f.target)} <span class="faint">${esc(f.detail)}</span></li>`).join('')}</ul></div>`; }).join('');
+  const g = {}; D.gaps.forEach(x=>{ (g[x.year]=g[x.year]||[]).push(x.metric); });
+  $('#st-gaps').innerHTML = `<ul class="plain">${Object.entries(g).map(([y,ms])=>`<li><b class="num">${y}</b> 검증된 전망 없음: ${ms.join(', ')}</li>`).join('')}</ul>
+    <p class="faint" style="font-size:12px;margin:8px 0 0">빈칸은 추정해서 채우지 않습니다. 증권사 리포트나 FnGuide 연도별 컨센서스를 확보하면 <span class="mono">data/manual</span>에 넣고 다시 실행하면 됩니다.</p>`;
+})();
+
+/* ---------- 계열 만들기 ---------- */
+function seriesOf(m){
+  const a = YEARS.map(y => m.actual[y]?.v ?? null);
+  const c = YEARS.map(y => m.consensus[y]?.v ?? null);
+  const u = YEARS.map(y => m.unverified[y]?.v ?? null);
+  const lastA = D.actualYears.at(-1), li = YEARS.indexOf(lastA);
+  if(c.some((v,i)=>v!=null && YEARS[i]===B) && a[li]!=null) c[li]=a[li];   // 마지막 실적에서 점선 시작
+  if(u.some((v,i)=>v!=null && YEARS[i]===B) && a[li]!=null) u[li]=a[li];
+  return {a,c,u};
+}
+function scaler(m, mode){
+  const s = seriesOf(m); const vals = [...s.a, ...s.c, ...(state.unv? s.u:[])].filter(v=>v!=null);
+  const base = m.actual[D.actualYears[0]]?.v;
+  const allPos = vals.every(v=>v>0);
+  if(mode==='spec' && base>0 && allPos) return {f:v=>v==null?null:v/base*100, how:`${D.actualYears[0]}=100 지수`};
+  const lo=Math.min(...vals), hi=Math.max(...vals);
+  return {f:v=>v==null?null:(hi===lo?50:(v-lo)/(hi-lo)*100), how:`0~100 정규화(최소 ${fmt(lo,m.unit)}, 최대 ${fmt(hi,m.unit)})`};
+}
+const DASH_C=[6,4], DASH_U=[2,3];
+function pointInfo(m, slot, y){ const p = m[slot][y]; return p; }
+
+/* ---------- 통합 그래프 ---------- */
+let allChart;
+function drawAll(){
+  const ds = [], notes = [];
+  D.metrics.forEach((m,i)=>{
+    const col = css(SLOT[i]); const sc = scaler(m, state.mode); const s = seriesOf(m);
+    notes.push(`<b>${m.name}</b> ${sc.how}`);
+    const hidden = !state.on[m.key];
+    const base = {borderColor:col, backgroundColor:col, borderWidth:2, pointRadius:3, pointHoverRadius:6, spanGaps:false, tension:0, hidden, _m:i};
+    ds.push({...base, label:m.name, data:s.a.map(sc.f), _slot:'actual', _raw:s.a});
+    ds.push({...base, label:m.name+' 전망', data:s.c.map(sc.f), borderDash:DASH_C, pointStyle:'rectRot', pointRadius:4, _slot:'consensus', _raw:s.c});
+    if(state.unv) ds.push({...base, label:m.name+' 미검증', data:s.u.map(sc.f), borderDash:DASH_U, borderWidth:1.5, pointBackgroundColor:css('--surface'), pointRadius:4, _slot:'unverified', _raw:s.u});
+  });
+  $('#norm-note').innerHTML = `환산 방식 · ${notes.join(' · ')}<br>값이 모두 양수인 지표는 첫해를 100으로 둔 지수, 0 이하 값이 있는 지표(EPS·ROE 등)는 기간 최솟값 0·최댓값 100으로 환산합니다. 높이는 지표끼리 크기를 비교하는 뜻이 아닙니다. 점에 마우스를 올리면 원래 단위 값이 나옵니다.`;
+  if(allChart) allChart.destroy();
+  allChart = new Chart($('#c-all'), {type:'line', data:{labels:YEARS, datasets:ds}, options:chartOpts({combined:true})});
+}
+function chartOpts({combined, unit}){
+  const ink2 = css('--ink-2'), line = css('--line-2'), ink3=css('--ink-3');
+  return {responsive:true, maintainAspectRatio:false, animation:false, interaction:{mode:'index', intersect:false},
+    plugins:{legend:{display:false}, tooltip:{backgroundColor:css('--surface'), titleColor:css('--ink'), bodyColor:css('--ink'), borderColor:css('--line'), borderWidth:1, padding:10, boxPadding:4,
+      titleFont:{family:'IBM Plex Mono'}, bodyFont:{family:'IBM Plex Sans KR', size:12},
+      filter: it => it.raw!=null && !(it.dataset._slot!=='actual' && YEARS[it.dataIndex]===D.actualYears.at(-1)),
+      callbacks:{title: it => it.length? `${it[0].label}년${+it[0].label>=B? (+it[0].label===B?' (올해)':' (전망)'):''}`:'',
+        label: it => { const m = D.metrics[it.dataset._m]; const y = YEARS[it.dataIndex]; const p = m[it.dataset._slot][y] || (it.dataset._slot==='partial'? null : null);
+          const raw = it.dataset._raw[it.dataIndex];
+          const prevY = YEARS[it.dataIndex-1]; const prev = m.actual[prevY]?.v ?? m.consensus[prevY]?.v;
+          return ` ${m.name}: ${fmt(raw,m.unit)}  ${KIND_KO[it.dataset._slot]}${p? ' · '+(ST_KO[p.status]||p.status):''}  ${yoyTxt(raw,prev,m.unit)}`; },
+        afterLabel: it => { const m = D.metrics[it.dataset._m]; const p = m[it.dataset._slot][YEARS[it.dataIndex]]; return (!combined && p)? `   ${p.formula}${p.as_of? ' · 기준 '+p.as_of:''}`:''; } }}},
+    scales:{x:{grid:{display:false}, ticks:{color:ink2, font:{family:'IBM Plex Mono', size:11}}, border:{color:css('--line')}},
+      y:{grid:{color:line}, border:{display:false}, ticks:{color:ink3, font:{family:'IBM Plex Mono', size:11}, maxTicksLimit:6,
+        callback: v => combined? v : (unit==='%'? v+'%' : Number(v).toLocaleString('ko-KR'))}}}};
+}
+const futBand = {id:'fut', beforeDraw(ch){ const {ctx, chartArea:a, scales:{x}} = ch; if(!a) return; const i = YEARS.indexOf(B);
+  const x0 = (x.getPixelForValue(i-1)+x.getPixelForValue(i))/2; ctx.save(); ctx.fillStyle = css('--line-2'); ctx.fillRect(x0, a.top, a.right-x0, a.bottom-a.top);
+  ctx.fillStyle = css('--ink-3'); ctx.font = '11px "IBM Plex Sans KR", sans-serif'; ctx.fillText('올해·전망', x0+6, a.top+13); ctx.restore(); }};
+if (window.Chart) Chart.register(futBand);
+
+function drawLegend(){
+  $('#lg').innerHTML = D.metrics.map((m,i)=>`<button type="button" data-k="${m.key}" aria-pressed="${state.on[m.key]}"><i style="background:var(${SLOT[i]})"></i>${m.name} <small>${m.unit}</small></button>`).join('');
+  $('#lg').querySelectorAll('button').forEach(b=>b.onclick=()=>{ state.on[b.dataset.k]=!state.on[b.dataset.k]; save(); drawLegend(); drawAll(); });
+  const sw = (dash, hollow) => `<svg width="30" height="10" aria-hidden="true"><line x1="1" y1="5" x2="29" y2="5" stroke="var(--ink-2)" stroke-width="2" ${dash?`stroke-dasharray="${dash}"`:''}/>${hollow?'<circle cx="15" cy="5" r="3.5" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="1.5"/>':''}</svg>`;
+  $('#keys').innerHTML = `<span>${sw('')}확정 실적</span><span>${sw('6 4')}검증 출처 컨센서스</span>${state.unv?`<span>${sw('2 3',1)}미검증 전망(원문 미확인)</span>`:''}<span><svg width="30" height="10" aria-hidden="true"><path d="M15 1 L20 9 L10 9 Z" fill="var(--ink-2)"/></svg>올해 반기 실제값(개별 그래프)</span>`;
+}
+
+/* ---------- 개별 그래프 ---------- */
+const mini = [];
+function drawCards(){
+  mini.forEach(c=>c.destroy()); mini.length=0;
+  $('#cards').innerHTML = D.metrics.map((m,i)=>`<div class="card"><div class="hd"><h3>${m.name} <span class="faint" style="font-weight:400">${m.unit}</span></h3><span class="v" id="v-${m.key}"></span></div>
+    <div class="sub" id="s-${m.key}"></div><div class="mini"><canvas id="c-${m.key}" aria-label="${m.name} 추이"></canvas></div><div class="src" id="r-${m.key}"></div></div>`).join('');
+  D.metrics.forEach((m,i)=>{
+    const col = css(SLOT[i]); const s = seriesOf(m);
+    const part = YEARS.map(y => m.partial[y]?.v ?? null);
+    const showPart = ['op_margin','debt_ratio','bps'].includes(m.key);
+    const ds = [{label:m.name, data:s.a, borderColor:col, backgroundColor:col, borderWidth:2, pointRadius:2.5, spanGaps:false, _m:i, _slot:'actual', _raw:s.a},
+      {label:'컨센서스', data:s.c, borderColor:col, backgroundColor:col, borderDash:DASH_C, borderWidth:2, pointStyle:'rectRot', pointRadius:4, spanGaps:false, _m:i, _slot:'consensus', _raw:s.c}];
+    if(state.unv) ds.push({label:'미검증', data:s.u, borderColor:col, borderDash:DASH_U, borderWidth:1.5, pointRadius:4, pointBackgroundColor:css('--surface'), spanGaps:false, _m:i, _slot:'unverified', _raw:s.u});
+    if(showPart) ds.push({label:'반기 실제', data:part, showLine:false, borderColor:col, backgroundColor:col, pointStyle:'triangle', pointRadius:6, _m:i, _slot:'partial', _raw:part});
+    mini.push(new Chart($('#c-'+m.key), {type:'line', data:{labels:YEARS, datasets:ds}, options:chartOpts({combined:false, unit:m.unit})}));
+    const la = D.actualYears.at(-1), lv = m.actual[la]?.v, pv = m.actual[la-1]?.v;
+    const cur = m.key==='market_cap' && m.actual[B] ? m.actual[B] : null;
+    $('#v-'+m.key).textContent = cur? fmt(cur.v,m.unit) : fmt(lv,m.unit);
+    const cons = YEARS.filter(y=>y>=B && m.consensus[y]).map(y=>`${y}E ${fmt(m.consensus[y].v,m.unit)} ${chip(m.consensus[y].status)}`);
+    const pt = m.partial[B];
+    $('#s-'+m.key).innerHTML = `<span>${cur? `${esc(cur.as_of)} 기준`:`${la}년 · ${yoyTxt(lv,pv,m.unit)}`}</span><span>${cons.join(' ') || `<span class="faint">${m.key==='market_cap'?'전망 대상 아님(시장가격)':'검증된 전망 없음'}</span>`}</span>`;
+    const refs = [...new Set(Object.values(m.actual).map(p=>p.source))];
+    $('#r-'+m.key).innerHTML = `출처: ${esc(refs.join(', '))}${pt? ` · ${B} ${esc(pt.as_of)} 실제 ${fmt(pt.v,m.unit)}${pt.note? ' ('+esc(pt.note)+')':''}`:''}`;
+  });
+}
+
+/* ---------- 표 ---------- */
+function drawTables(){
+  const head = `<tr><th>연도</th><th>구분</th>${D.metrics.map(m=>`<th class="n">${m.name}<br><span class="faint" style="font-weight:400">${m.unit}</span></th>`).join('')}</tr>`;
+  const row = (y, slot, label) => { const has = D.metrics.some(m=>m[slot][y]); if(!has) return '';
+    return `<tr class="${y>=B?'fut':''}"><td class="y">${y}</td><td>${label}</td>${D.metrics.map(m=>{ const p=m[slot][y];
+      return p? `<td class="n" title="${esc(p.source+' · '+p.formula+(p.as_of?' · '+p.as_of:''))}">${fmt(p.v,m.unit)}<span class="cell-st" style="color:var(--${p.status==='VERIFIED'?'good':p.status==='CONFLICT'?'bad':'warn'})">${ST_KO[p.status]||p.status}</span></td>` : '<td class="n faint">–</td>'; }).join('')}</tr>`; };
+  let body = D.actualYears.map(y=>row(y,'actual','실적')).join('');
+  body += row(B,'actual','기준일 시세') + row(B,'partial','반기 실제') + row(B,'consensus','컨센서스') + row(B,'unverified','미검증');
+  D.futureYears.forEach(y=>{ body += row(y,'consensus','컨센서스') + row(y,'unverified','미검증') || `<tr class="fut"><td class="y">${y}</td><td colspan="${D.metrics.length+1}" class="faint">검증된 전망 없음</td></tr>`; });
+  $('#t-metrics').innerHTML = head + body;
+  const acc = [['revenue','매출액'],['op','영업이익'],['ni_owner','지배순이익'],['eps','EPS(원)'],['eq_owner','지배자본'],['eq','자본총계'],['liab','부채총계'],['issued_capital','자본금']];
+  const yrs = Object.keys(D.raw).sort();
+  $('#t-raw').innerHTML = `<tr><th>연도</th>${acc.map(a=>`<th class="n">${a[1]}</th>`).join('')}<th>접수번호</th></tr>` + yrs.map(y=>{ const r=D.raw[y];
+    return `<tr><td class="y">${y}</td>${acc.map(([k])=>{ const c=r[k]; if(!c) return '<td class="n faint">–</td>'; const v = k==='eps'? c.v : c.v/1e8;
+      return `<td class="n">${k==='eps'? Math.round(v).toLocaleString('ko-KR') : v.toLocaleString('ko-KR',{maximumFractionDigits:1})}</td>`; }).join('')}<td class="mono"><a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${esc(Object.values(r)[0]?.ref)}" target="_blank" rel="noopener">${esc(Object.values(r)[0]?.ref)}</a></td></tr>`; }).join('');
+  const cnt = {PASS:0,WARN:0,FAIL:0}; D.checks.forEach(c=>cnt[c.result]++);
+  $('#rp-sum').innerHTML = `${chip('PASS')} ${cnt.PASS} ${chip('WARN')} ${cnt.WARN} ${chip('FAIL')} ${cnt.FAIL}`;
+  $('#t-checks').innerHTML = `<tr><th>결과</th><th>연도</th><th>항목</th><th>검사</th><th>내용</th></tr>` + D.checks.map(c=>`<tr><td>${chip(c.result)}</td><td class="y">${c.fiscal_year??''}</td><td>${esc(c.item)}</td><td>${esc(c.check_name)}</td><td>${esc(c.detail)}</td></tr>`).join('');
+  const nm = {revenue:'매출액',op:'영업이익',eps:'EPS',bps:'BPS',roe:'ROE'};
+  $('#t-snap').innerHTML = `<tr><th>대상</th><th>항목</th><th class="n">값</th><th>출처</th><th>기준일</th><th>상태</th></tr>` + D.snapshots.map(s=>{ const v = ['revenue','op'].includes(s.item)? Math.round(s.value/1e8).toLocaleString('ko-KR')+'억' : s.item==='roe'? s.value.toFixed(2)+'%' : Math.round(s.value).toLocaleString('ko-KR')+'원';
+    return `<tr><td class="y">${s.fiscal_year}E</td><td>${nm[s.item]||s.item}</td><td class="n">${v}</td><td>${esc(s.source)}</td><td class="mono">${esc(s.as_of)}<br><span class="faint">수집 ${esc((s.collected_at||'').slice(0,10))}</span></td><td>${chip(s.status)}${s.status_note? `<span class="cell-st faint">${esc(s.status_note)}</span>`:''}</td></tr>`; }).join('');
+  $('#t-chg').innerHTML = D.changes.length? `<div class="tbl"><table><tr><th>연도</th><th>항목</th><th class="n">이전</th><th class="n">변경</th><th>이유</th><th>일시</th></tr>${D.changes.map(c=>`<tr><td class="y">${c.fiscal_year}</td><td>${esc(c.item)}</td><td class="n">${c.old_value?.toLocaleString('ko-KR')}</td><td class="n">${c.new_value?.toLocaleString('ko-KR')}</td><td>${esc(c.reason)}</td><td class="mono">${esc(c.changed_at)}</td></tr>`).join('')}</table></div>`
+    : `<p class="muted" style="margin:0">아직 바뀐 값이 없습니다. 정정 공시나 다른 값이 들어오면 이전 값을 지우지 않고 여기에 이전 값 → 새 값으로 남깁니다.</p>`;
+}
+
+/* ---------- 조작 ---------- */
+function setMode(m){ state.mode=m; save(); $('#m-spec').setAttribute('aria-pressed', m==='spec'); $('#m-mm').setAttribute('aria-pressed', m==='mm'); drawAll(); }
+$('#m-spec').onclick=()=>setMode('spec'); $('#m-mm').onclick=()=>setMode('mm');
+$('#t-unv').checked = state.unv;
+$('#t-unv').onchange = e => { state.unv = e.target.checked; save(); drawLegend(); drawAll(); drawCards(); };
+function renderAll(){ Chart.defaults.font.family = '"IBM Plex Sans KR", sans-serif'; Chart.defaults.color = css('--ink-2');
+  $('#m-spec').setAttribute('aria-pressed', state.mode==='spec'); $('#m-mm').setAttribute('aria-pressed', state.mode==='mm');
+  drawLegend(); drawAll(); drawCards(); }
+drawTables();
+if (window.Chart) renderAll(); else document.querySelectorAll('.chart-box,.mini').forEach(el=>el.innerHTML='<p class="muted">그래프 라이브러리를 불러오지 못했습니다. 아래 표에서 같은 값을 볼 수 있습니다.</p>');
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>window.Chart && renderAll());
+new MutationObserver(()=>window.Chart && renderAll()).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+</script>

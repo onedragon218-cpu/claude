@@ -1,0 +1,4 @@
+{
+  "_설명": "종목코드 → DART 고유번호(corp_code)·액면가. 새 종목은 여기 한 줄 추가. corp_code는 DART 기업개황 또는 opendart corpCode.xml에서 확인.",
+  "213500": {"name": "한솔제지", "corp_code": "01060744", "market": "KOSPI", "face_value": 5000}
+}

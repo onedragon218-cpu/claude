@@ -1,0 +1,19 @@
+{
+ "_설명": "2026년 반기보고서(연결). 손익은 1~6월 누적, 재무상태는 2026-06-30. 이전 작업(valuation/raw/hansol_2026_H1.json)에서 DART 전체 재무제표로 추출한 값.",
+ "stock_code": "213500",
+ "fiscal_year": 2026,
+ "period": "H1",
+ "basis": "CFS",
+ "source": "DART 반기보고서",
+ "source_ref": "20260813001710",
+ "source_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001710",
+ "collected_at": "2026-11-03",
+ "accounts": {
+  "revenue": 1152546492570.0,
+  "op": 62044461329.0,
+  "ni_owner": 33386107518.0,
+  "eq_owner": 725085685172.0,
+  "eq": 725507928668.0,
+  "liab": 1396124425575.0
+ }
+}
