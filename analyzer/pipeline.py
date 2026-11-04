@@ -68,7 +68,8 @@ def select_facts(conn, code, y, period, via=None, stats=None):
     1순위: 그 연도 자신의 보고서(정정 공시가 있으면 가장 최근 접수번호)
     2순위: 그 연도를 처음으로 담은 후속 보고서(원래 숫자에 가장 가까움)"""
     for key in dart.ALL_KEYS:
-        obs = db.observations(conn, code, y, key, period)
+        # 대표값은 DART 원본에서만 고른다(WiseReport 등 다른 출처는 교차 검증용 관측값)
+        obs = [o for o in db.observations(conn, code, y, key, period) if o["source"] == "DART" and o["report_year"] is not None]
         if not obs:
             continue
         own = [o for o in obs if o["report_year"] == y]

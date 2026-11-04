@@ -130,6 +130,17 @@ def stability(conn, code, P, vrows, comp):
             return None, "이자지급 없음(무차입 또는 자료 없음) → 배율 계산 안 함"
         return op / ip, None
 
+    def cash_of(y, per="FY", prev=None):
+        """현금 잔액과 증감 원인(억원). 증감 = 영업 + 투자 + 재무 + 환율, 나머지는 '기타·차이'로 따로 둔다."""
+        e = lambda v: None if v is None else v / 1e8
+        c_only, c_tot = bk.v(y, "acc_cash_only", per), bk.v(y, "acc_cash", per)
+        cfo, cfi, cff, fx = (bk.v(y, k, per) for k in ("acc_ocf", "acc_cfi", "acc_cff", "acc_fx"))
+        p_only = prev if prev is not None else bk.v(y - 1, "acc_cash_only")
+        chg = c_only - p_only if c_only is not None and p_only is not None else None
+        parts = None if None in (cfo, cfi, cff) else cfo + cfi + cff + (fx or 0)
+        return {"cash_only": e(c_only), "cash_total": e(c_tot), "cash_chg": e(chg), "cfo": e(cfo), "cfi": e(cfi),
+                "cff": e(cff), "fx": e(fx), "cash_other": e(chg - parts) if chg is not None and parts is not None else None}
+
     for y in P["past"]:
         ip = (bk.v(y, "acc_int_paid") or 0) + (bk.v(y, "acc_int_paid_fin") or 0)
         icr, why = icr_of(bk.v(y, "acc_op"), ip)
@@ -139,7 +150,7 @@ def stability(conn, code, P, vrows, comp):
                      "op": bk.v(y, "acc_op"), "interest": ip or None, "net_debt": nd,
                      "net_debt_why": None if nd is not None else ("차입금이 재무상태표에 따로 표시되지 않음" if r else "자료 없음"),
                      "ind_debt_ratio": bm["debt_ratio"].get(y), "ind_icr": bm["icr"].get(y),
-                     "all_debt_ratio": bm["all_debt_ratio"].get(y), "all_icr": bm["all_icr"].get(y)})
+                     "all_debt_ratio": bm["all_debt_ratio"].get(y), "all_icr": bm["all_icr"].get(y), **cash_of(y)})
     cy = P["current"]
     per = bk.latest_interim(cy)
     if per:
@@ -151,7 +162,8 @@ def stability(conn, code, P, vrows, comp):
         rows.append({"year": cy, "kind": f"현재({per}말·최근12개월)", "debt_ratio": bk.v(cy, "debt_ratio", per),
                      "icr": icr, "icr_why": why, "op": op, "interest": ip or None, "net_debt": nd,
                      "net_debt_why": None if nd is not None else "자료 없음",
-                     "ind_debt_ratio": None, "ind_icr": None, "all_debt_ratio": None, "all_icr": None})
+                     "ind_debt_ratio": None, "ind_icr": None, "all_debt_ratio": None, "all_icr": None,
+                     "flow_basis": f"{per} 누적(전년말 대비)", **cash_of(cy, per)})
     # 경고(사실만): 최근 실적 연도 기준
     warn = []
     act = [r for r in rows if r["kind"] == "실적"]

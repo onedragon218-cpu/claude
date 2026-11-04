@@ -232,6 +232,22 @@ class T(unittest.TestCase):
                 {"fs_div": "OFS", "sj_div": "BS", "account_nm": "자본총계", "thstrm_amount": "40"}]
         self.assertAlmostEqual(risk.from_accounts(acc2)[0], 0.6)
 
+    def test_cross_check_obs_do_not_break_selection(self):
+        """WiseReport 교차검증 관측값(보고연도 없음)이 있어도 DART 원본 재해석이 깨지지 않아야 한다(실제 발생한 오류)."""
+        pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
+        pipeline.record_cross_check(self.conn, "213500", [{"target_year": 2024, "metric": "revenue", "value": 22157.9}],
+                                    "https://example/x&sDT=1")
+        with open(os.path.join(SEED, "dart_2025_11011_CFS.json"), encoding="utf-8") as f:
+            pipeline.ingest_statement(self.conn, "213500", json.load(f))
+        self.assertEqual(db.current_fact(self.conn, "213500", 2024, "acc_revenue")["source"], "DART")
+
+    def test_cash_flow_reconciles(self):
+        pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
+        st = report.payload(self.conn, "213500", 2026)["stability"]
+        r = next(x for x in st["rows"] if x["year"] == 2025)
+        self.assertAlmostEqual(r["cash_only"], 256.40748607, places=4)
+        self.assertAlmostEqual(r["cfo"] + r["cfi"] + r["cff"] + r["fx"], r["cash_chg"], delta=0.5)   # 억원 단위
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>

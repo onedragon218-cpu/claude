@@ -41,6 +41,12 @@ MAP.update({
     # 이자지급: 영업활동 분류(FCFF 계산 때 되더함)와 재무활동 분류를 나눠 둔다. 표준코드가 없으면 영업활동으로 본다
     "acc_int_paid": (("CF",), ["ifrs-full_InterestPaidClassifiedAsOperatingActivities"], ["이자의지급", "이자지급", "이자의지급(영업)"]),
     "acc_int_paid_fin": (("CF",), ["ifrs-full_InterestPaidClassifiedAsFinancingActivities"], []),
+    # 현금 추이·증감 원인(화면 H)
+    "acc_cash_only": (("BS",), ["ifrs-full_CashAndCashEquivalents"], ["현금및현금성자산"]),
+    "acc_cfi": (("CF",), ["ifrs-full_CashFlowsFromUsedInInvestingActivities"], ["투자활동현금흐름", "투자활동으로인한현금흐름"]),
+    "acc_cff": (("CF",), ["ifrs-full_CashFlowsFromUsedInFinancingActivities"], ["재무활동현금흐름", "재무활동으로인한현금흐름"]),
+    "acc_fx": (("CF",), ["ifrs-full_EffectOfExchangeRateChangesOnCashAndCashEquivalents"],
+               ["현금및현금성자산에대한환율변동효과", "외화표시현금및현금성자산의환율변동효과", "현금및현금성자산의환율변동효과"]),
 })
 # 여러 줄을 더해야 하는 계정(재무상태표): 이름 규칙으로 찾는다
 SUM = {
@@ -50,9 +56,9 @@ SUM = {
 SUM_EXCLUDE = re.compile(r"(사채할인|상환할증|전환권조정|대여금|이자|미지급|충당)")
 ALL_KEYS = list(MAP) + list(SUM)
 ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"}   # 회사마다 부호 표기가 달라 절댓값 사용
-CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"}
+CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_cfi", "acc_cff", "acc_fx"}
 FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
-PARSER_VERSION = 2   # 계정을 늘리면 올린다 → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
+PARSER_VERSION = 3   # 계정을 늘리면 올린다 → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
 
 
 def _num(s):

@@ -225,6 +225,8 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <div class="card" style="margin:0"><h3>부채비율 (%)</h3><div class="muted" id="hs-debt"></div><div class="chartbox"><canvas id="h-debt"></canvas></div></div>
       <div class="card" style="margin:0"><h3>이자보상배율 (배)</h3><div class="muted" id="hs-icr"></div><div class="chartbox"><canvas id="h-icr"></canvas></div></div>
       <div class="card" style="margin:0"><h3>순차입금 (억원)</h3><div class="muted" id="hs-nd"></div><div class="chartbox"><canvas id="h-nd"></canvas></div></div>
+      <div class="card" style="margin:0"><h3>현금 잔액 (억원)</h3><div class="muted" id="hs-cash"></div><div class="chartbox"><canvas id="h-cash"></canvas></div></div>
+      <div class="card" style="margin:0;grid-column:span 2"><h3>현금 증감 원인 (억원)</h3><div class="muted" id="hs-cf"></div><div class="chartbox"><canvas id="h-cf"></canvas></div></div>
     </div>
   </div>
   <div class="card"><h3>연도별 안정성 지표</h3><div class="tablewrap"><table id="htable"></table></div>
@@ -865,17 +867,39 @@ function renderH(){
   // 3) 순차입금 + 0 기준선
   mk('h-nd', [line('회사 순차입금(차입금−현금)', rows.map(r=>r.net_debt), '--s2', {fill:{target:{value:0}, above:rgba('--bad',0.10), below:rgba('--good',0.12)}}),
     ref('0(순현금 경계)', rows.map(()=>0), '--text-muted', [3,3])], '억원');
+  // 4) 현금 잔액: 재무상태표 표기 그대로의 현금및현금성자산 + 단기금융상품 포함
+  const sameCash = rows.every(r => r.cash_only==null || r.cash_total==null || Math.abs(r.cash_only - r.cash_total) < 0.05);
+  mk('h-cash', [line('현금및현금성자산', rows.map(r=>r.cash_only), '--s3'),
+    ...(sameCash ? [] : [line('단기금융상품 포함', rows.map(r=>r.cash_total), '--s4', {borderDash:[4,3]})])], '억원');
+  // 5) 현금 증감 원인: 영업·투자·재무·환율(막대, 쌓기) + 순증감(선)
+  { const o = baseOpts(); o.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}};
+    o.scales.x.stacked = true; o.scales.y.stacked = true; o.scales.y.ticks.callback = v => fmt(v,'억원');
+    o.interaction = {mode:'index', intersect:false};
+    o.plugins.tooltip.callbacks = {label: ctx => ctx.parsed.y==null ? null : `${ctx.dataset.label}: ${ctx.parsed.y>=0?'+':''}${fmt(ctx.parsed.y,'억원')}억원`,
+      afterBody: items => { const r = rows[items[0].dataIndex]; const out = [];
+        if (r.flow_basis) out.push('기준: ' + r.flow_basis);
+        if (r.cash_other!=null && Math.abs(r.cash_other) >= 1) out.push(`기타·차이: ${fmt(r.cash_other,'억원')}억원(연결범위 변동 등)`);
+        if (r.cfo==null) out.push('현금흐름표 자료 없음'); return out; }};
+    const bar = (label, key, color) => ({type:'bar', label, data: rows.map(r=>r[key]), backgroundColor: css(color), borderColor: css('--surface-1'), borderWidth: 1, stack:'cf', order:2, borderRadius:3});
+    const ds = [bar('영업활동', 'cfo', '--s1'), bar('투자활동', 'cfi', '--s2'), bar('재무활동', 'cff', '--s7'), bar('환율변동', 'fx', '--text-muted'),
+      {type:'line', label:'현금 순증감', data: rows.map(r=>r.cash_chg), borderColor: css('--text-primary'), backgroundColor: css('--text-primary'), borderWidth:2.25, pointRadius:4, pointStyle:'rectRot', tension:0, order:1, stack:'line'}];
+    if (charts['h-cf']) charts['h-cf'].destroy();
+    charts['h-cf'] = mkChart($('#h-cf'), {type:'bar', data:{labels, datasets:ds}, options:o}); }
   const lastA = [...rows].reverse().find(r=>r.kind==='실적' && r.debt_ratio!=null);
   if (lastA){
     $('#hs-debt').innerHTML = `${lastA.year}년 <b>${fmt(lastA.debt_ratio,'%')}%</b>${lastA.ind_debt_ratio?` · 업종 ${fmt(lastA.ind_debt_ratio,'%')}% (${(lastA.debt_ratio/lastA.ind_debt_ratio).toFixed(1)}배)`:''}`;
     $('#hs-icr').innerHTML = lastA.icr!=null ? `${lastA.year}년 <b>${lastA.icr.toFixed(2)}배</b>${lastA.ind_icr!=null?` · 업종 ${lastA.ind_icr.toFixed(2)}배`:''} · 1배 미만 = 영업이익으로 이자를 다 못 냄` : esc(lastA.icr_why||'');
     $('#hs-nd').innerHTML = lastA.net_debt!=null ? `${lastA.year}년 <b>${fmt(lastA.net_debt,'억원')}억원</b> · 0보다 크면 빚이 현금보다 많음` : esc(lastA.net_debt_why||'');
+    const firstC = rows.find(r=>r.cash_only!=null), cashRows = rows.filter(r=>r.kind==='실적' && r.cash_only!=null);
+    let streak = 0; for (let i = cashRows.length-1; i>0 && cashRows[i].cash_only < cashRows[i-1].cash_only; i--) streak++;
+    $('#hs-cash').innerHTML = lastA.cash_only!=null ? `${lastA.year}년말 <b>${fmt(lastA.cash_only,'억원')}억원</b>${lastA.cash_chg!=null?` (전년 대비 ${lastA.cash_chg>=0?'+':''}${fmt(lastA.cash_chg,'억원')}억원)`:''}${streak>=2?` · <b style="color:var(--bad)">${streak}년 연속 감소</b>`:''}${sameCash?' · 단기금융상품 없음(두 값 같음)':''}` : '현금 자료 없음';
+    $('#hs-cf').innerHTML = lastA.cfo!=null ? `${lastA.year}년: 영업 ${lastA.cfo>=0?'+':''}${fmt(lastA.cfo,'억원')} · 투자 ${lastA.cfi>=0?'+':''}${fmt(lastA.cfi,'억원')} · 재무 ${lastA.cff>=0?'+':''}${fmt(lastA.cff,'억원')} → 순증감 <b>${lastA.cash_chg>=0?'+':''}${fmt(lastA.cash_chg,'억원')}억원</b> · 영업이 마이너스면 본업에서 현금이 빠져나간 것, 재무가 플러스면 차입·증자로 채운 것` : '현금흐름표 자료 없음';
   }
-  $('#htable').innerHTML = '<tr><th>연도</th><th class="l">구분</th><th>부채비율</th><th>업종 평균</th><th>업종 대비</th><th>이자보상배율</th><th>업종 평균</th><th>영업이익(억)</th><th>이자지급(억)</th><th>순차입금(억)</th><th class="l">메모</th></tr>' +
+  $('#htable').innerHTML = '<tr><th>연도</th><th class="l">구분</th><th>부채비율</th><th>업종 평균</th><th>업종 대비</th><th>이자보상배율</th><th>업종 평균</th><th>영업이익(억)</th><th>이자지급(억)</th><th>순차입금(억)</th><th>현금(억)</th><th>현금 증감(억)</th><th>영업CF(억)</th><th>투자CF(억)</th><th>재무CF(억)</th><th class="l">메모</th></tr>' +
     rows.map(r=>`<tr><td>${r.year}</td><td class="l">${esc(r.kind)}</td><td>${r.debt_ratio==null?'–':fmt(r.debt_ratio,'%')+'%'}</td><td>${r.ind_debt_ratio==null?'–':fmt(r.ind_debt_ratio,'%')+'%'}</td><td>${r.debt_ratio!=null&&r.ind_debt_ratio?(r.debt_ratio/r.ind_debt_ratio).toFixed(2)+'배':'–'}</td>`+
-      `<td style="${r.icr!=null&&r.icr<1?'color:var(--bad);font-weight:600':''}">${r.icr==null?'–':r.icr.toFixed(2)+'배'}</td><td>${r.ind_icr==null?'–':r.ind_icr.toFixed(2)+'배'}</td><td>${r.op==null?'–':fmt(r.op/1e8,'억원')}</td><td>${r.interest==null?'–':fmt(r.interest/1e8,'억원')}</td><td>${r.net_debt==null?'–':fmt(r.net_debt,'억원')}</td>`+
-      `<td class="l" style="white-space:normal">${esc([r.icr_why, r.net_debt_why].filter(Boolean).join(' / '))}</td></tr>`).join('');
-  $('#hsrc').innerHTML = `회사 값: DART 연결재무제표로 계산. 부채비율 = 부채총계 ÷ 자본총계, 이자보상배율 = 영업이익 ÷ 이자지급(현금흐름표, 영업·재무활동 분류 합계), 순차입금 = 차입금·사채·리스부채 − 현금·단기금융상품. 업종 평균: ${esc(ind.source||'')} · 한국은행 이자보상비율은 손익계산서의 이자비용 기준이라 회사 값(현금 이자지급 기준)과 정의가 조금 다릅니다. 업종 평균은 가장 최근 공표 연도까지만 있습니다.`;
+      `<td style="${r.icr!=null&&r.icr<1?'color:var(--bad);font-weight:600':''}">${r.icr==null?'–':r.icr.toFixed(2)+'배'}</td><td>${r.ind_icr==null?'–':r.ind_icr.toFixed(2)+'배'}</td><td>${r.op==null?'–':fmt(r.op/1e8,'억원')}</td><td>${r.interest==null?'–':fmt(r.interest/1e8,'억원')}</td><td>${r.net_debt==null?'–':fmt(r.net_debt,'억원')}</td><td>${r.cash_only==null?'–':fmt(r.cash_only,'억원')}</td><td style="${r.cash_chg!=null&&r.cash_chg<0?'color:var(--bad)':''}">${r.cash_chg==null?'–':(r.cash_chg>=0?'+':'')+fmt(r.cash_chg,'억원')}</td><td>${r.cfo==null?'–':fmt(r.cfo,'억원')}</td><td>${r.cfi==null?'–':fmt(r.cfi,'억원')}</td><td>${r.cff==null?'–':fmt(r.cff,'억원')}</td>`+
+      `<td class="l" style="white-space:normal">${esc([r.icr_why, r.net_debt_why, r.flow_basis?('현금흐름 '+r.flow_basis):null].filter(Boolean).join(' / '))}</td></tr>`).join('');
+  $('#hsrc').innerHTML = `회사 값: DART 연결재무제표로 계산. 부채비율 = 부채총계 ÷ 자본총계, 이자보상배율 = 영업이익 ÷ 이자지급(현금흐름표, 영업·재무활동 분류 합계), 순차입금 = 차입금·사채·리스부채 − 현금·단기금융상품. 현금 = 재무상태표 현금및현금성자산, 현금 증감 원인 = 현금흐름표 영업·투자·재무활동 현금흐름과 환율변동효과(합계가 잔액 증감과 다르면 '기타·차이'로 표시). 업종 평균: ${esc(ind.source||'')} · 한국은행 이자보상비율은 손익계산서의 이자비용 기준이라 회사 값(현금 이자지급 기준)과 정의가 조금 다릅니다. 업종 평균은 가장 최근 공표 연도까지만 있습니다.`;
 }
 
 
