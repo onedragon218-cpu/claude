@@ -216,14 +216,24 @@ def get_json(path, **params):
     return d
 
 
-def corp_code(stock_code):
-    """종목코드 → DART 고유번호. 전체 목록을 한 번 받아 data/corp_codes.json 에 저장해 두고 재사용."""
+def corp_list(refresh_days=30, allow_download=True):
+    """상장사 전체 목록 {종목코드: {corp_code, name}}. data/corp_codes.json 에 저장해 두고,
+    30일이 지났거나 없으면(키가 있을 때) 다시 받는다. 키가 없으면 저장본만 쓴다."""
+    import time
     cache = os.path.join(config.DATA_DIR, "corp_codes.json")
-    if os.path.exists(cache):
-        m = json.load(open(cache, encoding="utf-8"))
-        if stock_code in m:
-            return m[stock_code]
-    raw = _get("corpCode.xml")
+    fresh = os.path.exists(cache) and (time.time() - os.path.getmtime(cache)) < refresh_days * 86400
+    if os.path.exists(cache) and (fresh or not allow_download or not has_key()):
+        with open(cache, encoding="utf-8") as f:
+            return json.load(f)
+    if not has_key():
+        return {}
+    try:
+        raw = _get("corpCode.xml")
+    except DartUnavailable:
+        if os.path.exists(cache):
+            with open(cache, encoding="utf-8") as f:
+                return json.load(f)
+        raise
     z = zipfile.ZipFile(io.BytesIO(raw))
     xml = z.read(z.namelist()[0]).decode("utf-8")
     m = {}
@@ -233,7 +243,16 @@ def corp_code(stock_code):
             m[sc.group(1)] = {"corp_code": re.search(r"<corp_code>(\d+)</corp_code>", blk).group(1),
                               "name": re.search(r"<corp_name>(.*?)</corp_name>", blk).group(1).strip()}
     os.makedirs(os.path.dirname(cache), exist_ok=True)
-    json.dump(m, open(cache, "w", encoding="utf-8"), ensure_ascii=False)
+    with open(cache, "w", encoding="utf-8") as f:
+        json.dump(m, f, ensure_ascii=False)
+    return m
+
+
+def corp_code(stock_code):
+    """종목코드 → DART 고유번호."""
+    m = corp_list()
+    if stock_code not in m:
+        m = corp_list(refresh_days=0)      # 신규 상장일 수 있으니 한 번 새로 받아 본다
     if stock_code not in m:
         raise DartUnavailable(f"{stock_code}: DART 고유번호를 찾지 못했습니다.")
     return m[stock_code]

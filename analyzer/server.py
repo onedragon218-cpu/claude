@@ -1,9 +1,10 @@
 """표준 라이브러리만 쓰는 로컬 웹 서버.  python -m analyzer serve  →  http://localhost:8765"""
 import json
+import os
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import db, pipeline, report
+from . import config, db, pipeline, report
 
 
 class H(BaseHTTPRequestHandler):
@@ -21,6 +22,10 @@ class H(BaseHTTPRequestHandler):
         by = int(q["base_year"][0]) if q.get("base_year") else None
         conn = db.connect()
         try:
+            if u.path == "/api/search":
+                from . import search
+                res = search.search(conn, q.get("q", [""])[0], limit=12)
+                return self._send(200, json.dumps(res, ensure_ascii=False), "application/json")
             if u.path.startswith("/company/"):
                 code = u.path.split("/")[2]
                 return self._send(200, report.render(report.payload(conn, code, by)))
@@ -39,11 +44,22 @@ class H(BaseHTTPRequestHandler):
         if u.path != "/api/analyze":
             return self._send(404, "not found")
         try:
-            from .__main__ import resolve
+            from . import search
             conn = db.connect()
-            code = resolve(conn, q.get("code", [""])[0])
+            try:
+                code = search.resolve(conn, q.get("code", [""])[0])
+            except search.Ambiguous as e:
+                conn.close()
+                return self._send(200, json.dumps({"error": str(e), "candidates": e.cands}, ensure_ascii=False),
+                                  "application/json")
+            except LookupError as e:
+                conn.close()
+                return self._send(200, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
             by = int(q["base_year"][0]) if q.get("base_year") else None
             res = pipeline.analyze(code, by, conn=conn)
+            # 저장된 화면 파일도 함께 갱신(바로가기·목록 클릭용)
+            report.render(report.payload(conn, code, by, last_run=res["stats"]),
+                          os.path.join(config.OUTPUT_DIR, f"{code}.html"))
             conn.close()
             self._send(200, json.dumps({"code": code, "stats": res["stats"]}, ensure_ascii=False), "application/json")
         except SystemExit as e:

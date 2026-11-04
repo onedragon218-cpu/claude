@@ -109,6 +109,7 @@ $batTxt = (Get-Content (Join-Path $PSScriptRoot 'run_now.bat') -Raw).Replace('%~
 Write-Host '[5/5] 첫 수집을 실행합니다(빠진 값만 받습니다)...' -ForegroundColor Cyan
 Push-Location $Root
 try { & $py -m analyzer update-all } finally { Pop-Location }
+Stop-Server            # 이전 버전 서버가 떠 있으면 끄고 새 코드로 다시 시작
 Start-Server $py
 Start-Process $Url
 Write-Host ''

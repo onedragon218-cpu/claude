@@ -17,18 +17,11 @@ from . import config, db, pipeline, report
 
 
 def resolve(conn, q):
-    q = q.strip()
-    if q.isdigit() and len(q) == 6:
-        return q
-    r = conn.execute("SELECT stock_code FROM companies WHERE name LIKE ?", (f"%{q}%",)).fetchone()
-    if r:
-        return r["stock_code"]
-    cache = os.path.join(config.DATA_DIR, "corp_codes.json")
-    if os.path.exists(cache):
-        for code, v in json.load(open(cache, encoding="utf-8")).items():
-            if q in v["name"]:
-                return code
-    raise SystemExit(f"'{q}'에 해당하는 종목을 찾지 못했습니다. 6자리 종목코드로 입력하세요.")
+    from . import search
+    try:
+        return search.resolve(conn, q)
+    except (LookupError, search.Ambiguous) as e:
+        raise SystemExit(str(e))
 
 
 def do_analyze(code, base_year=None, offline=False, quiet=False):

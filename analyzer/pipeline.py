@@ -12,7 +12,7 @@ import re
 import statistics
 
 from . import config, db
-from .collectors import dart, fnguide, manual, prices
+from .collectors import dart, fnguide, manual, naver, prices
 
 CORE_ACC = ["acc_revenue", "acc_op", "acc_ni_owner", "acc_eq_owner", "acc_eq", "acc_liab", "acc_eps_basic"]
 ACC_UNIT = {k: ("원" if k != "acc_eps_basic" else "원/주") for k in dart.ALL_KEYS}
@@ -221,9 +221,9 @@ def plan(conn, code, P):
         "SELECT DISTINCT period FROM facts WHERE stock_code=? AND fiscal_year=? AND period IN ('Q1','H1','Q3') "
         "AND is_current=1", (code, cur))]
     need["interim"] = "Q3" not in have_interim
-    need["asof_price"] = not db.fetched_recently(conn, "price", f"{code}:asof", config.TTL_DAYS["price_asof"]) and \
+    need["asof_price"] = not db.fetched_recently(conn, "price", f"{code}:asof", config.TTL_DAYS["price_asof"], ok_only=True) and \
         _asof_age(conn, code, cur) != 0
-    need["consensus"] = not db.fetched_recently(conn, "consensus", code, config.TTL_DAYS["consensus"])
+    need["consensus"] = not db.fetched_recently(conn, "consensus", code, config.TTL_DAYS["consensus"], ok_only=True)
     return need
 
 
@@ -336,16 +336,28 @@ def collect(conn, code, P, stats, offline=False):
             db.log_fetch(conn, "price", f"{code}:asof", code, False, 0, str(e))
             stats.notes.append(f"주가 미확보: {e}")
 
-    # 6) 컨센서스(7일에 1번, 시점별로 새 스냅숏 추가)
+    # 6) 컨센서스: OpenDART에는 컨센서스가 없다. FnGuide(최대 3년) → 실패하면 네이버 금융(보통 1~2년) 순서로 시도.
+    #    성공한 뒤 7일 동안은 다시 받지 않고, 실패하면 다음 실행 때 다시 시도한다. 시점별로 새 스냅숏을 쌓는다.
     if need["consensus"]:
-        try:
-            stats.req("FnGuide")
-            url, items = fnguide.fetch(code)
-            n = ingest_consensus(conn, code, items, "FnGuide", db.today(), url)
-            db.log_fetch(conn, "consensus", code, code, True, n)
-        except fnguide.ConsensusUnavailable as e:
-            db.log_fetch(conn, "consensus", code, code, False, 0, str(e))
-            stats.notes.append(f"컨센서스 미확보: {e}")
+        got, errs = 0, []
+        for name, mod in (("FnGuide", fnguide), ("Naver", naver)):
+            try:
+                stats.req(name)
+                url, items = mod.fetch(code)
+                if not items:
+                    raise mod.ConsensusUnavailable("표는 읽었지만 추정치(E) 열이 없음")
+                n = ingest_consensus(conn, code, items, name, db.today(), url)
+                db.log_fetch(conn, "consensus_src", f"{code}:{name}", code, True, len(items), f"새 {n}건")
+                got += len(items)
+                stats.notes.append(f"컨센서스 {name}: {len(items)}건(새로 저장 {n}건, 대상 연도 "
+                                   f"{sorted({i['target_year'] for i in items})})")
+                break
+            except mod.ConsensusUnavailable as e:
+                errs.append(f"{name}: {e}")
+                db.log_fetch(conn, "consensus_src", f"{code}:{name}", code, False, 0, str(e))
+        db.log_fetch(conn, "consensus", code, code, got > 0, got, "; ".join(errs) or None)
+        if not got:
+            stats.notes.append("컨센서스 미확보(다음 실행 때 다시 시도): " + " / ".join(errs))
     return need
 
 

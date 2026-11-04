@@ -51,3 +51,11 @@ function Start-Server([string]$python) {
     }
     for ($i = 0; $i -lt 20 -and -not (Test-Server); $i++) { Start-Sleep -Milliseconds 300 }
 }
+
+function Stop-Server {
+    # 새 버전 코드를 읽도록 실행 중인 화면 서버를 끈다
+    Get-CimInstance Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*analyzer serve*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Milliseconds 500
+}

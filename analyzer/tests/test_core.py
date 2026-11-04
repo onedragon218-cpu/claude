@@ -104,6 +104,34 @@ class T(unittest.TestCase):
         self.assertIn((2025, "acc_int_paid_fin"), keys)
         self.assertNotIn((2025, "acc_int_paid"), keys)    # 재무활동 이자를 영업활동으로 세지 않음
 
+    def test_search_by_name(self):
+        from analyzer import search
+        pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
+        db.ensure_company(self.conn, "213500", "한솔제지")
+        self.assertEqual(search.resolve(self.conn, "한솔제지"), "213500")
+        self.assertEqual(search.resolve(self.conn, " 한솔 제지 "), "213500")
+        self.assertEqual(search.resolve(self.conn, "213500"), "213500")
+
+    def test_naver_parser(self):
+        from analyzer.collectors import naver
+        page = """<div class="section cop_analysis"><table class="tb_type1 tb_num tb_info"><thead>
+        <tr><th rowspan="3">주요재무정보</th><th colspan="4">최근 연간 실적</th><th colspan="6">최근 분기 실적</th></tr>
+        <tr><th>2023.12</th><th>2024.12</th><th>2025.12</th><th>2026.12<em>(E)</em></th>
+            <th>2025.06</th><th>2025.09</th><th>2025.12</th><th>2026.03</th><th>2026.06</th><th>2026.09<em>(E)</em></th></tr>
+        <tr><th>IFRS연결</th></tr></thead><tbody>
+        <tr><th><strong>매출액</strong></th><td>21,941</td><td>22,158</td><td>22,900</td><td>23,600</td><td>5,7</td><td>1</td><td>1</td><td>1</td><td>1</td><td>9,999</td></tr>
+        <tr><th>ROE(지배주주)</th><td>0.2</td><td>-4.3</td><td>0.6</td><td>5.1</td><td></td><td></td><td></td><td></td><td></td><td>1</td></tr>
+        <tr><th>EPS(원)</th><td>74</td><td>-1,278</td><td>163</td><td>1,520</td><td></td><td></td><td></td><td></td><td></td><td>1</td></tr>
+        </tbody></table></div>"""
+        got = {(o["target_year"], o["metric"], o["value"]) for o in naver.parse(page)}
+        self.assertEqual(got, {(2026, "revenue", 23600.0), (2026, "roe", 5.1), (2026, "eps", 1520.0)})
+
+    def test_failed_consensus_is_retried(self):
+        db.log_fetch(self.conn, "consensus", "213500", "213500", False, 0, "blocked")
+        self.assertFalse(db.fetched_recently(self.conn, "consensus", "213500", 7, ok_only=True))
+        db.log_fetch(self.conn, "consensus", "213500", "213500", True, 5)
+        self.assertTrue(db.fetched_recently(self.conn, "consensus", "213500", 7, ok_only=True))
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>

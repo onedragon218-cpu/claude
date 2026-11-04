@@ -75,6 +75,12 @@ td.est{font-style:italic;color:var(--text-secondary)}
 .dash{display:inline-block;width:22px;border-top:2px dashed var(--text-secondary);vertical-align:middle}
 .solid{display:inline-block;width:22px;border-top:2px solid var(--text-secondary);vertical-align:middle}
 .detail{margin-top:12px}
+.suggest{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.suggest button{font:inherit;font-size:13px;border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);border-radius:999px;padding:4px 10px;cursor:pointer}
+.suggest button .muted{margin-left:4px}
+tr.clickrow{cursor:pointer} tr.clickrow:hover td{background:var(--surface-2)}
+tr.clickrow.cur td{font-weight:600}
+a.plain{color:inherit;text-decoration:none} a.plain:hover{text-decoration:underline}
 .subtabs{display:flex;gap:0;flex-wrap:wrap;border-bottom:1px solid var(--border);margin:10px 0 4px}
 .subtabs button{font:inherit;font-size:14px;background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .subtabs button.on{color:var(--text-primary);border-bottom-color:var(--text-primary);font-weight:600}
@@ -106,11 +112,12 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <div class="card">
     <h2>기업 검색과 분석 실행</h2>
     <div class="row">
-      <label>종목코드 또는 기업명<input id="q" placeholder="예: 213500" list="complist"></label>
+      <label>종목코드 또는 종목명<input id="q" placeholder="예: 213500 또는 한솔제지" list="complist" autocomplete="off"></label>
       <datalist id="complist"></datalist>
       <label>기준 연도<input id="by" type="number" min="2000" max="2100" style="width:110px"></label>
       <button class="primary" id="run">분석 실행</button>
     </div>
+    <div id="suggest" class="suggest"></div>
     <p class="muted" id="runhint"></p>
     <div id="runresult"></div>
   </div>
@@ -204,6 +211,8 @@ const ACC = D.accounts;
 let BY = D.periods.base_year;
 const visible = new Set(MET.map(m=>m.key));
 const charts = {};
+const SERVED = location.protocol.startsWith('http') && !location.hostname.endsWith('claude.ai');
+const companyUrl = code => SERVED ? `/company/${code}?base_year=${BY}` : `${code}.html`;
 let CTAB = (()=>{ try{ return localStorage.getItem('ctab')||'norm'; }catch(e){ return 'norm'; } })();   // 통합 그래프 탭: 'norm' = 표준화 비교, 그 밖에는 지표 키(원데이터)
 
 const fmt = (v, u) => {
@@ -303,7 +312,7 @@ function renderCombo(){
 
 // ---- 통합 그래프 탭: 표준화 비교 ↔ 지표별 원데이터 ----
 function renderCTabs(){
-  const tabs = [{k:'norm', name:'표준화 비교', c:null}].concat(MET.map((m,i)=>({k:m.key, name:m.name, c:COLORS[i]})));
+  const tabs = [{k:'norm', name:'표준화 비교', c:null}, {k:'rawall', name:'원데이터 중첩', c:null}].concat(MET.map((m,i)=>({k:m.key, name:m.name, c:COLORS[i]})));
   $('#ctabs').innerHTML = tabs.map(t=>`<button role="tab" aria-selected="${CTAB===t.k}" class="${CTAB===t.k?'on':''}" data-k="${t.k}">${t.c?`<span class="sw" style="background:var(${t.c})"></span>`:''}${t.name}</button>`).join('');
   $('#ctabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ CTAB=b.dataset.k; try{localStorage.setItem('ctab',CTAB)}catch(e){} renderC(); });
 }
@@ -314,10 +323,49 @@ function setCMode(raw){
   $('#rawtablecard').style.display = raw?'':'none';
 }
 function renderC(){
-  if (CTAB!=='norm' && !MNAME[CTAB]) CTAB='norm';
+  if (CTAB!=='norm' && CTAB!=='rawall' && !MNAME[CTAB]) CTAB='norm';
   renderCTabs();
   if (CTAB==='norm'){ $('#ctitle').textContent='7개 지표 통합 추이(표준화)'; renderCombo(); }
+  else if (CTAB==='rawall') renderRawAll();
   else renderRaw(CTAB);
+}
+
+// 원데이터 중첩: 표준화하지 않고 실제 단위 그대로 겹친다. 단위가 달라 축을 단위별로 나눈다(억원·원 왼쪽, % 오른쪽).
+const UNIT_AXIS = {'억원':'y_eok', '원':'y_won', '%':'y_pct'};
+const rawVisible = new Set(['revenue','market_cap','op_margin','roe','debt_ratio']);
+function renderRawAll(){
+  setCMode(false);
+  $('#normcard').style.display='none';
+  $('#ctitle').textContent = '7개 지표 원데이터 중첩(실제 단위)';
+  $('#normnote').textContent = '표준화하지 않은 실제 값을 겹쳤습니다. 단위가 달라 축을 나눴습니다: 억원(매출액·시가총액)과 원(EPS·BPS)은 왼쪽, %(영업이익률·ROE·부채비율)는 오른쪽. 값을 비교할 때는 같은 축끼리만 비교하세요. 아래 단추로 지표를 켜고 끕니다.';
+  $('#toggles').innerHTML = MET.map((m,i)=>`<span class="tg ${rawVisible.has(m.key)?'':'off'}" data-k="${m.key}" role="button" aria-pressed="${rawVisible.has(m.key)}"><span class="sw" style="background:var(${COLORS[i]})"></span>${m.name} <span class="muted">${m.unit}</span></span>`).join('') +
+    '<span class="tg" data-k="__all">모두 보기</span><span class="tg" data-k="__none">모두 끄기</span>';
+  document.querySelectorAll('#toggles .tg').forEach(el=>el.onclick=()=>{
+    const k = el.dataset.k;
+    if (k==='__all') MET.forEach(m=>rawVisible.add(m.key)); else if (k==='__none') rawVisible.clear();
+    else rawVisible.has(k)? rawVisible.delete(k) : rawVisible.add(k);
+    renderRawAll();
+  });
+  const ys = yearsFor(BY);
+  const ds = MET.map((m,i)=>{ const pts = ys.map(y=>pick(m,y,BY)); const c = css(COLORS[i]);
+    return {label:`${m.name}(${m.unit})`, key:m.key, unit:m.unit, yAxisID:UNIT_AXIS[m.unit], data:pts.map(p=>p?p.v:null), _pts:pts,
+      borderColor:c, backgroundColor:c, borderWidth:2, pointRadius:3.5, pointHoverRadius:6,
+      pointBackgroundColor: pts.map(p=>p&&isEst(p)?css('--surface-1'):c), segment:segDash(pts), hidden:!rawVisible.has(m.key), tension:0}; });
+  const used = new Set(ds.filter(d=>!d.hidden).map(d=>d.yAxisID));
+  const o = baseOpts();
+  delete o.scales.y;
+  const ax = (id, pos, title, fmtU, grid) => ({type:'linear', position:pos, display:used.has(id), grid:{color:css('--grid'), drawOnChartArea:grid},
+    border:{display:false}, title:{display:true, text:title, color:css('--text-secondary')}, ticks:{color:css('--text-secondary'), callback:v=>fmt(v,fmtU)}});
+  o.scales.y_eok = ax('y_eok','left','억원', '억원', true);
+  o.scales.y_won = ax('y_won','left','원', '원', !used.has('y_eok'));
+  o.scales.y_pct = ax('y_pct','right','%', '%', !used.has('y_eok') && !used.has('y_won'));
+  o.plugins.tooltip.callbacks = {label: ctx => { const p = ctx.dataset._pts[ctx.dataIndex]; if(!p) return null;
+    const m = MET.find(x=>x.key===ctx.dataset.key); const r = yoy(m, ys[ctx.dataIndex], BY);
+    return `${m.name}: ${fmt(p.v,m.unit)} ${m.unit} (${p.kind})${r?' · 전년 대비 '+yoyText(r):''}`; }};
+  o.onClick = (e, els, chart) => { const x = chart.scales.x.getValueForPixel(e.x); if (x!=null) showDetail(ys[Math.round(x)]); };
+  if (charts.combo) charts.combo.destroy();
+  charts.combo = new Chart($('#combo'), {type:'line', data:{labels:ys.map(y=> y>BY? y+'E' : y===BY? y+'(현재)': String(y)), datasets:ds}, options:o});
+  $('#rawsum').style.display='none'; $('#rawtablecard').style.display='none';
 }
 function renderRaw(key){
   setCMode(true);
@@ -413,10 +461,15 @@ function renderStatic(){
   $('#title').textContent = `${D.company.name} (${D.company.code})`;
   $('#subtitle').textContent = `기준 연도 ${BY} · 화면 생성 ${D.generated_at} · 마지막 수집 ${D.last_collect||'–'} · 마지막 검증 ${D.last_verify||'–'}`;
   $('#by').value = BY;
-  $('#complist').innerHTML = D.companies.map(c=>`<option value="${esc(c.stock_code)}">${esc(c.name||'')}</option>`).join('');
-  $('#comps').innerHTML = '<tr><th class="l">종목코드</th><th class="l">기업명</th><th>저장된 값</th><th class="l">마지막 수집일</th></tr>' +
-    D.companies.map(c=>`<tr><td class="l">${esc(c.stock_code)}</td><td class="l">${esc(c.name||'')}</td><td>${c.n}</td><td class="l">${esc(c.last||'–')}</td></tr>`).join('');
-  const served = location.protocol.startsWith('http') && !location.hostname.endsWith('claude.ai');
+  $('#complist').innerHTML = D.companies.map(c=>`<option value="${esc(c.name||c.stock_code)}">${esc(c.stock_code)}</option>`).join('');
+  $('#comps').innerHTML = '<tr><th class="l">종목코드</th><th class="l">기업명</th><th>저장된 값</th><th class="l">마지막 수집일</th><th class="l"></th></tr>' +
+    D.companies.map(c=>`<tr class="clickrow ${c.stock_code===D.company.code?'cur':''}" data-code="${esc(c.stock_code)}" tabindex="0" title="눌러서 이 기업 보기"><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.stock_code)}</a></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.name||'')}</a></td><td>${c.n}</td><td class="l">${esc(c.last||'–')}</td><td class="l">${c.stock_code===D.company.code?'보는 중':'열기 →'}</td></tr>`).join('');
+  document.querySelectorAll('#comps tr.clickrow').forEach(tr=>{
+    const go = ()=>{ location.href = companyUrl(tr.dataset.code); };
+    tr.onclick = e => { if (e.target.tagName!=='A') go(); };
+    tr.onkeydown = e => { if (e.key==='Enter') go(); };
+  });
+  const served = SERVED;
   $('#runhint').innerHTML = served ? '분석 실행을 누르면 DB에 없는 자료만 수집한 뒤 화면을 다시 만듭니다.' :
     '이 파일은 저장된 결과 화면입니다. 기준 연도는 여기서 바로 바꿀 수 있고, 새 종목 분석은 터미널에서 <code>python -m analyzer analyze 종목코드</code> 또는 <code>python -m analyzer serve</code> 후 이 화면에서 실행하세요.';
   const lr = D.last_run;
@@ -455,7 +508,8 @@ const V = D.valuation || {rows:[], assumptions:{}};
 const VROWS = V.rows || [];
 const VMETH = [['price','주가','--text-primary'],['srim','S-RIM','--s1'],['dcf','DCF(FCFF)','--s2'],['per','PER 가치','--s3'],['pbr','PBR 가치','--s4'],['psr','PSR 가치','--s5'],['median','종합(중앙값)','--s7']];
 const gVisible = new Set(VMETH.map(m=>m[0]));
-let GTAB = (()=>{ try{ return localStorage.getItem('gtab')||'value'; }catch(e){ return 'value'; } })();
+let GTAB = (()=>{ try{ return localStorage.getItem('gtab')||'all'; }catch(e){ return 'all'; } })();
+const allVisible = new Set(['price','srim','dcf','median','roic','wacc']);
 const pct = (x,d=1) => x==null? '–' : (x*100).toFixed(d)+'%';
 const won = x => x==null? '–' : Math.round(x).toLocaleString('ko-KR');
 const eok = x => x==null? '–' : Math.round(x/1e8).toLocaleString('ko-KR');
@@ -465,15 +519,16 @@ function vget(r,k){ return k==='price'? r.price : k==='median'? r.median : (r.va
 const vIsEst = r => r && !String(r.kind).startsWith('실적');
 
 function renderG(){
-  const tabs=[['value','주가 vs 주당가치'],['roic','ROIC vs WACC'],['table','계산 근거 표'],['assump','가정']];
+  const tabs=[['all','전체 중첩'],['value','주가 vs 주당가치'],['roic','ROIC vs WACC'],['table','계산 근거 표'],['assump','가정']];
   $('#gtabs').innerHTML = tabs.map(([k,n])=>`<button role="tab" aria-selected="${GTAB===k}" class="${GTAB===k?'on':''}" data-k="${k}">${n}</button>`).join('');
   $('#gtabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ GTAB=b.dataset.k; try{localStorage.setItem('gtab',GTAB)}catch(e){} renderG(); });
-  $('#gpanel-chart').style.display = (GTAB==='value'||GTAB==='roic')?'':'none';
+  $('#gpanel-chart').style.display = (GTAB==='value'||GTAB==='roic'||GTAB==='all')?'':'none';
   $('#gpanel-table').style.display = GTAB==='table'?'':'none';
   $('#gpanel-assump').style.display = GTAB==='assump'?'':'none';
   const byNote = V.base_year!==BY ? ` (가치평가는 기준 연도 ${V.base_year}로 계산됨. 바꾸려면 기준 연도를 넣고 다시 실행)` : '';
   if (!VROWS.length){ $('#gnote').textContent='가치평가 결과가 없습니다.'; return; }
-  if (GTAB==='value') renderGValue(byNote);
+  if (GTAB==='all') renderGAll(byNote);
+  else if (GTAB==='value') renderGValue(byNote);
   else if (GTAB==='roic') renderGRoic(byNote);
   else if (GTAB==='table') renderGTable(byNote);
   else renderGAssump();
@@ -508,6 +563,57 @@ function renderGValue(byNote){
   const last = [...VROWS].reverse().find(r=>r.price && r.median);
   $('#gsum').innerHTML = last ? `<span>${last.year} ${String(last.kind).startsWith('현재')?'기준일':'연말'} 주가 <b>${won(last.price)}원</b></span><span>종합 주당가치 <b>${won(last.median)}원</b></span><span>괴리율 <b>${last.gap>=0?'+':''}${pct(last.gap,0)}</b> ${last.gap>=0?'(가치가 주가보다 높음)':'(주가가 가치보다 높음)'}</span>` : '<span>종합 주당가치를 낼 수 있는 연도가 없습니다.</span>';
   $('#glegend').innerHTML = '<span><span class="solid"></span> 실적 기준</span><span><span class="dash"></span> 현재·전망</span><span>값이 0 이하이거나 계산할 수 없는 연도는 점을 찍지 않음</span><span>⚠ 가정에 따라 크게 달라지는 추정값입니다. G-가정 탭과 계산 메모를 함께 보세요.</span>';
+}
+
+// 전체 중첩: 주가·S-RIM·DCF·상대가치·종합(원, 왼쪽 축) + ROIC·WACC·Ke(%, 오른쪽 축). ROIC−WACC 차이를 색칠
+function renderGAll(byNote){
+  $('#gtitle').textContent='가치평가 전체 중첩: 주당가치 + ROIC·WACC';
+  $('#gnote').textContent='왼쪽 축(원/주): 주가와 S-RIM·DCF·PER·PBR·PSR 가치·종합. 오른쪽 축(%): ROIC·WACC·Ke. ROIC가 WACC보다 높으면 초록, 낮으면 빨강으로 칠합니다. 두 축의 눈금은 서로 관계가 없으니, 선이 교차하는 위치로 판단하지 마세요.'+byNote;
+  $('#gtoggles').style.display=''; $('#glogrow').style.display='';
+  const items = VMETH.map(([k,n,c])=>({k,n,c,axis:'y'})).concat([
+    {k:'roic',n:'ROIC(%)',c:'--s1',axis:'y_pct'},{k:'wacc',n:'WACC(%)',c:'--s2',axis:'y_pct'},{k:'ke',n:'Ke(%)',c:'--text-muted',axis:'y_pct'}]);
+  $('#gtoggles').innerHTML = items.map(it=>`<span class="tg ${allVisible.has(it.k)?'':'off'}" data-k="${it.k}" role="button" aria-pressed="${allVisible.has(it.k)}"><span class="sw" style="background:var(${it.c})${it.axis==='y_pct'?';height:0;border-top:2px dashed var('+it.c+')':''}"></span>${it.n}</span>`).join('') +
+    '<span class="tg" data-k="__all">모두 보기</span>';
+  $('#gtoggles').querySelectorAll('.tg').forEach(el=>el.onclick=()=>{ const k=el.dataset.k;
+    if (k==='__all') items.forEach(it=>allVisible.add(it.k)); else allVisible.has(k)?allVisible.delete(k):allVisible.add(k); renderGAll(byNote); });
+  const rows = VROWS;
+  const labels = rows.map(r=> vIsEst(r)? (String(r.kind).startsWith('현재')? r.year+'(현재)' : r.year+'E') : String(r.year));
+  const dash = {borderDash: ctx => (vIsEst(rows[ctx.p0DataIndex])||vIsEst(rows[ctx.p1DataIndex]))?[6,4]:undefined};
+  const ds = VMETH.map(([k,n,c])=>{ const col=css(c);
+    return {label:n, key:k, yAxisID:'y', data:rows.map(r=>{ const v=vget(r,k); return v!=null&&v>0?v:null; }),
+      borderColor:col, backgroundColor:col, borderWidth:k==='price'?3:(k==='median'?2.5:1.75), pointRadius:k==='median'?5:3,
+      pointStyle:k==='median'?'rectRot':'circle', pointBackgroundColor: rows.map(r=>vIsEst(r)?css('--surface-1'):col),
+      segment:dash, hidden:!allVisible.has(k), tension:0, order:2}; });
+  const pctv = k => rows.map(r=> r[k]==null? null : r[k]*100);
+  const iR = ds.length;
+  ds.push({label:'ROIC(%)', key:'roic', yAxisID:'y_pct', data:pctv('roic'), borderColor:css('--s1'), backgroundColor:css('--s1'), borderWidth:2,
+    borderDash:[2,3], pointRadius:3, pointStyle:'triangle', tension:0, hidden:!allVisible.has('roic'), order:1,
+    fill: allVisible.has('roic')&&allVisible.has('wacc') ? {target:iR+1, above:rgba('--good',0.16), below:rgba('--bad',0.16)} : false});
+  ds.push({label:'WACC(%)', key:'wacc', yAxisID:'y_pct', data:pctv('wacc'), borderColor:css('--s2'), backgroundColor:css('--s2'), borderWidth:2,
+    borderDash:[2,3], pointRadius:3, pointStyle:'triangle', tension:0, hidden:!allVisible.has('wacc'), order:1});
+  ds.push({label:'Ke(%)', key:'ke', yAxisID:'y_pct', data:pctv('ke'), borderColor:css('--text-muted'), backgroundColor:css('--text-muted'), borderWidth:1.25,
+    borderDash:[1,3], pointRadius:0, tension:0, hidden:!allVisible.has('ke'), order:1});
+  const usedL = ds.some(d=>d.yAxisID==='y' && !d.hidden), usedR = ds.some(d=>d.yAxisID==='y_pct' && !d.hidden);
+  if (!renderGAll._init){ renderGAll._init=true; const all = ds.filter(d=>d.yAxisID==='y'&&!d.hidden).flatMap(d=>d.data).filter(v=>v>0);
+    if (all.length && Math.max(...all)/Math.min(...all) > 8) $('#glog').checked = true; }
+  const o = baseOpts();
+  o.scales.y = Object.assign(o.scales.y, {type:$('#glog').checked?'logarithmic':'linear', position:'left', display:usedL,
+    title:{display:true, text:'원/주', color:css('--text-secondary')}, ticks:{color:css('--text-secondary'), callback:v=>won(v)}});
+  o.scales.y_pct = {type:'linear', position:'right', display:usedR, grid:{drawOnChartArea:!usedL, color:css('--grid')}, border:{display:false},
+    title:{display:true, text:'%', color:css('--text-secondary')}, ticks:{color:css('--text-secondary'), callback:v=>v.toFixed(0)+'%'}};
+  o.plugins.tooltip.callbacks = {label: ctx => { const v = ctx.parsed.y; if (v==null) return null; const r = rows[ctx.dataIndex];
+      if (ctx.dataset.yAxisID==='y_pct') return `${ctx.dataset.label}: ${v.toFixed(2)}%`;
+      const g = (ctx.dataset.key!=='price' && r.price) ? ` · 주가 대비 ${((v/r.price-1)*100).toFixed(0)}%` : '';
+      return `${ctx.dataset.label}: ${won(v)}원${g}`; },
+    afterBody: items => { const r = rows[items[0].dataIndex]; return r.spread!=null ? [`ROIC−WACC: ${(r.spread*100).toFixed(2)}%p ${r.spread>0?'(가치 창출)':'(가치 훼손)'}`] : []; }};
+  if (charts.g) charts.g.destroy();
+  charts.g = new Chart($('#gchart'), {type:'line', data:{labels, datasets:ds}, options:o});
+  $('#glog').onchange = ()=>renderGAll(byNote);
+  const last = [...rows].reverse().find(r=>r.price && r.median);
+  const lastR = [...rows].reverse().find(r=>r.spread!=null);
+  $('#gsum').innerHTML = (last ? `<span>${last.year} 주가 <b>${won(last.price)}원</b> · 종합 <b>${won(last.median)}원</b> (괴리율 ${last.gap>=0?'+':''}${pct(last.gap,0)})</span>` : '') +
+    (lastR ? `<span>${lastR.year} ROIC <b>${pct(lastR.roic,2)}</b> vs WACC <b>${pct(lastR.wacc,2)}</b> → ${lastR.spread>0?'가치 창출':'가치 훼손'}</span>` : '<span>ROIC·WACC 계산 가능한 연도 없음</span>');
+  $('#glegend').innerHTML = '<span><span class="solid"></span> 주당가치(원, 왼쪽 축)</span><span><span class="dash"></span> 현재·전망 구간</span><span>▲ 점선 = ROIC·WACC·Ke(%, 오른쪽 축)</span><span>초록 = ROIC>WACC, 빨강 = ROIC<WACC</span>';
 }
 
 function renderGRoic(byNote){
@@ -581,18 +687,44 @@ document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
 });
 $('#ffilter').onchange = renderFacts;
 $('#by').onchange = () => { const v = parseInt($('#by').value); if (v>1990 && v<2100){ BY=v; renderAll(); } };
-$('#run').onclick = async () => {
-  const q = $('#q').value.trim() || D.company.code; const by = parseInt($('#by').value) || BY;
-  if (!(location.protocol.startsWith('http') && !location.hostname.endsWith('claude.ai'))) {
-    $('#runresult').innerHTML = `<p>터미널에서 실행하세요: <code>python -m analyzer analyze ${esc(q)} --base-year ${by}</code></p>`; return; }
-  $('#runresult').textContent = '분석 중… (DB에 없는 자료만 수집합니다)';
+// ---- 기업 검색: 종목코드·종목명 모두 받음 ----
+function localSearch(q){
+  const nq = q.replace(/\s/g,'').toLowerCase();
+  return D.companies.filter(c => c.stock_code.startsWith(q) || (c.name||'').replace(/\s/g,'').toLowerCase().includes(nq))
+    .map(c=>({code:c.stock_code, name:c.name, in_db:true}));
+}
+function showSuggest(list, q){
+  if (!list.length){ $('#suggest').innerHTML = q ? `<span class="muted">'${esc(q)}' 검색 결과 없음${SERVED?'':' (저장된 화면에서는 DB에 있는 기업만 찾습니다)'}</span>` : ''; return; }
+  $('#suggest').innerHTML = list.map(c=>`<button type="button" data-code="${esc(c.code)}" data-name="${esc(c.name||'')}">${esc(c.name||'(이름 없음)')}<span class="muted">${esc(c.code)}${c.in_db?' · DB':''}</span></button>`).join('');
+  $('#suggest').querySelectorAll('button').forEach(b=>b.onclick=()=>{ $('#q').value = b.dataset.code; $('#q').dataset.name = b.dataset.name; runAnalyze(); });
+}
+let sTimer = null;
+$('#q').addEventListener('input', ()=>{
+  const q = $('#q').value.trim(); clearTimeout(sTimer);
+  if (!q){ showSuggest([], ''); return; }
+  sTimer = setTimeout(async ()=>{
+    if (!SERVED) return showSuggest(localSearch(q), q);
+    try { const r = await fetch('/api/search?q='+encodeURIComponent(q)); showSuggest(await r.json(), q); }
+    catch(e){ showSuggest(localSearch(q), q); }
+  }, 200);
+});
+$('#q').addEventListener('keydown', e=>{ if (e.key==='Enter') runAnalyze(); });
+async function runAnalyze(){
+  let q = $('#q').value.trim() || D.company.code; const by = parseInt($('#by').value) || BY;
+  if (!SERVED){
+    const hit = /^\d{6}$/.test(q) ? D.companies.find(c=>c.stock_code===q) : localSearch(q)[0];
+    if (hit && (hit.stock_code||hit.code)){ location.href = companyUrl(hit.stock_code||hit.code); return; }
+    $('#runresult').innerHTML = `<p>새 종목은 프로그램 화면(바탕화면 '재무분석 열기')에서 분석하거나, 터미널에서 실행하세요: <code>python -m analyzer analyze ${esc(q)} --base-year ${by}</code></p>`; return; }
+  $('#runresult').textContent = `분석 중… '${q}' (DB에 없는 자료만 수집합니다. 새 종목은 1~2분 걸릴 수 있습니다)`;
   try {
     const r = await fetch(`/api/analyze?code=${encodeURIComponent(q)}&base_year=${by}`, {method:'POST'});
     const j = await r.json();
+    if (j.candidates){ $('#runresult').textContent = '여러 종목이 해당됩니다. 아래에서 고르세요.'; showSuggest(j.candidates.map(c=>({code:c.code,name:c.name,in_db:c.in_db})), q); return; }
     if (j.error) throw new Error(j.error);
     location.href = `/company/${j.code}?base_year=${by}`;
   } catch(e){ $('#runresult').textContent = '실패: ' + e.message; }
-};
+}
+$('#run').onclick = runAnalyze;
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
 renderAll();
 </script>

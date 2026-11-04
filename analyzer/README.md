@@ -9,6 +9,7 @@
 
 ```bash
 python -m analyzer analyze 213500          # 한솔제지 분석 → data/output/213500.html
+python -m analyzer analyze 한솔제지         # 종목명도 됩니다(DART 키가 있으면 전체 상장사에서 찾음)
 python -m analyzer analyze 213500          # 다시 실행: 외부 요청 0건, 기존 값 재사용
 python -m analyzer analyze 005930 --base-year 2027   # 다른 종목, 기준 연도 변경
 python -m analyzer serve                   # http://localhost:8765 에서 화면 A~F 사용
@@ -25,7 +26,9 @@ python -m analyzer serve                   # http://localhost:8765 에서 화면
 | `python -m analyzer update-all` | DB의 모든 기업 갱신(자동 실행용) |
 | `python -m unittest discover -s analyzer/tests -t .` | 시험 10개 |
 
-화면 C(통합 그래프)는 위쪽 탭으로 **표준화 비교**와 **지표별 원데이터**(실제 단위 그래프, 연도별 표)를 오갈 수 있습니다. 마지막으로 고른 탭은 브라우저에 기억됩니다.
+화면 A: 종목코드·종목명 검색(입력하면 후보가 뜸), DB 기업 목록을 누르면 그 기업 화면으로 이동합니다.
+
+화면 C(통합 그래프): **표준화 비교**, **원데이터 중첩**(실제 단위, 억원·원은 왼쪽 축, %는 오른쪽 축), **지표별 원데이터**(지표 1개 그래프와 연도별 표)를 탭으로 오갈 수 있습니다. 마지막으로 고른 탭은 브라우저에 기억됩니다.
 
 ## 2-1. 윈도우11 PC에서 자동 실행
 
@@ -54,7 +57,7 @@ python -m analyzer serve                   # http://localhost:8765 에서 화면
 | 재무제표(연결) | OpenDART `fnlttSinglAcntAll` (키 필요) | 한솔제지·메디톡스 2016·2019·2022·2025 사업보고서 응답 원본(`analyzer/seed/`). 각 보고서의 당기·전기·전전기 열로 2014~2025년 계정을 채움. 한솔제지는 2026년 반기보고서 포함 |
 | 주식 수 | OpenDART `stockTotqySttus` (키 필요) | **미확보**. 키를 넣고 자동 수집을 돌리면 채워짐 |
 | 주가 | 네이버 차트(공개) / KIS | 2016~2025년 연말 종가와 2026-11-04 주가(KIS, 수정주가 아님) |
-| 컨센서스 | FnGuide 공개 화면 / CSV | **미확보**(FnGuide가 이 환경에서 오류 페이지로 응답) |
+| 컨센서스 | FnGuide 공개 화면(최대 3년) → 실패하면 네이버 금융 기업실적분석(보통 1~2년) / CSV | **OpenDART는 컨센서스를 제공하지 않음.** 실패하면 7일을 기다리지 않고 다음 실행 때 다시 시도 |
 | 한국거래소 | — | 정보데이터시스템이 로그인을 요구해서(응답 `LOGOUT`) 쓰지 않음. 접근 권한을 우회하지 않음 |
 
 ## 4. 저장 규칙(재수집 방지)
@@ -96,6 +99,7 @@ python -m analyzer serve                   # http://localhost:8765 에서 화면
 
 | 탭 | 내용 |
 |---|---|
+| 전체 중첩(기본) | 주가·S-RIM·DCF·PER·PBR·PSR 가치·종합(원, 왼쪽 축)과 ROIC·WACC·Ke(%, 오른쪽 축)를 한 그래프에 겹치고 ROIC−WACC 구간을 색칠 |
 | 주가 vs 주당가치 | 연말 주가(현재 연도는 기준일 주가) 위에 S-RIM, DCF(FCFF), PER·PBR·PSR 가치, 종합(중앙값)을 겹쳐 그림. 값 차이가 8배를 넘으면 처음부터 로그 축 |
 | ROIC vs WACC | 두 선을 겹치고 사이를 색칠(ROIC>WACC 초록 = 가치 창출, 반대 빨강 = 가치 훼손). 자기자본비용 Ke를 점선으로 함께 표시 |
 | 계산 근거 표 | 연도별 Rf, Ke, Kd, 세율, WACC, ROIC, NOPAT, 투하자본, FCFF, 차입금, 현금, 실제·적정 배수 |

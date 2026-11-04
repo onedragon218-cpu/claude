@@ -177,12 +177,15 @@ def add_consensus(conn, code, target_year, metric, value, provider, as_of, unit=
 
 
 def latest_consensus(conn, code):
-    """대상 연도·지표별로 가장 최근 기준일의 평균값."""
-    return conn.execute(
-        "SELECT c.* FROM consensus c JOIN (SELECT target_year, metric, MAX(as_of) m FROM consensus "
-        "WHERE stock_code=? AND broker='(평균)' GROUP BY target_year, metric) x "
-        "ON c.target_year=x.target_year AND c.metric=x.metric AND c.as_of=x.m "
-        "WHERE c.stock_code=? AND c.broker='(평균)'", (code, code)).fetchall()
+    """대상 연도·지표별로 가장 최근 기준일의 평균값. 같은 날 여러 출처면 직접 입력 > FnGuide > Naver 순."""
+    rank = {"manual": 0, "FnGuide": 1, "Naver": 2}
+    best = {}
+    for r in conn.execute("SELECT * FROM consensus WHERE stock_code=? AND broker='(평균)'", (code,)):
+        k = (r["target_year"], r["metric"])
+        key = (r["as_of"], -rank.get(r["provider"], 9))
+        if k not in best or key > best[k][0]:
+            best[k] = (key, r)
+    return [v[1] for v in best.values()]
 
 
 def log_fetch(conn, source, key, code, ok, n_items=0, note=None):
@@ -196,8 +199,13 @@ def last_fetch(conn, source, key):
                         (source, key)).fetchone()
 
 
-def fetched_recently(conn, source, key, ttl_days):
-    r = last_fetch(conn, source, key)
+def fetched_recently(conn, source, key, ttl_days, ok_only=False):
+    """ok_only=True면 '성공해서 값을 받은' 요청만 센다(실패는 다음 실행 때 다시 시도)."""
+    if ok_only:
+        r = conn.execute("SELECT * FROM fetch_log WHERE source=? AND key=? AND ok=1 AND n_items>0 "
+                         "ORDER BY id DESC LIMIT 1", (source, key)).fetchone()
+    else:
+        r = last_fetch(conn, source, key)
     if r is None:
         return False
     t = dt.datetime.fromisoformat(r["fetched_at"])
