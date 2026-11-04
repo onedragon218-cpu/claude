@@ -188,6 +188,30 @@ class T(unittest.TestCase):
         # 목록은 DB에 넣지 않는다(자동 수집 대상 아님)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0], 0)
 
+    def test_screener_exclusion_rules(self):
+        from analyzer import screener
+        cases = {("005930", "삼성전자"): None, ("005935", "삼성전자우"): "우선주·기타 종류주",
+                 ("00104K", "CJ4우(전환)"): "우선주·기타 종류주", ("0099X0", "IBKS제25호스팩"): "스팩",
+                 ("330590", "롯데리츠"): "리츠", ("088260", "이리츠코크렙"): "리츠",
+                 ("088980", "맥쿼리인프라"): "인프라펀드", ("415640", "KB발해인프라"): "인프라펀드",
+                 ("138040", "메리츠금융지주"): None, ("0126Z0", "삼성에피스홀딩스"): None,
+                 ("064550", "바이오인프라"): None}
+        for (code, name), want in cases.items():
+            self.assertEqual(screener.classify(code, name), want, name)
+
+    def test_krx_listing_parse(self):
+        from analyzer.collectors import krx
+        import unittest.mock as um, io
+        body = '{"block1":[{"full_code":"KR7213500002","short_code":"213500","codeName":"한솔제지","marketEngName":"KOSPI"}]}'
+        class R(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+        with um.patch("urllib.request.urlopen", return_value=R(body.encode())):
+            self.assertEqual(krx.fetch(), [{"code": "213500", "name": "한솔제지", "market": "KOSPI", "isin": "KR7213500002"}])
+        with um.patch("urllib.request.urlopen", return_value=R(b"LOGOUT")):
+            with self.assertRaises(krx.KrxUnavailable):
+                krx.fetch()
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>

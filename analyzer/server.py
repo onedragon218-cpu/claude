@@ -59,6 +59,12 @@ class H(BaseHTTPRequestHandler):
                 from . import __version__
                 return self._send(200, json.dumps({"version": __version__, "root": config.ROOT, "data": config.DATA_DIR},
                                                   ensure_ascii=False), "application/json")
+            if u.path == "/api/scan":
+                from . import screener
+                with screener.LOCK:
+                    job = dict(screener.JOB)
+                res = screener.results(conn) if q.get("results", ["0"])[0] == "1" else None
+                return self._send(200, json.dumps({"job": job, "results": res}, ensure_ascii=False), "application/json")
             if u.path == "/api/job":
                 with JOB_LOCK:
                     return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
@@ -81,6 +87,19 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
+        if u.path == "/api/scan":
+            from . import screener
+            started = screener.start(full=q.get("full", ["0"])[0] == "1")
+            with screener.LOCK:
+                job = dict(screener.JOB)
+            return self._send(200, json.dumps({"started": started, "job": job}, ensure_ascii=False), "application/json")
+        if u.path == "/api/universe/add":
+            from . import universe
+            n = int(self.headers.get("Content-Length") or 0)
+            items = json.loads(self.rfile.read(n).decode("utf-8") or "[]") if n else []
+            added = universe.add([(c, nm) for c, nm in items])
+            return self._send(200, json.dumps({"added": added, "total": len(universe.load())}, ensure_ascii=False),
+                              "application/json")
         if u.path == "/api/update-all":
             with JOB_LOCK:
                 if JOB["running"]:

@@ -82,6 +82,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "last_collect": last_collect, "last_verify": last_verify,
         "companies": companies,
         "last_run": last_run,
+        "screen": __import__("analyzer.screener", fromlist=["results"]).results(conn),
         "universe": [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()],
         "stability": stability(conn, code, P, vres["rows"], comp),
         "app_version": __import__("analyzer").__version__,

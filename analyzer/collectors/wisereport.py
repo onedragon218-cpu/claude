@@ -91,6 +91,40 @@ def parse_opinion(page):
     return None
 
 
+def parse_header(page):
+    """기업개요 화면 머리글 → {market, krx_sector, wics}. 예: 'KOSPI : 코스피 종이·목재 WICS : 종이와목재'"""
+    txt = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", page)))
+    m = re.search(r"(KOSPI|KOSDAQ|KONEX)\s*:\s*\S+\s+(.*?)\s+WICS\s*:\s*(.+?)\s+(?:EPS|<|$)", txt)
+    if not m:
+        return {}
+    return {"market": m.group(1), "krx_sector": m.group(2).strip(), "wics": m.group(3).strip()}
+
+
+def check(code, as_of=None):
+    """컨센서스 유무만 가볍게 확인(종목 찾기용). 재무 자료를 DB에 넣지 않는다.
+    반환: {has, years, first_year, revenue, op_income, eps, basis} 또는 has=False"""
+    d = (as_of or dt.date.today()).strftime("%Y%m%d")
+    est, act, basis = parse_data(_get(DATA_URL.format(code=code, d=d)))
+    years = sorted({e["target_year"] for e in est})
+    if not years:
+        return {"has": False, "actual_years": sorted({a["target_year"] for a in act})}
+    first = years[0]
+    pick = {e["metric"]: e["value"] for e in est if e["target_year"] == first}
+    return {"has": True, "years": years, "first_year": first, "basis": basis,
+            "revenue": pick.get("revenue"), "op_income": pick.get("op_income"), "eps": pick.get("eps"),
+            "roe": pick.get("roe")}
+
+
+def profile(code):
+    """기업개요 화면에서 시장·업종·추정기관 수·목표주가"""
+    page = _get(PAGE_URL.format(code=code))
+    out = parse_header(page)
+    op = parse_opinion(page)
+    if op:
+        out.update(n_estimates=op["n"], target_price=op["target_price"], opinion=op["opinion"])
+    return out
+
+
 def fetch(code, as_of=None):
     """반환: (출처 URL, 추정치 목록). 추정치에는 추정기관 수(n_estimates)를 붙인다."""
     d = (as_of or dt.date.today()).strftime("%Y%m%d")

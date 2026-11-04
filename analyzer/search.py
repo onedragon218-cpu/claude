@@ -21,6 +21,8 @@ def search(conn, q, limit=10):
     except dart.DartUnavailable:
         corp = {}
     names = dict((c, v["name"]) for c, v in corp.items())
+    from .collectors import krx
+    names.update({r["code"]: r["name"] for r in krx.cached()})   # 한국거래소 전체 종목(저장본)
     names.update({c: n for c, n in universe.load()})          # 기본 종목 목록(키가 없어도 이름 검색 가능)
     names.update({c: n for c, n in db_rows.items() if n})
 
