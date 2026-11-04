@@ -99,6 +99,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="D">D. 개별 그래프</button>
   <button data-s="E">E. 원본 데이터</button>
   <button data-s="F">F. 검증 보고서</button>
+  <button data-s="G">G. 가치평가</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -163,6 +164,24 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted">컨센서스는 수집 기준일마다 따로 저장하며 덮어쓰지 않습니다.</p>
     <div class="tablewrap"><table id="cons"></table></div>
   </div>
+</section>
+
+<section id="G">
+  <div class="card">
+    <h2 id="gtitle">주가와 주당가치 겹쳐 보기</h2>
+    <div class="subtabs" id="gtabs" role="tablist"></div>
+    <p class="muted" id="gnote"></p>
+    <div id="gpanel-chart">
+      <div class="toggles" id="gtoggles"></div>
+      <div class="row" id="glogrow" style="margin-bottom:8px"><label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="glog"> 로그 축(값 차이가 클 때)</label></div>
+      <div class="rawsum" id="gsum"></div>
+      <div class="chartbox big"><canvas id="gchart"></canvas></div>
+      <div class="legendnote" id="glegend"></div>
+    </div>
+    <div id="gpanel-table" style="display:none"><div class="tablewrap"><table id="gtable"></table></div></div>
+    <div id="gpanel-assump" style="display:none"></div>
+  </div>
+  <div class="card" id="gnotes-card"><h3>연도별 계산 메모</h3><div class="tablewrap"><table id="gnotes"></table></div></div>
 </section>
 
 <section id="F">
@@ -430,7 +449,130 @@ function renderStatic(){
   $('#miss').innerHTML = '<tr><th>연도</th><th class="l">지표</th><th class="l">이유</th></tr>' + D.missing.map(m=>`<tr><td>${m.year}</td><td class="l">${esc(MNAME[m.metric])}</td><td class="l">${esc(m.reason)}</td></tr>`).join('');
 }
 
-function renderAll(){ renderStatic(); renderC(); renderSingles(); renderPivot(); renderFacts(); }
+
+// ---- G. 가치평가 ----
+const V = D.valuation || {rows:[], assumptions:{}};
+const VROWS = V.rows || [];
+const VMETH = [['price','주가','--text-primary'],['srim','S-RIM','--s1'],['dcf','DCF(FCFF)','--s2'],['per','PER 가치','--s3'],['pbr','PBR 가치','--s4'],['psr','PSR 가치','--s5'],['median','종합(중앙값)','--s7']];
+const gVisible = new Set(VMETH.map(m=>m[0]));
+let GTAB = (()=>{ try{ return localStorage.getItem('gtab')||'value'; }catch(e){ return 'value'; } })();
+const pct = (x,d=1) => x==null? '–' : (x*100).toFixed(d)+'%';
+const won = x => x==null? '–' : Math.round(x).toLocaleString('ko-KR');
+const eok = x => x==null? '–' : Math.round(x/1e8).toLocaleString('ko-KR');
+function rgba(varName, a){ const h = css(varName).replace('#',''); if(h.length!==6) return css(varName);
+  return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${a})`; }
+function vget(r,k){ return k==='price'? r.price : k==='median'? r.median : (r.values||{})[k]; }
+const vIsEst = r => r && !String(r.kind).startsWith('실적');
+
+function renderG(){
+  const tabs=[['value','주가 vs 주당가치'],['roic','ROIC vs WACC'],['table','계산 근거 표'],['assump','가정']];
+  $('#gtabs').innerHTML = tabs.map(([k,n])=>`<button role="tab" aria-selected="${GTAB===k}" class="${GTAB===k?'on':''}" data-k="${k}">${n}</button>`).join('');
+  $('#gtabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ GTAB=b.dataset.k; try{localStorage.setItem('gtab',GTAB)}catch(e){} renderG(); });
+  $('#gpanel-chart').style.display = (GTAB==='value'||GTAB==='roic')?'':'none';
+  $('#gpanel-table').style.display = GTAB==='table'?'':'none';
+  $('#gpanel-assump').style.display = GTAB==='assump'?'':'none';
+  const byNote = V.base_year!==BY ? ` (가치평가는 기준 연도 ${V.base_year}로 계산됨. 바꾸려면 기준 연도를 넣고 다시 실행)` : '';
+  if (!VROWS.length){ $('#gnote').textContent='가치평가 결과가 없습니다.'; return; }
+  if (GTAB==='value') renderGValue(byNote);
+  else if (GTAB==='roic') renderGRoic(byNote);
+  else if (GTAB==='table') renderGTable(byNote);
+  else renderGAssump();
+  renderGNotes();
+}
+
+function renderGValue(byNote){
+  $('#gtitle').textContent='주가와 주당가치 겹쳐 보기(원/주)';
+  $('#gnote').textContent='주가(검은 선) 위에 각 방법의 주당 적정가치를 겹쳤습니다. 종합 = 계산된 방법이 3개 이상일 때의 중앙값. 점선·빈 점 = 현재 연도·전망.'+byNote;
+  $('#gtoggles').style.display=''; $('#glogrow').style.display='';
+  $('#gtoggles').innerHTML = VMETH.map(([k,n,c])=>`<span class="tg ${gVisible.has(k)?'':'off'}" data-k="${k}" role="button" aria-pressed="${gVisible.has(k)}"><span class="sw" style="background:var(${c})"></span>${n}</span>`).join('');
+  $('#gtoggles').querySelectorAll('.tg').forEach(el=>el.onclick=()=>{ const k=el.dataset.k; gVisible.has(k)?gVisible.delete(k):gVisible.add(k); renderGValue(byNote); });
+  const labels = VROWS.map(r=> vIsEst(r)? (String(r.kind).startsWith('현재')? r.year+'(현재)' : r.year+'E') : String(r.year));
+  const ds = VMETH.map(([k,n,c])=>{ const col=css(c); const data=VROWS.map(r=>{ const v=vget(r,k); return v!=null && v>0 ? v : null; });
+    return {label:n, key:k, data, borderColor:col, backgroundColor:col, borderWidth:k==='price'?3:(k==='median'?2.5:1.75),
+      pointRadius:k==='median'?5:3.5, pointStyle:k==='median'?'rectRot':'circle', pointHoverRadius:6,
+      pointBackgroundColor: VROWS.map(r=>vIsEst(r)?css('--surface-1'):col),
+      segment:{borderDash: ctx => (vIsEst(VROWS[ctx.p0DataIndex])||vIsEst(VROWS[ctx.p1DataIndex]))?[6,4]:undefined},
+      hidden:!gVisible.has(k), spanGaps:false, tension:0}; });
+  if (!renderGValue._init){ renderGValue._init = true;   // 값 차이가 8배 넘게 벌어지면 처음에는 로그 축으로
+    const all = ds.filter(d=>!d.hidden).flatMap(d=>d.data).filter(v=>v>0);
+    if (all.length && Math.max(...all)/Math.min(...all) > 8) $('#glog').checked = true; }
+  const o = baseOpts();
+  o.scales.y.type = $('#glog').checked ? 'logarithmic' : 'linear';
+  o.scales.y.ticks.callback = v => won(v);
+  o.plugins.tooltip.callbacks = {label: ctx => { const r=VROWS[ctx.dataIndex]; const v=ctx.parsed.y; if(v==null) return null;
+    const g = (ctx.dataset.key!=='price' && r.price) ? ` · 주가 대비 ${((v/r.price-1)*100).toFixed(0)}%` : '';
+    return `${ctx.dataset.label}: ${won(v)}원${g}`; }};
+  if (charts.g) charts.g.destroy();
+  charts.g = new Chart($('#gchart'), {type:'line', data:{labels, datasets:ds}, options:o});
+  $('#glog').onchange = ()=>renderGValue(byNote);
+  const last = [...VROWS].reverse().find(r=>r.price && r.median);
+  $('#gsum').innerHTML = last ? `<span>${last.year} ${String(last.kind).startsWith('현재')?'기준일':'연말'} 주가 <b>${won(last.price)}원</b></span><span>종합 주당가치 <b>${won(last.median)}원</b></span><span>괴리율 <b>${last.gap>=0?'+':''}${pct(last.gap,0)}</b> ${last.gap>=0?'(가치가 주가보다 높음)':'(주가가 가치보다 높음)'}</span>` : '<span>종합 주당가치를 낼 수 있는 연도가 없습니다.</span>';
+  $('#glegend').innerHTML = '<span><span class="solid"></span> 실적 기준</span><span><span class="dash"></span> 현재·전망</span><span>값이 0 이하이거나 계산할 수 없는 연도는 점을 찍지 않음</span><span>⚠ 가정에 따라 크게 달라지는 추정값입니다. G-가정 탭과 계산 메모를 함께 보세요.</span>';
+}
+
+function renderGRoic(byNote){
+  $('#gtitle').textContent='ROIC와 WACC 겹쳐 보기(%)';
+  $('#gnote').textContent='ROIC(투하자본이익률)가 WACC(가중평균자본비용)보다 높으면 투자한 돈으로 자본비용 이상을 버는 것(가치 창출, 초록), 낮으면 가치 훼손(빨강)입니다.'+byNote;
+  $('#gtoggles').style.display='none'; $('#glogrow').style.display='none';
+  const rows = VROWS.filter(r=>!String(r.kind).startsWith('전망'));
+  const labels = rows.map(r=> String(r.kind).startsWith('현재')? r.year+'(현재)' : String(r.year));
+  const P = k => rows.map(r=> r[k]==null? null : r[k]*100);
+  const o = baseOpts();
+  o.scales.y.ticks.callback = v => v.toFixed(0)+'%';
+  o.plugins.tooltip.callbacks = {label: ctx => ctx.parsed.y==null? null : `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}%`,
+    afterBody: items => { const r = rows[items[0].dataIndex]; return r.spread!=null ? [`차이(ROIC−WACC): ${(r.spread*100).toFixed(2)}%p`] : ['차이: 계산 불가']; }};
+  if (charts.g) charts.g.destroy();
+  charts.g = new Chart($('#gchart'), {type:'line', data:{labels, datasets:[
+    {label:'ROIC', data:P('roic'), borderColor:css('--s1'), backgroundColor:css('--s1'), borderWidth:2.5, pointRadius:4, spanGaps:false, tension:0,
+     fill:{target:1, above:rgba('--good',0.18), below:rgba('--bad',0.18)}},
+    {label:'WACC', data:P('wacc'), borderColor:css('--s2'), backgroundColor:css('--s2'), borderWidth:2.5, pointRadius:4, spanGaps:false, tension:0},
+    {label:'자기자본비용 Ke', data:P('ke'), borderColor:css('--text-muted'), backgroundColor:css('--text-muted'), borderWidth:1.25, borderDash:[3,3], pointRadius:0, spanGaps:false, tension:0},
+  ]}, options:Object.assign(o, {plugins:Object.assign(o.plugins,{legend:{display:true, labels:{color:css('--text-secondary'), boxWidth:14}}})})});
+  const ok = rows.filter(r=>r.spread!=null); const pos = ok.filter(r=>r.spread>0).length;
+  $('#gsum').innerHTML = ok.length ? `<span>ROIC > WACC인 해 <b>${pos} / ${ok.length}</b></span><span>평균 차이 <b>${(ok.reduce((a,r)=>a+r.spread,0)/ok.length*100).toFixed(2)}%p</b></span><span>최근(${ok[ok.length-1].year}) ROIC <b>${pct(ok[ok.length-1].roic,2)}</b> · WACC <b>${pct(ok[ok.length-1].wacc,2)}</b></span>` : '<span>ROIC·WACC를 계산할 수 있는 연도가 없습니다(차입금 미식별 등).</span>';
+  $('#glegend').innerHTML = '<span>ROIC = 영업이익×(1−세율) ÷ 평균 투하자본(자본총계+차입금−현금)</span><span>WACC = 시가총액 비중×Ke + 차입금 비중×Kd×(1−세율)</span>';
+}
+
+function renderGTable(byNote){
+  $('#gtitle').textContent='가치평가 계산 근거(연도별)';
+  $('#gnote').textContent='모든 금액은 지배주주 기준이며, 억원 표시는 반올림 값입니다.'+byNote;
+  const H = ['연도','구분','주가','S-RIM','DCF','PER 가치','PBR 가치','PSR 가치','종합','괴리율','Rf','Ke','Kd','세율','WACC','ROIC','ROIC−WACC','NOPAT(억)','투하자본(억)','FCFF(억)','가중FCFF(억)','차입금(억)','현금(억)','가중ROE','PER(실제)','PBR(실제)','PSR(실제)','적정 PER','적정 PBR','적정 PSR'];
+  const f2 = x => x==null?'–':x.toFixed(2);
+  $('#gtable').innerHTML = '<tr>'+H.map((h,i)=>`<th class="${i<2?'l':''}">${h}</th>`).join('')+'</tr>' + VROWS.map(r=>{
+    const v=r.values||{}, m=r.mult||{}, fa=r.fair||{};
+    const cells=[r.year, r.kind, won(r.price), won(v.srim), won(v.dcf), won(v.per), won(v.pbr), won(v.psr), `<b>${won(r.median)}</b>`, r.gap==null?'–':(r.gap>=0?'+':'')+pct(r.gap,0),
+      pct(r.rf,2), pct(r.ke,2), pct(r.kd,2), pct(r.tax,1), pct(r.wacc,2), pct(r.roic,2), r.spread==null?'–':(r.spread*100).toFixed(2)+'%p',
+      eok(r.nopat), eok(r.ic), eok(r.fcff), eok(r.fcff_w), eok(r.debt), eok(r.cash), pct(r.roe_w,2), f2(m.per), f2(m.pbr), f2(m.psr), f2(fa.per), f2(fa.pbr), f2(fa.psr)];
+    return `<tr class="${vIsEst(r)?'':''}">`+cells.map((c,i)=>`<td class="${i<2?'l':''} ${vIsEst(r)&&i>=2?'est':''}">${c}</td>`).join('')+'</tr>'; }).join('');
+}
+
+function renderGAssump(){
+  $('#gtitle').textContent='가치평가 가정';
+  $('#gnote').textContent='가정은 analyzer/assumptions.json 에서 바꿀 수 있습니다. 바꾼 뒤 python -m analyzer report 종목코드 를 실행하면 수집 없이 다시 계산됩니다.';
+  const A = V.assumptions||{};
+  const rf = A['무위험수익률_국고채10년']||{};
+  const rows = [
+    ['자기자본비용 Ke','무위험수익률 + 베타 × 시장위험프리미엄', `베타 ${A['베타']}, 시장위험프리미엄 ${pct(A['시장위험프리미엄_ERP'],1)}`],
+    ['무위험수익률','그해 국고채 10년 연평균', esc(rf['_출처']||'')],
+    ['타인자본비용 Kd','이자지급 ÷ 평균 차입금', `1% 미만·15% 초과면 무위험수익률 + ${pct(A['타인자본비용_가산'],1)}p`],
+    ['세율','법인세 ÷ 세전이익', `0~50% 밖이거나 세전이익 ≤ 0이면 ${pct(A['대체세율'],0)}`],
+    ['WACC','E/(D+E)×Ke + D/(D+E)×Kd×(1−t)','E = 연말 시가총액, D = 차입금·사채·리스부채(장부가)'],
+    ['ROIC','NOPAT ÷ 평균 투하자본','NOPAT = 영업이익×(1−t), 투하자본 = 자본총계 + 차입금 − 현금·단기금융상품'],
+    ['S-RIM','B + B×(ROE−Ke)×w ÷ (1+Ke−w)', `B = 지배주주 자본, ROE = 최근 3년 3:2:1 가중, w = ${A['S-RIM_초과이익지속계수_w']}`],
+    ['DCF(FCFF)','가중FCFF×(1+g) ÷ (WACC−g) − 순차입금', `FCFF = 영업현금흐름 − 설비·무형투자 + 영업활동 이자지급×(1−t), 3:2:1 가중, g = ${pct(A['영구성장률_g'],1)}, 지배지분 비율 적용`],
+    ['PER·PBR·PSR 가치','적정 배수 × EPS·BPS·주당매출', `적정 배수 = 그 연도까지 자기 배수의 중앙값(최소 ${A['상대가치_최소관측연수']}년), 적자 해 PER 제외`],
+    ['종합','계산된 방법들의 중앙값','3개 이상 계산된 해에만'],
+  ];
+  $('#gpanel-assump').innerHTML = `<div class="tablewrap"><table><tr><th class="l">항목</th><th class="l">계산식</th><th class="l">값·규칙</th></tr>${rows.map(r=>`<tr><td class="l">${r[0]}</td><td class="l">${r[1]}</td><td class="l" style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
+    <h3 style="margin-top:14px">연도별 무위험수익률(국고채 10년, %)</h3><div class="tablewrap"><table><tr>${Object.keys(rf).filter(k=>!k.startsWith('_')).map(k=>`<th>${k}</th>`).join('')}</tr><tr>${Object.entries(rf).filter(([k])=>!k.startsWith('_')).map(([k,v])=>`<td>${v}</td>`).join('')}</tr></table></div>
+    <div class="warnbox">베타는 기업별로 받지 않고 ${A['베타']}로 일괄 적용했습니다. 차입이 많은 기업은 실제 Ke가 더 높을 수 있어, WACC가 낮게 나오고 DCF가 크게 나올 수 있습니다.</div>`;
+}
+
+function renderGNotes(){
+  $('#gnotes').innerHTML = '<tr><th>연도</th><th class="l">구분</th><th class="l">메모</th></tr>' + VROWS.map(r=>`<tr><td>${r.year}</td><td class="l">${esc(r.kind)}</td><td class="l" style="white-space:normal">${(r.notes||[]).map(esc).join('<br>')||'–'}</td></tr>`).join('');
+}
+
+function renderAll(){ renderStatic(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));

@@ -31,7 +31,28 @@ MAP = {
     "acc_eq": (("BS",), ["ifrs-full_Equity"], ["자본총계"]),
     "acc_eq_owner": (("BS",), ["ifrs-full_EquityAttributableToOwnersOfParent"], ["지배기업소유주지분", "지배기업의소유주에게귀속되는자본"]),
 }
-FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_eps_basic"}
+# 가치평가(DCF·ROIC·WACC)용 계정
+MAP.update({
+    "acc_pretax": (("IS", "CIS"), ["ifrs-full_ProfitLossBeforeTax"], ["법인세비용차감전순이익", "법인세비용차감전순이익(손실)"]),
+    "acc_tax": (("IS", "CIS"), ["ifrs-full_IncomeTaxExpenseContinuingOperations"], ["법인세비용", "법인세비용(수익)", "법인세수익(비용)"]),
+    "acc_ocf": (("CF",), ["ifrs-full_CashFlowsFromUsedInOperatingActivities"], ["영업활동현금흐름", "영업활동으로인한현금흐름"]),
+    "acc_capex_ppe": (("CF",), ["ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"], ["유형자산의취득", "유형자산취득"]),
+    "acc_capex_int": (("CF",), ["ifrs-full_PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities"], ["무형자산의취득", "무형자산취득"]),
+    # 이자지급: 영업활동 분류(FCFF 계산 때 되더함)와 재무활동 분류를 나눠 둔다. 표준코드가 없으면 영업활동으로 본다
+    "acc_int_paid": (("CF",), ["ifrs-full_InterestPaidClassifiedAsOperatingActivities"], ["이자의지급", "이자지급", "이자의지급(영업)"]),
+    "acc_int_paid_fin": (("CF",), ["ifrs-full_InterestPaidClassifiedAsFinancingActivities"], []),
+})
+# 여러 줄을 더해야 하는 계정(재무상태표): 이름 규칙으로 찾는다
+SUM = {
+    "acc_debt": re.compile(r"(차입금|사채|리스부채|유동성장기부채)"),
+    "acc_cash": re.compile(r"^(현금및현금성자산|단기금융상품)$"),
+}
+SUM_EXCLUDE = re.compile(r"(사채할인|상환할증|전환권조정|대여금|이자|미지급|충당)")
+ALL_KEYS = list(MAP) + list(SUM)
+ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"}   # 회사마다 부호 표기가 달라 절댓값 사용
+CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"}
+FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
+PARSER_VERSION = 2   # 계정을 늘리면 올린다 → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
 
 
 def _num(s):
@@ -68,6 +89,32 @@ def _find(lst, key, col):
     return None
 
 
+def _sum(lst, key, col):
+    rx, tot, hit = SUM[key], 0.0, False
+    for it in lst:
+        if it.get("sj_div") != "BS":
+            continue
+        nm = re.sub(r"\s", "", it.get("account_nm", ""))
+        if rx.search(nm) and not SUM_EXCLUDE.search(nm):
+            v = _num(it.get(col))
+            if v is not None:
+                tot += v; hit = True
+    has_bs = any(it.get("sj_div") == "BS" and _num(it.get(col)) is not None for it in lst)
+    return tot if (hit or has_bs) else None   # 재무상태표는 있는데 해당 줄이 없으면 0
+
+
+def _val(lst, key, col):
+    v = _sum(lst, key, col) if key in SUM else _find(lst, key, col)
+    if key == "acc_int_paid" and v is not None:
+        # 이름으로 찾은 '이자지급'이 실제로는 재무활동 분류 줄이면 영업활동 이자로 보지 않는다
+        has_op_id = any(_norm_id(it.get("account_id")) == "ifrs-full_InterestPaidClassifiedAsOperatingActivities" for it in lst)
+        if not has_op_id and _find(lst, "acc_int_paid_fin", col) is not None:
+            v = None
+    if v is not None and key in ABS_KEYS:
+        v = abs(v)
+    return v
+
+
 def parse_statement(d, fs_div="CFS"):
     """반환: dict(meta=..., values=[(fiscal_year, period, metric, value, col)])"""
     lst = d.get("list") or []
@@ -82,18 +129,23 @@ def parse_statement(d, fs_div="CFS"):
     if reprt == "11011":
         cols = [("thstrm_amount", year, "당기"), ("frmtrm_amount", year - 1, "전기"), ("bfefrmtrm_amount", year - 2, "전전기")]
         for col, y, cname in cols:
-            for key in MAP:
-                v = _find(lst, key, col)
+            for key in ALL_KEYS:
+                v = _val(lst, key, col)
                 if v is not None:
                     out.append((y, "FY", key, v, cname))
     else:
-        for key in MAP:
-            col = "thstrm_add_amount" if key in FLOW else "thstrm_amount"
-            v = _find(lst, key, col)
+        for key in ALL_KEYS:
+            col = "thstrm_add_amount" if (key in FLOW and key not in CF_KEYS) else "thstrm_amount"
+            v = _val(lst, key, col)
             if v is None and key in FLOW:   # 1분기 보고서는 누적 열이 비어 있을 수 있음
-                v = _find(lst, key, "thstrm_amount")
+                v = _val(lst, key, "thstrm_amount")
             if v is not None:
                 out.append((year, period, key, v, "당기누적" if key in FLOW else "당기말"))
+            if key in FLOW:                 # 전년 같은 기간 누적(최근 12개월 계산용)
+                pcol = "frmtrm_amount" if key in CF_KEYS else "frmtrm_add_amount"
+                pv = _val(lst, key, pcol)
+                if pv is not None:
+                    out.append((year - 1, period, key, pv, "전년동기누적"))
     return {"meta": meta, "values": out}
 
 
@@ -166,7 +218,7 @@ def get_json(path, **params):
 
 def corp_code(stock_code):
     """종목코드 → DART 고유번호. 전체 목록을 한 번 받아 data/corp_codes.json 에 저장해 두고 재사용."""
-    cache = os.path.join(config.ROOT, "data", "corp_codes.json")
+    cache = os.path.join(config.DATA_DIR, "corp_codes.json")
     if os.path.exists(cache):
         m = json.load(open(cache, encoding="utf-8"))
         if stock_code in m:

@@ -29,6 +29,32 @@ if (-not $py) {
 Write-Host "[1/5] 파이썬: $py" -ForegroundColor Green
 $pyw = Get-Pythonw $py
 
+# 1-2) 데이터 폴더: 프로그램 폴더 밖(%LOCALAPPDATA%\CorpAnalyzer\data)에 둔다.
+#      새 버전을 받아 프로그램 폴더를 바꿔도 모아 둔 DB가 그대로 남는다.
+$settingsDir = Join-Path $env:APPDATA 'corp-analyzer'
+$settingsFile = Join-Path $settingsDir 'settings.json'
+$DataDir = Join-Path $env:LOCALAPPDATA 'CorpAnalyzer\data'
+if (Test-Path $settingsFile) {
+    try { $cur = (Get-Content $settingsFile -Raw | ConvertFrom-Json).data_dir; if ($cur) { $DataDir = $cur } } catch { }
+}
+if (-not (Test-Path (Join-Path $DataDir 'analyzer.db'))) {
+    $src = Join-Path $Root 'data'
+    $oldTask = Get-ScheduledTask -TaskName $TaskUpdate -ErrorAction SilentlyContinue
+    if ($oldTask) {
+        $oldRoot = $oldTask.Actions[0].WorkingDirectory
+        if ($oldRoot -and ($oldRoot -ne $Root) -and (Test-Path (Join-Path $oldRoot 'data\analyzer.db'))) {
+            $src = Join-Path $oldRoot 'data'
+            Write-Host "      이전 설치 폴더($oldRoot)의 데이터를 옮깁니다." -ForegroundColor Yellow
+        }
+    }
+    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    Copy-Item -Path (Join-Path $src '*') -Destination $DataDir -Recurse -Force
+    Write-Host "      데이터 복사: $src → $DataDir"
+}
+New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
+[IO.File]::WriteAllText($settingsFile, (@{ data_dir = $DataDir } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "      데이터 폴더: $DataDir" -ForegroundColor Green
+
 # 2) DART 인증키 (저장 위치: %APPDATA%\corp-analyzer\dart_api_key.txt, 프로그램 폴더 밖)
 $keyDir = Join-Path $env:APPDATA 'corp-analyzer'
 $keyFile = Join-Path $keyDir 'dart_api_key.txt'
@@ -87,4 +113,4 @@ Start-Server $py
 Start-Process $Url
 Write-Host ''
 Write-Host "설치 완료. 화면: $Url  (바탕화면 '재무분석 열기')" -ForegroundColor Green
-Write-Host '기록: data\logs\  ·  제거: windows\uninstall.bat'
+Write-Host "데이터·기록: $DataDir  ·  제거: windows\uninstall.bat"

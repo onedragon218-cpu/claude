@@ -15,7 +15,8 @@ from . import config, db
 from .collectors import dart, fnguide, manual, prices
 
 CORE_ACC = ["acc_revenue", "acc_op", "acc_ni_owner", "acc_eq_owner", "acc_eq", "acc_liab", "acc_eps_basic"]
-ACC_UNIT = {k: ("원" if k != "acc_eps_basic" else "원/주") for k in dart.MAP}
+ACC_UNIT = {k: ("원" if k != "acc_eps_basic" else "원/주") for k in dart.ALL_KEYS}
+RAW_DIR = os.path.join(config.DATA_DIR, "raw")
 
 
 class Stats:
@@ -66,7 +67,7 @@ def select_facts(conn, code, y, period, via=None, stats=None):
     """같은 연도·계정의 여러 관측값 중 대표값을 고른다.
     1순위: 그 연도 자신의 보고서(정정 공시가 있으면 가장 최근 접수번호)
     2순위: 그 연도를 처음으로 담은 후속 보고서(원래 숫자에 가장 가까움)"""
-    for key in dart.MAP:
+    for key in dart.ALL_KEYS:
         obs = db.observations(conn, code, y, key, period)
         if not obs:
             continue
@@ -150,6 +151,33 @@ def ingest_consensus(conn, code, items, provider, as_of, source_ref):
                               n_estimates=it.get("n_estimates"), basis=it.get("basis", "연결"),
                               source_ref=it.get("source_ref", source_ref))
     conn.commit()
+    return n
+
+
+def save_raw(code, d):
+    """받은 DART 응답 원본을 data/raw/<종목코드>/ 에 보관한다. 해석 규칙이 바뀌면 네트워크 없이 다시 해석한다."""
+    lst = d.get("list") or []
+    if not lst:
+        return
+    folder = os.path.join(RAW_DIR, code)
+    os.makedirs(folder, exist_ok=True)
+    fn = os.path.join(folder, f"dart_{lst[0]['bsns_year']}_{lst[0]['reprt_code']}_CFS_{lst[0]['rcept_no']}.json")
+    with open(fn, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
+
+
+def reparse_cached(conn, code, stats=None):
+    """해석기 버전이 바뀌었으면 보관된 원본(seed + data/raw)을 다시 해석해 새 계정을 채운다(외부 요청 없음)."""
+    key = f"{code}:v{dart.PARSER_VERSION}"
+    if db.last_fetch(conn, "parse", key):
+        return 0
+    files = sorted(glob.glob(os.path.join(config.SEED_DIR, code, "dart_*_CFS*.json")) +
+                   glob.glob(os.path.join(RAW_DIR, code, "dart_*_CFS*.json")))
+    n = 0
+    for f in files:
+        with open(f, encoding="utf-8") as fh:
+            n += ingest_statement(conn, code, json.load(fh), "CFS", via="보관 원본 재해석", stats=stats)
+    db.log_fetch(conn, "parse", key, code, True, n, f"{len(files)}개 원본 재해석")
     return n
 
 
@@ -253,6 +281,7 @@ def collect(conn, code, P, stats, offline=False):
         try:
             stats.req("DART")
             d = dart.fetch_statement(_corp(), y, "11011")
+            save_raw(code, d)
             n = ingest_statement(conn, code, d, stats=stats)
             db.log_fetch(conn, "dart_report", key, code, n > 0, n, d.get("message"))
         except dart.DartUnavailable as e:
@@ -286,6 +315,7 @@ def collect(conn, code, P, stats, offline=False):
             try:
                 stats.req("DART")
                 d = dart.fetch_statement(_corp(), P["current"], reprt)
+                save_raw(code, d)
                 n = ingest_statement(conn, code, d, stats=stats)
                 db.log_fetch(conn, "dart_report", key, code, n > 0, n, d.get("message"))
                 if n > 0:
@@ -504,11 +534,18 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True):
     if use_seed and not db.last_fetch(conn, "seed", code) and os.path.isdir(os.path.join(config.SEED_DIR, code)):
         import_seed(conn, code, P["current"], stats)
         stats.notes.append("저장 원본(seed) 가져오기 완료")
+    if reparse_cached(conn, code, stats):
+        stats.notes.append(f"해석 규칙 v{dart.PARSER_VERSION}로 보관 원본 재해석(외부 요청 없음)")
     stats.reused = existed
     need = collect(conn, code, P, stats, offline=offline)
     validate.validate_accounts(conn, code, P)
     compute(conn, code, P, stats)
     report = validate.run(conn, code, P)
+    from . import valuation
+    val = valuation.run(conn, code, P)
+    report["items"] += val["checks"]
+    for c in val["checks"]:
+        report["summary"][c["level"]] = report["summary"].get(c["level"], 0) + 1
     if own:
         conn.close()
     return {"periods": P, "stats": stats.as_dict(), "need": need, "validation": report, "had_data": existed > 0}

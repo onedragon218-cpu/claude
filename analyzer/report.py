@@ -10,6 +10,8 @@ STOCK = {"bps", "debt_ratio", "market_cap"}  # 시점 값(현재 연도에 최�
 
 def payload(conn, code, base_year=None, last_run=None):
     P = config.periods(base_year)
+    from . import valuation
+    vres = valuation.run(conn, code, P)      # 가정 파일을 바꿨을 때도 바로 반영되도록 매번 다시 계산(수집 없음)
     comp = conn.execute("SELECT * FROM companies WHERE stock_code=?", (code,)).fetchone()
     cur = db.facts(conn, code)
     allf = db.facts(conn, code, current_only=False)
@@ -80,6 +82,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "last_collect": last_collect, "last_verify": last_verify,
         "companies": companies,
         "last_run": last_run,
+        "valuation": {"rows": vres["rows"], "assumptions": vres["assumptions"], "base_year": P["base_year"]},
         "total_facts": len(cur), "total_versions": len(allf),
     }
 

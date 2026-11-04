@@ -3,8 +3,30 @@ import datetime as _dt
 import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.environ.get("ANALYZER_DB", os.path.join(ROOT, "data", "analyzer.db"))
-OUTPUT_DIR = os.path.join(ROOT, "data", "output")
+
+
+def _data_dir():
+    """데이터 폴더. 1) 환경변수 ANALYZER_DATA 2) 사용자 설정 파일(윈도우 설치 시 %APPDATA%\\corp-analyzer\\settings.json)
+    3) 프로그램 폴더의 data. 윈도우에서는 프로그램을 새 버전으로 바꿔도 DB가 지워지지 않도록 프로그램 폴더 밖에 둔다."""
+    if os.environ.get("ANALYZER_DATA"):
+        return os.environ["ANALYZER_DATA"]
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    f = os.path.join(base, "corp-analyzer", "settings.json")
+    if os.path.exists(f):
+        try:
+            import json
+            with open(f, encoding="utf-8-sig") as fh:
+                d = json.load(fh).get("data_dir")
+            if d:
+                return d
+        except (OSError, ValueError):
+            pass
+    return os.path.join(ROOT, "data")
+
+
+DATA_DIR = _data_dir()
+DB_PATH = os.environ.get("ANALYZER_DB", os.path.join(DATA_DIR, "analyzer.db"))
+OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 SEED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed")
 
 # 재수집 간격(일). 이 기간 안에는 같은 요청을 다시 보내지 않는다.

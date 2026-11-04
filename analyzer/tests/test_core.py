@@ -32,8 +32,9 @@ class T(unittest.TestCase):
 
     def test_half_year_uses_cumulative(self):
         d = json.load(open(os.path.join(SEED, "dart_2026_11012_CFS.json"), encoding="utf-8"))
-        vals = {(per, k): v for (y, per, k, v, col) in dart.parse_statement(d)["values"]}
-        self.assertEqual(vals[("H1", "acc_revenue")], 1152546492570.0)   # 3개월 값(592,742,934,637)이 아닌 누적
+        vals = {(y, per, k): v for (y, per, k, v, col) in dart.parse_statement(d)["values"]}
+        self.assertEqual(vals[(2026, "H1", "acc_revenue")], 1152546492570.0)   # 3개월 값(592,742,934,637)이 아닌 누적
+        self.assertEqual(vals[(2025, "H1", "acc_revenue")], 1140635669030.0)   # 전년 같은 기간 누적(최근 12개월 계산용)
 
     def test_reuse_without_refetch(self):
         r1 = pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
@@ -78,6 +79,30 @@ class T(unittest.TestCase):
         self.assertNotIn("ERROR", res["validation"]["summary"])
         html = report.render(report.payload(self.conn, "213500", 2026))
         self.assertIn("한솔제지", html)
+
+    def test_valuation_runs_and_rules(self):
+        from analyzer import valuation
+        pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
+        res = valuation.run(self.conn, "213500", config.periods(2026))
+        rows = {r["year"]: r for r in res["rows"]}
+        self.assertIn(2025, rows)
+        r = rows[2025]
+        self.assertGreater(r["values"]["srim"], 0)
+        self.assertAlmostEqual(r["ke"], 0.02894 + 0.055, places=6)            # 국고채 2025 + ERP, 베타 1
+        self.assertIsNotNone(r["roic"]); self.assertIsNotNone(r["wacc"])
+        for y, row in rows.items():                                            # 종합은 3개 이상일 때만
+            if row["median"] is not None:
+                self.assertGreaterEqual(len(row["values"]), 3)
+            for v in row["values"].values():
+                self.assertGreater(v, 0)                                       # 0 이하 가치는 저장하지 않음
+        # 2016~2017은 상대가치 적정 배수가 아직 없어야 함(사후 정보 금지)
+        self.assertIsNone(rows[2016]["fair"]["per"])
+
+    def test_interest_classification(self):
+        d = json.load(open(os.path.join(config.SEED_DIR, "086900", "dart_2025_11011_CFS.json"), encoding="utf-8"))
+        keys = {(y, k) for (y, per, k, v, col) in dart.parse_statement(d)["values"]}
+        self.assertIn((2025, "acc_int_paid_fin"), keys)
+        self.assertNotIn((2025, "acc_int_paid"), keys)    # 재무활동 이자를 영업활동으로 세지 않음
 
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
