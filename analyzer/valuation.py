@@ -83,6 +83,35 @@ def _eok(x):
     return "–" if x is None else f"{x / 1e8:,.0f}억"
 
 
+def _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals):
+    """빈칸 이유(화면 툴팁용). 값이 있는 항목은 넣지 않는다."""
+    out = {}
+    nodebt = "차입금이 재무상태표에 따로 표시되지 않아 계산하지 않음(값을 만들지 않음)"
+    if wacc is None:
+        out["wacc"] = nodebt if debt is None else ("시가총액(주가·주식 수) 없음" if not mcap else "타인자본비용 자료 없음")
+    if roic is None:
+        out["roic"] = nodebt if debt is None else "영업이익 또는 투하자본 자료 없음"
+    if "dcf" not in vals:
+        if debt is None:
+            out["dcf"] = nodebt
+        elif fcff_w is not None and fcff_w <= 0:
+            out["dcf"] = "최근 3년 가중 FCFF(영업현금흐름−투자)가 0 이하 → 영구가치 공식 적용 불가"
+        elif not wacc:
+            out["dcf"] = "WACC 없음"
+        else:
+            out["dcf"] = next((n for n in notes if "DCF 지분가치" in n), "자료 부족")
+    if "dcf_e" not in vals:
+        if debt is None:
+            out["dcf_e"] = nodebt
+        elif nopat_w is not None and nopat_w <= 0:
+            out["dcf_e"] = "최근 3년 가중 세후 영업이익이 0 이하"
+        elif not wacc:
+            out["dcf_e"] = "WACC 없음"
+        else:
+            out["dcf_e"] = next((n for n in notes if "이익 기준" in n), "자료 부족")
+    return out
+
+
 def _median(xs):
     xs = [x for x in xs if x is not None]
     return statistics.median(xs) if xs else None
@@ -100,11 +129,26 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
 
     debt, cash = stocks.get("acc_debt"), stocks.get("acc_cash")
     int_paid = (flows.get("acc_int_paid") or 0) + (flows.get("acc_int_paid_fin") or 0)
-    if debt == 0 and int_paid > 0:
-        notes.append("재무상태표 본문에 차입금 줄이 따로 없음(금융부채에 포함된 것으로 보임) → 차입금 미식별")
+    # 재무상태표에 차입금·사채·리스부채 줄이 없을 때:
+    #  - 이자지급이 작으면(이자 ÷ (무위험수익률+가산) < 총자산의 5%) 실제로 차입이 없는 것으로 보고 원본대로 0을 쓴다
+    #    (예: 스튜디오드래곤 2019~2021, 리스 이자 등 소액만 있음)
+    #  - 이자지급이 크면 차입금이 다른 금융부채 줄에 묶여 있는 것이므로 값을 지어내지 않고 빈칸으로 둔다(예: 메디톡스)
+    assets = stocks.get("acc_assets")
+    hidden_limit = 0.05 * assets if assets else 0
+
+    def _hidden(d):
+        if d != 0 or not int_paid:
+            return False
+        return int_paid / (rf + A["타인자본비용_가산"]) > hidden_limit
+
+    if _hidden(debt):
+        notes.append(f"재무상태표 본문에 차입금 줄이 없는데 이자지급({_eok(int_paid)})이 커서 차입금이 다른 금융부채에 "
+                     "묶여 있는 것으로 보임 → 차입금 미식별(값을 만들지 않음)")
         debt = None
+    elif debt == 0 and int_paid:
+        notes.append(f"차입금·사채 줄 없음, 이자지급 {_eok(int_paid)}은 리스 등 소액 → 원본대로 차입금 0")
     pdebt = prev_stocks.get("acc_debt") if prev_stocks else None
-    if pdebt == 0 and int_paid > 0:
+    if _hidden(pdebt):
         pdebt = None
     avg_debt = (debt + pdebt) / 2 if debt is not None and pdebt is not None else debt
     kd = None
@@ -157,6 +201,17 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
         notes.append("가중 FCFF가 0 이하 → DCF 계산 안 함")
     elif debt is None:
         notes.append("차입금 미식별 → DCF·ROIC·WACC 계산 안 함")
+    # DCF(이익 기준): 현금흐름이 투자·운전자본으로 크게 출렁이는 회사(예: 콘텐츠 제작비가 영업현금흐름에 잡히는 회사)를 위해
+    # 실제 영업이익으로 계산한다. 기업가치 = 가중 NOPAT ÷ WACC (새 투자가 자본비용만큼만 번다고 보는 보수적 가정, 성장 가치 0)
+    nopat_w = wavg3(flows.get("_nopat_hist", [nopat]))
+    if nopat_w is not None and nopat_w > 0 and wacc and debt is not None and shares and eq:
+        dv2 = (nopat_w / wacc - (debt - (cash or 0))) * (eq_owner / eq) / shares
+        if dv2 > 0:
+            vals["dcf_e"] = dv2
+        else:
+            notes.append("DCF(이익 기준) 지분가치가 0 이하(순차입금 > 기업가치) → 빈칸")
+    elif nopat_w is not None and nopat_w <= 0:
+        notes.append("가중 NOPAT(세후 영업이익)가 0 이하 → DCF(이익 기준) 계산 안 함")
     # 상대가치
     if fair.get("per") and eps and eps > 0:
         vals["per"] = fair["per"] * eps
@@ -164,9 +219,10 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
         vals["pbr"] = fair["pbr"] * bps
     if fair.get("psr") and revenue and shares:
         vals["psr"] = fair["psr"] * revenue * 1e8 / shares
-    med = _median(vals.values()) if len(vals) >= 3 else None
-    if len(vals) < 3:
-        notes.append(f"계산된 방법이 {len(vals)}개뿐 → 종합 중앙값 내지 않음(3개 이상일 때만)")
+    core = [v for k, v in vals.items() if k != "dcf_e"]   # 종합은 기존 5가지 방법(S-RIM·DCF·PER·PBR·PSR)으로 유지
+    med = _median(core) if len(core) >= 3 else None
+    if len(core) < 3:
+        notes.append(f"계산된 방법이 {len(core)}개뿐 → 종합 중앙값 내지 않음(3개 이상일 때만)")
     mult = {
         "per": price / eps if price and eps and eps > 0 else None,
         "pbr": price / bps if price and bps else None,
@@ -180,12 +236,14 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
         "nopat": nopat, "ic": ic, "fcff": fcff, "fcff_w": fcff_w, "debt": debt, "cash": cash,
         "net_debt": debt - (cash or 0) if debt is not None else None, "roe_w": roe_w,
         "mult": mult, "fair": dict(fair), "notes": notes,
+        "nopat_w": nopat_w,
+        "missing": _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals),
     }
 
 
 FLOW_KEYS = ["acc_op", "acc_pretax", "acc_tax", "acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid",
              "acc_int_paid_fin", "acc_ni_owner", "acc_revenue", "acc_eps_basic"]
-STOCK_KEYS = ["acc_debt", "acc_cash", "acc_eq", "acc_eq_owner"]
+STOCK_KEYS = ["acc_debt", "acc_cash", "acc_eq", "acc_eq_owner", "acc_assets"]
 
 
 def run(conn, code, P):
@@ -203,6 +261,12 @@ def run(conn, code, P):
             return None
         return f["acc_ocf"] - (f["acc_capex_ppe"] or 0) - (f["acc_capex_int"] or 0) + (f["acc_int_paid"] or 0) * (1 - t)
 
+    def nopat_of(y, per="FY", ttm=False):
+        f = {k: (bk.ttm(y, k, per) if ttm else bk.v(y, k, per)) for k in ("acc_op", "acc_pretax", "acc_tax")}
+        if f["acc_op"] is None:
+            return None
+        return f["acc_op"] * (1 - _tax_rate(A, f["acc_pretax"], f["acc_tax"], []))
+
     def roe(y):
         r = bk.v(y, "roe")
         return r / 100 if r is not None else None
@@ -210,6 +274,7 @@ def run(conn, code, P):
     for y in P["past"]:
         flows = {k: bk.v(y, k) for k in FLOW_KEYS}
         flows["_fcff_hist"] = [fcff_of(y), fcff_of(y - 1), fcff_of(y - 2)]
+        flows["_nopat_hist"] = [nopat_of(y), nopat_of(y - 1), nopat_of(y - 2)]
         stocks = {k: bk.v(y, k) for k in STOCK_KEYS}
         prev = {k: bk.v(y - 1, k) for k in STOCK_KEYS}
         price, mcap, eps, bps, rev = (bk.v(y, "price_close"), bk.v(y, "market_cap"), bk.v(y, "eps"),
@@ -243,8 +308,10 @@ def run(conn, code, P):
             flows = {k: bk.v(cy - 1, k) for k in FLOW_KEYS}
             note = f"최근 12개월 계산 불가({', '.join(missing)}) → {cy - 1}년 연간 흐름 사용"
             flows["_fcff_hist"] = [fcff_of(cy - 1), fcff_of(cy - 2), fcff_of(cy - 3)]
+            flows["_nopat_hist"] = [nopat_of(cy - 1), nopat_of(cy - 2), nopat_of(cy - 3)]
         else:
             flows["_fcff_hist"] = [fcff_of(cy, per, ttm=True), fcff_of(cy - 1), fcff_of(cy - 2)]
+            flows["_nopat_hist"] = [nopat_of(cy, per, ttm=True), nopat_of(cy - 1), nopat_of(cy - 2)]
         stocks = {k: bk.v(cy, k, per) for k in STOCK_KEYS}
         prev = {k: bk.v(cy - 1, k) for k in STOCK_KEYS}
         eq_now, eq_prev = stocks.get("acc_eq_owner"), bk.v(cy - 1, "acc_eq_owner")

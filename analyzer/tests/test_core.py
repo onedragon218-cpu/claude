@@ -149,6 +149,19 @@ class T(unittest.TestCase):
                "<tr><td>4.00</td><td>10,250</td><td>1,073</td><td>6.16</td><td>2</td></tr></table>"
         self.assertEqual(wisereport.parse_opinion(page)["n"], 2)
 
+    def test_zero_debt_vs_hidden_debt(self):
+        """차입금 줄이 없을 때: 이자가 작으면 차입금 0(스튜디오드래곤), 크면 빈칸(메디톡스). 값을 만들지 않는다."""
+        from analyzer import valuation
+        for code in ("253450", "086900"):
+            pipeline.analyze(code, 2026, offline=True, conn=self.conn)
+        sd = {r["year"]: r for r in valuation.run(self.conn, "253450", config.periods(2026))["rows"]}
+        for y in range(2017, 2026):
+            self.assertIsNotNone(sd[y]["roic"], y); self.assertIsNotNone(sd[y]["wacc"], y)
+        self.assertEqual(sd[2020]["debt"], 0)
+        mt = {r["year"]: r for r in valuation.run(self.conn, "086900", config.periods(2026))["rows"]}
+        self.assertIsNone(mt[2019]["roic"]); self.assertIn("roic", mt[2019]["missing"])
+        self.assertIsNone(mt[2019]["debt"])
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>
