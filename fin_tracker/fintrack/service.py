@@ -49,7 +49,7 @@ def company_data(w, code, base_year=None):
         if not last:
             return None
         p = config.periods(base_year or last["base_year"])
-        return dashboard.collect(s, code, p, build(s, code, p), last["run_id"])
+        return dashboard.collect(s, code, p, build(s, code, p), last["run_id"], w)
     finally:
         s.con.close()
 

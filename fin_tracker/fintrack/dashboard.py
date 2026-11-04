@@ -4,7 +4,7 @@
 - export()는 같은 화면을 파일 한 장(<작업 폴더>/output/<종목>.html)으로 저장한다. 인터넷 없이 열린다.
 """
 import json, os
-from . import config, paths
+from . import config, paths, valuation
 
 TEMPLATE = os.path.join(os.path.dirname(__file__), "app.html")
 VENDOR = os.path.join(paths.CODE_DIR, "vendor", "chart.umd.4.4.1.js")
@@ -15,7 +15,7 @@ def _rows(cur):
     return [dict(r) for r in cur.fetchall()]
 
 
-def collect(store, code, p, series, run_id):
+def collect(store, code, p, series, run_id, w=None):
     c = store.company(code)
     con = store.con
     metrics = [{"key": k, "name": n, "unit": u,
@@ -40,13 +40,18 @@ def collect(store, code, p, series, run_id):
         "ORDER BY collected_at DESC, fiscal_year, item LIMIT 400", (code,)))
     gaps = [{"year": y, "metric": m["name"]} for y in [p["base"]] + p["future"] for m in metrics
             if str(y) not in m["consensus"] and m["key"] != "market_cap"]
+    vser, vtable, vassume = valuation.build(store, code, p, series, w)
+    val = [{"key": k, "name": n, "unit": u, "group": grp,
+            **{slot: {str(y): v for y, v in vser[k][slot].items()} for slot in ("actual", "partial", "consensus", "unverified")}}
+           for k, n, u, grp in valuation.VAL_METRICS]
     basis = {r["basis"] for r in store.current(code, kind="ACTUAL", period="FY") if r["basis"]}
     return {"company": {"code": code, "name": c["name"], "market": c["market"] or ""},
             "basis": "별도" if basis == {"OFS"} else "연결",
             "base": p["base"], "actualYears": p["actual"], "futureYears": p["future"],
             "metrics": metrics, "raw": raw, "counts": counts,
             "lastCollected": last["c"], "lastVerified": last["v"], "runs": runs, "checks": checks,
-            "changes": changes, "snapshots": snaps, "gaps": gaps}
+            "changes": changes, "snapshots": snaps, "gaps": gaps,
+            "valuation": val, "valTable": {str(y): r for y, r in vtable.items()}, "assumptions": vassume}
 
 
 def render_html(data=None, token="", static=False):
@@ -70,7 +75,7 @@ def full_document(fragment):
 
 
 def export(store, w, code, p, series, run_id):
-    data = collect(store, code, p, series, run_id)
+    data = collect(store, code, p, series, run_id, w)
     frag = render_html(data, static=True)
     with open(os.path.join(w.output, f"{code}.fragment.html"), "w", encoding="utf-8") as f:
         f.write(frag)

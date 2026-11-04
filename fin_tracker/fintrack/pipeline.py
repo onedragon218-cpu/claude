@@ -112,13 +112,21 @@ class Collector:
     # ---------- 1. 과거 실적 ----------
     def actuals(self):
         years = self.p["helper"] + self.p["actual"]
-        need = []
+        need, extra_need = [], []
         for y in years:
             rows = {r["item"]: r for r in self.s.current(self.code, fiscal_year=y, kind="ACTUAL", period="FY")}
             ok = all(a in rows and rows[a]["status"] == "VERIFIED" for a in config.REQUIRED_ACCOUNTS)
-            if ok or (y in self.p["helper"] and "eq_owner" in rows):
+            if ok and not ({"ocf", "debt"} <= set(rows)) and y in self.p["actual"]:
+                extra_need.append(y)          # 가치평가용 계정 보충(보관 원본이 있으면 네트워크 없음)
+                continue
+            if ok or (y in self.p["helper"] and {"eq_owner", "debt"} <= set(rows)):
                 continue
             need.append(y)
+        if extra_need:
+            self.log(dart.SOURCE, f"가치평가 계정 보충 {len(extra_need)}개년", "raw-cache", "ok", "법인세·현금흐름·차입금·현금")
+            need += [y for y in extra_need if y not in need]
+            if self.p["helper"][0] not in need:
+                need.append(self.p["helper"][0])
         reused = [y for y in years if y not in need]
         if reused:
             self.log(dart.SOURCE, f"{min(reused)}~{max(reused)} 중 {len(reused)}개년", "skipped-reuse", "ok", "VERIFIED 원값 재사용, 조회 안 함")
@@ -150,10 +158,15 @@ class Collector:
                 if only and y not in need:
                     continue
                 for item, v in row.items():
+                    if item.startswith("_"):
+                        continue
+                    ex = {"report_year": ry}
+                    if item in ("debt", "cash"):
+                        ex["accounts"] = row.get(f"_{item}_names", [])
                     self._put({"fiscal_year": y, "item": item, "kind": "ACTUAL", "value": v,
                                "unit": dart.UNITS.get(item, "원"), "basis": fs, "source": dart.SOURCE,
                                "source_ref": rcept, "source_url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept}",
-                               "extra": json.dumps({"report_year": ry}, ensure_ascii=False)}, reason=reason)
+                               "extra": json.dumps(ex, ensure_ascii=False)}, reason=reason)
 
     # ---------- 2. 주식 수(연말) ----------
     def shares(self):

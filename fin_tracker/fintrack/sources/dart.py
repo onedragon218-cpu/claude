@@ -28,7 +28,31 @@ ACCOUNTS = [
     ("liab", ("BS",), ["ifrs-full_Liabilities"], ["부채총계"]),
     ("issued_capital", ("BS",), ["ifrs-full_IssuedCapital"], ["자본금"]),
 ]
-FLOW = {"revenue", "op", "ni_owner", "eps"}   # 손익(기간) 항목. 분기 보고서에서는 누적값을 쓴다
+# 가치평가용 추가 계정(있으면 받음, 없어도 실적 검증에는 영향 없음)
+EXTRA = [
+    ("ni", ("IS", "CIS"), ["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)"]),
+    ("pretax", ("IS", "CIS"), ["ifrs-full_ProfitLossBeforeTax"], ["법인세비용차감전순이익", "법인세비용차감전순이익(손실)", "법인세차감전순이익"]),
+    ("tax", ("IS", "CIS"), ["ifrs-full_IncomeTaxExpenseContinuingOperations"], ["법인세비용", "법인세비용(수익)", "법인세수익(비용)"]),
+    ("ocf", ("CF",), ["ifrs-full_CashFlowsFromUsedInOperatingActivities"], ["영업활동현금흐름", "영업활동으로인한현금흐름"]),
+    ("capex_ppe", ("CF",), ["ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"], ["유형자산의취득"]),
+    ("capex_int", ("CF",), ["ifrs-full_PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities"], ["무형자산의취득"]),
+    ("interest_paid", ("CF",), ["ifrs-full_InterestPaidClassifiedAsOperatingActivities", "ifrs-full_InterestPaidClassifiedAsFinancingActivities"], ["이자의지급", "이자지급", "이자의지급(영업)"]),
+]
+ABS = {"capex_ppe", "capex_int", "interest_paid"}           # 부호가 보고서마다 달라 절댓값 사용
+# 차입부채: 아래 표준코드나 이름에 맞는 재무상태표 행을 모두 더한다(행 하나는 한 번만)
+DEBT_IDS = {"ifrs-full_ShorttermBorrowings", "ifrs-full_CurrentPortionOfLongtermBorrowings", "ifrs-full_LongtermBorrowings",
+            "ifrs-full_CurrentBorrowingsAndCurrentPortionOfNoncurrentBorrowings", "ifrs-full_NoncurrentPortionOfNoncurrentBorrowings",
+            "ifrs-full_BondsIssued", "ifrs-full_NoncurrentPortionOfNoncurrentBondsIssued", "ifrs-full_CurrentPortionOfNoncurrentBondsIssued",
+            "ifrs-full_LeaseLiabilities", "ifrs-full_CurrentLeaseLiabilities", "ifrs-full_NoncurrentLeaseLiabilities",
+            "dart_ShortTermBorrowings", "dart_LongTermBorrowingsGross", "dart_BondsIssued", "dart_CurrentPortionOfLongTermBorrowings"}
+DEBT_NAMES = {"단기차입금", "장기차입금", "유동성장기차입금", "유동성장기부채", "사채", "유동성사채", "단기사채", "장기사채",
+              "차입금및사채", "단기차입금및사채", "장기차입금및사채", "유동성차입금및사채", "전환사채", "교환사채", "신주인수권부사채",
+              "리스부채", "유동리스부채", "비유동리스부채", "금융리스부채", "유동금융리스부채", "비유동금융리스부채", "단기리스부채", "장기리스부채",
+              "단기차입부채", "장기차입부채", "유동차입금", "비유동차입금"}
+CASH_IDS = {"ifrs-full_CashAndCashEquivalents", "dart_ShortTermDepositsNotClassifiedAsCashEquivalents"}
+CASH_NAMES = {"현금및현금성자산", "단기금융상품", "단기예금", "단기금융자산"}
+
+FLOW = {"revenue", "op", "ni_owner", "eps", "pretax", "tax", "ocf", "capex_ppe", "capex_int", "interest_paid"}   # 손익(기간) 항목. 분기 보고서에서는 누적값을 쓴다
 UNITS = {"eps": "원"}
 COLS = (("thstrm_amount", 0), ("frmtrm_amount", 1), ("bfefrmtrm_amount", 2))
 
@@ -147,6 +171,21 @@ def _find(lst, sj, ids, names, col):
     return None
 
 
+def _sum_rows(lst, ids, names, col):
+    """재무상태표에서 표준코드나 이름이 맞는 행을 더한다. 반환: (합계 또는 None, 맞은 계정명들)"""
+    total, hit = 0.0, []
+    for it in lst:
+        if it.get("sj_div") != "BS":
+            continue
+        aid = it.get("account_id", "").replace("ifrs_", "ifrs-full_", 1)
+        nm = re.sub(r"\s", "", it.get("account_nm", ""))
+        if aid in ids or nm in names:
+            v = _num(it.get(col))
+            if v is not None:
+                total += v; hit.append(nm)
+    return (total if hit else None), hit
+
+
 def parse(d):
     """사업보고서 → ({연도: {항목: 값}}, 접수번호, 기준(CFS/OFS))"""
     lst = d.get("list", [])
@@ -156,7 +195,15 @@ def parse(d):
     fs = "OFS" if any(it.get("fs_div") == "OFS" for it in lst[:3]) else "CFS"
     out = {}
     for col, off in COLS:
-        row = {item: v for item, sj, ids, names in ACCOUNTS if (v := _find(lst, sj, ids, names, col)) is not None}
+        row = {item: v for item, sj, ids, names in ACCOUNTS + EXTRA if (v := _find(lst, sj, ids, names, col)) is not None}
+        for k in ABS & set(row):
+            row[k] = abs(row[k])
+        if row.get("eq") is not None:          # 재무상태표가 있는 열에서만 합산
+            debt, dn = _sum_rows(lst, DEBT_IDS, DEBT_NAMES, col)
+            cash, cn = _sum_rows(lst, CASH_IDS, CASH_NAMES, col)
+            row["debt"] = debt or 0.0          # 맞는 행이 없으면 무차입으로 본다(계정명은 검증 보고서에 표시)
+            row["cash"] = cash or 0.0
+            row["_debt_names"], row["_cash_names"] = dn, cn
         if row:
             out[year - off] = row
     return out, rcept, fs
@@ -168,7 +215,7 @@ def parse_partial(d):
     if not lst:
         return {}, None
     row = {}
-    for item, sj, ids, names in ACCOUNTS:
+    for item, sj, ids, names in ACCOUNTS + EXTRA:
         v = None
         if item in FLOW:
             v = _find(lst, sj, ids, names, "thstrm_add_amount")

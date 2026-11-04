@@ -1,20 +1,20 @@
-# fintrack — 기업 장기 재무 추이 (Windows 11 로컬 실행)
+# fintrack 1.0 — 기업 장기 재무 추이와 가치평가 (Windows 11 로컬 실행)
 
 종목을 입력하면 과거 10년 확정 실적(DART), 올해 분기·반기 실적, 향후 2년 컨센서스(FnGuide)를 모읍니다.
 7개 지표(매출액·영업이익률·EPS·BPS·ROE·부채비율·시가총액)를 **통합 그래프 1개 + 개별 그래프 7개**로 보여 줍니다.
+여기에 주가와 주당 가치(S-RIM·DCF·PER·PBR·PSR, 적정가 중앙값), ROIC와 WACC를 겹쳐 그립니다.
 분석한 종목은 탭으로 남습니다. 모든 자료는 사용자가 고른 **작업 폴더** 안의 DB에 쌓이고, 한 번 검증한 값은 다시 받지 않습니다.
 
 ## 처음 설치 (한 번만)
 
 1. Python 3.10 이상 설치: https://www.python.org/downloads/
    - 설치 첫 화면에서 **Add python.exe to PATH** 를 체크합니다.
-2. 프로그램 내려받기
-   - 아래 주소를 브라우저에 붙여 넣으면 ZIP 파일이 바로 내려받아집니다(로그인 불필요, 공개 저장소).
-     `https://github.com/onedragon218-cpu/claude/archive/refs/heads/claude/magical-bell-qydkjr.zip`
-   - 내려받은 ZIP을 **오른쪽 클릭 → 속성 → 아래쪽 '차단 해제' 체크 → 확인**(인터넷에서 받은 .bat 실행 경고 방지).
-   - 오른쪽 클릭 → **압축 풀기** → 풀린 폴더 안의 `fin_tracker` 폴더를 원하는 곳으로 옮깁니다(예: `D:\fintrack_app`).
-   - 웹 화면에서 받으려면: https://github.com/onedragon218-cpu/claude/tree/claude/magical-bell-qydkjr → 초록색 **Code** 버튼 → **Download ZIP**.
-3. `setup_windows.bat` 더블클릭 → 라이브러리를 설치합니다(2~3분).
+2. 프로그램 내려받기 (로그인 불필요)
+   - 아래 주소를 브라우저 주소창에 붙여 넣으면 `fintrack-1.0.zip`이 바로 받아집니다.
+     `https://github.com/onedragon218-cpu/claude/raw/claude/magical-bell-qydkjr/fin_tracker/dist/fintrack-1.0.zip`
+   - 받은 ZIP을 **오른쪽 클릭 → 속성 → 아래쪽 '차단 해제' 체크 → 확인** (인터넷에서 받은 .bat 실행 경고 방지).
+   - **오른쪽 클릭 → 압축 풀기** → 생긴 `fintrack` 폴더를 원하는 곳으로 옮깁니다(예: `D:\fintrack_app`).
+3. `fintrack` 폴더 안의 `setup_windows.bat` 더블클릭 → 라이브러리를 설치합니다(2~3분).
 4. `run_fintrack.bat` 더블클릭 → 처음 한 번 **작업 폴더 선택 창**이 뜹니다(예: `D:\투자\fintrack_data`).
 5. 브라우저에 화면이 열리면 오른쪽 위 **설정** → **DART 인증키** 입력 → **저장**.
 
@@ -31,6 +31,21 @@
 
 **갱신이 하는 일:** 사업보고서 정정 공시 확인(있으면 그 연도를 새 버전으로 다시 받음), 올해 새 분기·반기 보고서, FnGuide 컨센서스, 오늘 시세를 조회합니다.
 이미 검증한 과거 실적은 다시 받지 않습니다. 컨센서스는 갱신한 날짜마다 따로 쌓여 전망 변화를 추적할 수 있습니다.
+
+## 가치평가 (통합 그래프의 '가치평가'·'겹쳐 보기', 개별 그래프 맨 아래 2개)
+
+| 항목 | 계산 | 비고 |
+|---|---|---|
+| Ke(자기자본비용) | 그해 국고채 10년 평균 + 위험 프리미엄 5.5%p (β=1) | 금리: 한국은행 ECOS, `fintrack\assumptions.json` |
+| S-RIM | BPS + BPS×(ROE − Ke)×w ÷ (1 + Ke − w) | ROE = 최근 3년 가중(3:2:1). 띠 = w 1.0~0.8, 선 = w 0.9. 전망 연도는 컨센서스 ROE |
+| ROIC | 영업이익×(1 − 세율) ÷ 평균 투하자본 | 투하자본 = 자본총계 + 차입부채 − 현금성자산. 세율 = (세전이익 − 순이익) ÷ 세전이익 |
+| WACC | E/(D+E)×Ke + D/(D+E)×Kd×(1 − 세율) | E = 시가총액, D = 차입부채, Kd = 이자 지급 ÷ 평균 차입부채 |
+| DCF(FCFF) | 최근 3년 평균 FCFF를 2년 성장(올해는 컨센서스 매출 성장률) 후 영구성장 1.5%, WACC로 할인 − 순차입금 | FCFF = 영업현금흐름 + 이자×(1 − 세율) − 설비투자. **0 이하이거나 주가의 3배를 넘으면 제외**하고 계산표에 이유 표시 |
+| PER·PBR·PSR 가치 | EPS·BPS·주당매출 × 그 회사 과거 10년 연말 배수의 중앙값 | 과거 연도에는 사후적 기준(이후 연도 정보 포함) |
+| 적정가 중앙값 | 위 방법들 중 2개 이상 있는 해의 중앙값 | |
+
+가정을 바꾸려면 작업 폴더 `manual\assumptions.json`에 바꿀 항목만 적습니다(예: `{"위험프리미엄_ERP": 0.06}`).
+**주의:** DCF와 S-RIM은 가정 하나로 결과가 수십 % 달라집니다. 정답 가격이 아니라 범위로 보세요. 차입이 많은 회사는 WACC가 낮게 나와 DCF가 과대해지기 쉽습니다(한솔제지: 10개년 중 9개년 제외).
 
 ## 인증키 보관
 - 키는 **Windows 자격 증명 관리자**에만 저장합니다(제어판 → 자격 증명 관리자 → Windows 자격 증명 → `fintrack`).
@@ -80,10 +95,11 @@
 ```
 .venv\Scripts\python -m fintrack run 213500 --refresh   # 화면 없이 수집·갱신
 .venv\Scripts\python -m fintrack where                   # 작업 폴더·키 저장 위치
-.venv\Scripts\python -m unittest discover -s tests       # 시험
+.venv\Scripts\python -m unittest discover -s tests       # 시험(11개)
 ```
 
 ## 알려진 한계
+- 실제 Windows에서 `.bat` 실행과 자격 증명 저장은 개발 환경에서 돌려 보지 못했습니다. 첫 실행 결과를 확인해야 합니다.
 - FnGuide·한국거래소·네이버 수집은 개발 환경에서 접속이 막혀 **가상 시험 화면으로만 확인**했습니다. 첫 실행 결과를 확인해야 합니다.
 - FnGuide 이용약관은 자동 수집을 제한할 수 있습니다. 이 프로그램은 갱신 버튼을 눌렀을 때만, 종목당 한 장, 하루 한 번 이내로 조회합니다(같은 날 다시 누르면 보관 원본 사용).
 - 추정 기관이 없는 중소형주는 전망이 비어 있습니다.
