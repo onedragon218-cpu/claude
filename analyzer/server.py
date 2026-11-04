@@ -13,6 +13,7 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b)))
+        self.send_header("Cache-Control", "no-store")   # 새 버전 화면이 바로 보이도록 브라우저 저장본을 쓰지 않음
         self.end_headers()
         self.wfile.write(b)
 
@@ -22,6 +23,10 @@ class H(BaseHTTPRequestHandler):
         by = int(q["base_year"][0]) if q.get("base_year") else None
         conn = db.connect()
         try:
+            if u.path == "/api/version":
+                from . import __version__
+                return self._send(200, json.dumps({"version": __version__, "root": config.ROOT, "data": config.DATA_DIR},
+                                                  ensure_ascii=False), "application/json")
             if u.path == "/api/search":
                 from . import search
                 res = search.search(conn, q.get("q", [""])[0], limit=12)

@@ -53,9 +53,28 @@ function Start-Server([string]$python) {
 }
 
 function Stop-Server {
-    # 새 버전 코드를 읽도록 실행 중인 화면 서버를 끈다
+    # 새 버전 코드를 읽도록 실행 중인 화면 서버를 끈다(작업 스케줄러 작업, 명령줄, 8765 포트 사용 프로세스 모두)
+    Stop-ScheduledTask -TaskName $TaskServer -ErrorAction SilentlyContinue
     Get-CimInstance Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*analyzer serve*' } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Milliseconds 500
+    try {
+        Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+            ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+    } catch { }
+    for ($i = 0; $i -lt 20 -and (Test-Server); $i++) { Start-Sleep -Milliseconds 300 }
+}
+
+function Get-LocalVersion {
+    $f = Join-Path $Root 'analyzer\__init__.py'
+    if (Test-Path $f) { if ((Get-Content $f -Raw) -match '"([^"]+)"') { return $Matches[1] } }
+    return '?'
+}
+
+function Test-ServerVersion {
+    # 떠 있는 화면 서버가 이 폴더의 새 코드인지 확인
+    try {
+        $r = Invoke-RestMethod -Uri "$Url/api/version" -TimeoutSec 5
+        return @{ ok = ($r.version -eq (Get-LocalVersion)); running = $r.version; root = $r.root }
+    } catch { return @{ ok = $false; running = '(응답 없음)'; root = '' } }
 }

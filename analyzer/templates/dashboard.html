@@ -11,7 +11,7 @@
   --bg:#f6f6f4; --surface-1:#fcfcfb; --surface-2:#f0efec; --border:#e2e1dc;
   --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#7b7a75; --grid:#e8e7e2;
   --accent:#2a78d6;
-  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6; --s8:#e34948;
   --good:#1a7f37; --warn:#9a6700; --bad:#cf222e; --info:#52514e;
   --good-bg:#e6f4ea; --warn-bg:#fff4d6; --bad-bg:#fde8e8; --info-bg:#efefec;
 }
@@ -21,7 +21,7 @@
     --bg:#121211; --surface-1:#1a1a19; --surface-2:#232321; --border:#33332f;
     --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#8f8e86; --grid:#2c2c29;
     --accent:#3987e5;
-    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
     --good:#4ac26b; --warn:#d4a72c; --bad:#ff7b72; --info:#c3c2b7;
     --good-bg:#12321d; --warn-bg:#3a2e0b; --bad-bg:#3d1716; --info-bg:#262624;
   }
@@ -31,7 +31,7 @@
   --bg:#121211; --surface-1:#1a1a19; --surface-2:#232321; --border:#33332f;
   --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#8f8e86; --grid:#2c2c29;
   --accent:#3987e5;
-  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
   --good:#4ac26b; --warn:#d4a72c; --bad:#ff7b72; --info:#c3c2b7;
   --good-bg:#12321d; --warn-bg:#3a2e0b; --bad-bg:#3d1716; --info-bg:#262624;
 }
@@ -95,7 +95,10 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 </head>
 <body>
 <header>
-  <h1 id="title"></h1>
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <h1 id="title" style="margin:0"></h1>
+    <label style="flex-direction:row;align-items:center;gap:6px">기업 선택 <select id="compsel"></select></label>
+  </div>
   <div class="sub" id="subtitle"></div>
 </header>
 <nav id="tabs">
@@ -205,11 +208,26 @@ const $ = s => document.querySelector(s);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const COLORS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
 const MET = D.metrics;
-const MNAME = Object.fromEntries(MET.map(m=>[m.key,m.name]));
-const MUNIT = Object.fromEntries(MET.map(m=>[m.key,m.unit]));
+MET.forEach((m,i)=>{ m.color = COLORS[i]; m.ps = 'circle'; });
+// 가치평가 지표(화면 G의 계산 결과)를 통합 그래프에 함께 겹치기 위한 정의
+const VMET = [
+  {key:'v_price',  name:'주가',          unit:'원', val:true, color:'--text-primary', ps:'crossRot', f:r=>r.price},
+  {key:'v_srim',   name:'S-RIM 주당가치', unit:'원', val:true, color:'--s8', ps:'triangle', f:r=>(r.values||{}).srim},
+  {key:'v_dcf',    name:'DCF 주당가치',   unit:'원', val:true, color:'--text-secondary', ps:'rect', f:r=>(r.values||{}).dcf},
+  {key:'v_per',    name:'PER 가치',       unit:'원', val:true, color:'--s3', ps:'triangle', f:r=>(r.values||{}).per},
+  {key:'v_pbr',    name:'PBR 가치',       unit:'원', val:true, color:'--s4', ps:'triangle', f:r=>(r.values||{}).pbr},
+  {key:'v_psr',    name:'PSR 가치',       unit:'원', val:true, color:'--s1', ps:'triangle', f:r=>(r.values||{}).psr},
+  {key:'v_median', name:'종합 주당가치',   unit:'원', val:true, color:'--s7', ps:'rectRot', f:r=>r.median},
+  {key:'v_roic',   name:'ROIC',          unit:'%',  val:true, color:'--s2', ps:'triangle', f:r=>r.roic==null?null:r.roic*100},
+  {key:'v_wacc',   name:'WACC',          unit:'%',  val:true, color:'--s5', ps:'triangle', f:r=>r.wacc==null?null:r.wacc*100},
+  {key:'v_spread', name:'ROIC−WACC',     unit:'%p', val:true, color:'--good', ps:'rectRot', f:r=>r.spread==null?null:r.spread*100},
+];
+const XMET = MET.concat(VMET);
+const MNAME = Object.fromEntries(XMET.map(m=>[m.key,m.name]));
+const MUNIT = Object.fromEntries(XMET.map(m=>[m.key,m.unit]));
 const ACC = D.accounts;
 let BY = D.periods.base_year;
-const visible = new Set(MET.map(m=>m.key));
+const visible = new Set(MET.map(m=>m.key).concat(['v_srim','v_dcf','v_roic','v_wacc']));
 const charts = {};
 const SERVED = location.protocol.startsWith('http') && !location.hostname.endsWith('claude.ai');
 const companyUrl = code => SERVED ? `/company/${code}?base_year=${BY}` : `${code}.html`;
@@ -225,7 +243,15 @@ const badge = s => s ? `<span class="badge b-${esc(s)}">${esc(s)}</span>` : '';
 const yearsFor = by => Array.from({length:13}, (_,i)=>by-10+i);
 
 // 연도별로 그래프에 쓸 값을 고른다(실적 / 현재 연도 / 전망 구분)
+function pickVal(m, y){
+  const row = ((D.valuation||{}).rows||[]).find(r=>r.year===y); if (!row) return null;
+  const v = m.f(row); if (v==null || Number.isNaN(v) || (m.unit==='원' && v<=0)) return null;
+  const k = String(row.kind);
+  const kind = k.startsWith('실적') ? '실적' : k.startsWith('현재') ? '현재(부분 실적)' : '전망';
+  return {v, kind, p:{status: row.caution?'UNVERIFIED':'VERIFIED', note:(row.notes||[]).join(' / '), source:'가치평가 계산', as_of:null}};
+}
 function pick(m, y, by){
+  if (m.val) return pickVal(m, y);
   const s = (D.series[m.key]||{})[y]; if(!s) return null;
   if (y < by) return s.fy && s.fy.value!=null ? {v:s.fy.value, kind:'실적', p:s.fy} : null;
   if (y === by){
@@ -241,7 +267,7 @@ const isEst = pt => pt && pt.kind !== '실적';
 function yoy(m, y, by){
   const a = pick(m, y-1, by), b = pick(m, y, by);
   if(!a || !b || a.v === 0) return null;
-  if (m.unit === '%') return {pp: b.v - a.v};
+  if (m.unit === '%' || m.unit === '%p') return {pp: b.v - a.v};
   if (a.v < 0) return null;
   return {pct: (b.v/a.v - 1)*100};
 }
@@ -279,17 +305,14 @@ function renderCombo(){
   setCMode(false);
   const ys = yearsFor(BY);
   const ds = [], norms = {};
-  MET.forEach((m,i)=>{
+  XMET.forEach(m=>{
     const n = normalize(m, ys, BY); norms[m.key]=n;
-    const c = css(COLORS[i]);
-    ds.push({label:m.name, key:m.key, data:n.data, borderColor:c, backgroundColor:c, borderWidth:2, pointRadius:3.5,
-      pointHoverRadius:6, pointBackgroundColor: n.pts.map(p=> p && isEst(p) ? css('--surface-1') : c),
-      segment: segDash(n.pts), hidden: !visible.has(m.key), tension:0});
+    ds.push(xDataset(m, n.data, n.pts, !visible.has(m.key)));
   });
   const o = baseOpts();
   o.scales.y.title = {display:true, text:'표준화 값', color:css('--text-muted')};
   o.plugins.tooltip.callbacks = {label: ctx => {
-    const m = MET.find(x=>x.key===ctx.dataset.key); const p = norms[m.key].pts[ctx.dataIndex];
+    const m = XMET.find(x=>x.key===ctx.dataset.key); const p = norms[m.key].pts[ctx.dataIndex];
     if(!p) return `${m.name}: 자료 없음`;
     return `${m.name}: ${fmt(p.v,m.unit)} ${m.unit} (${p.kind}) · 표준화 ${ctx.parsed.y.toFixed(1)}`;
   }};
@@ -299,15 +322,32 @@ function renderCombo(){
   if (charts.combo) charts.combo.destroy();
   charts.combo = new Chart($('#combo'), {type:'line', data:{labels:ys.map(y=> y>BY? y+'E' : y===BY? y+'(현재)': String(y)), datasets:ds}, options:o});
   $('#normtable').innerHTML = '<tr><th class="l">지표</th><th class="l">단위</th><th class="l">표준화 방식</th><th class="l">이유</th></tr>' +
-    MET.map(m=>{ const n=norms[m.key]; return `<tr><td class="l">${m.name}</td><td class="l">${m.unit}</td><td class="l">${esc(n.method)}</td><td class="l">${n.minmax?'0 이하 값이 있거나 기준값이 0에 가까워 단순 비율을 쓰지 않음':'기준값이 양수라 첫해 대비 비율 사용'}</td></tr>`;}).join('');
-  $('#normnote').textContent = `분석 기간 ${ys[0]}~${ys[12]} (과거 ${ys[0]}~${BY-1}, 현재 ${BY}, 전망 ${BY+1}~${BY+2}). 단위가 다른 지표를 한 축에 놓기 위해 표준화했습니다. 실제 값은 D·E 화면에서 확인하세요.`;
-  $('#toggles').innerHTML = MET.map((m,i)=>`<span class="tg ${visible.has(m.key)?'':'off'}" data-k="${m.key}" role="button" aria-pressed="${visible.has(m.key)}"><span class="sw" style="background:var(${COLORS[i]})"></span>${m.name}</span>`).join('') +
-    '<span class="tg" data-k="__all">모두 보기</span>';
+    XMET.map(m=>{ const n=norms[m.key]; return `<tr><td class="l">${m.name}</td><td class="l">${m.unit}</td><td class="l">${esc(n.method)}</td><td class="l">${n.minmax?'0 이하 값이 있거나 기준값이 0에 가까워 단순 비율을 쓰지 않음':'기준값이 양수라 첫해 대비 비율 사용'}</td></tr>`;}).join('');
+  $('#normnote').textContent = `분석 기간 ${ys[0]}~${ys[12]} (과거 ${ys[0]}~${BY-1}, 현재 ${BY}, 전망 ${BY+1}~${BY+2}). 단위가 다른 지표를 한 축에 놓기 위해 표준화했습니다. 재무지표 7개와 가치평가(S-RIM·DCF·상대가치·ROIC·WACC·ROIC−WACC)를 함께 겹쳤습니다. 실제 값은 '원데이터 중첩' 탭에서 확인하세요.`;
+  buildToggles(visible, renderCombo, false);
+}
+
+// 통합 그래프의 지표 켜기·끄기 단추(재무지표 7개 / 가치평가 10개)
+function buildToggles(set, rerender, showUnit){
+  const chip = m => `<span class="tg ${set.has(m.key)?'':'off'}" data-k="${m.key}" role="button" aria-pressed="${set.has(m.key)}"><span class="sw" style="background:var(${m.color})"></span>${m.name}${showUnit?` <span class="muted">${m.unit}</span>`:''}</span>`;
+  $('#toggles').innerHTML = `<div style="width:100%" class="muted">재무지표</div>${MET.map(chip).join('')}` +
+    `<div style="width:100%;margin-top:4px" class="muted">가치평가 (S-RIM·DCF·상대가치·ROIC·WACC, 계산 근거는 화면 G)</div>${VMET.map(chip).join('')}` +
+    `<div style="width:100%;margin-top:4px"></div><span class="tg" data-k="__fin">재무지표만</span><span class="tg" data-k="__val">가치평가만</span><span class="tg" data-k="__all">모두 보기</span><span class="tg" data-k="__none">모두 끄기</span>`;
   document.querySelectorAll('#toggles .tg').forEach(el=>el.onclick=()=>{
     const k = el.dataset.k;
-    if (k==='__all') MET.forEach(m=>visible.add(m.key)); else visible.has(k)? visible.delete(k) : visible.add(k);
-    renderCombo();
+    if (k==='__all') XMET.forEach(m=>set.add(m.key));
+    else if (k==='__none') set.clear();
+    else if (k==='__fin'){ set.clear(); MET.forEach(m=>set.add(m.key)); }
+    else if (k==='__val'){ set.clear(); VMET.forEach(m=>set.add(m.key)); }
+    else set.has(k)? set.delete(k) : set.add(k);
+    rerender();
   });
+}
+function xDataset(m, data, pts, hidden, extra){
+  const c = css(m.color);
+  return Object.assign({label:m.name, key:m.key, data, _pts:pts, borderColor:c, backgroundColor:c,
+    borderWidth: m.val ? 1.75 : 2, pointRadius: m.val ? 4 : 3.5, pointStyle:m.ps, pointHoverRadius:6,
+    pointBackgroundColor: pts.map(p=> p && isEst(p) ? css('--surface-1') : c), segment: segDash(pts), hidden, tension:0, spanGaps:false}, extra||{});
 }
 
 // ---- 통합 그래프 탭: 표준화 비교 ↔ 지표별 원데이터 ----
@@ -331,26 +371,20 @@ function renderC(){
 }
 
 // 원데이터 중첩: 표준화하지 않고 실제 단위 그대로 겹친다. 단위가 달라 축을 단위별로 나눈다(억원·원 왼쪽, % 오른쪽).
-const UNIT_AXIS = {'억원':'y_eok', '원':'y_won', '%':'y_pct'};
-const rawVisible = new Set(['revenue','market_cap','op_margin','roe','debt_ratio']);
+const UNIT_AXIS = {'억원':'y_eok', '원':'y_won', '%':'y_pct', '%p':'y_pct'};
+// 처음 화면: ROIC·WACC가 눌리지 않도록 부채비율(200%대)과 DCF(값이 큼)는 꺼 둔다. 단추로 켤 수 있음
+const rawVisible = new Set(['op_margin','roe','v_price','v_srim','v_median','v_roic','v_wacc','v_spread']);
 function renderRawAll(){
   setCMode(false);
   $('#normcard').style.display='none';
-  $('#ctitle').textContent = '7개 지표 원데이터 중첩(실제 단위)';
-  $('#normnote').textContent = '표준화하지 않은 실제 값을 겹쳤습니다. 단위가 달라 축을 나눴습니다: 억원(매출액·시가총액)과 원(EPS·BPS)은 왼쪽, %(영업이익률·ROE·부채비율)는 오른쪽. 값을 비교할 때는 같은 축끼리만 비교하세요. 아래 단추로 지표를 켜고 끕니다.';
-  $('#toggles').innerHTML = MET.map((m,i)=>`<span class="tg ${rawVisible.has(m.key)?'':'off'}" data-k="${m.key}" role="button" aria-pressed="${rawVisible.has(m.key)}"><span class="sw" style="background:var(${COLORS[i]})"></span>${m.name} <span class="muted">${m.unit}</span></span>`).join('') +
-    '<span class="tg" data-k="__all">모두 보기</span><span class="tg" data-k="__none">모두 끄기</span>';
-  document.querySelectorAll('#toggles .tg').forEach(el=>el.onclick=()=>{
-    const k = el.dataset.k;
-    if (k==='__all') MET.forEach(m=>rawVisible.add(m.key)); else if (k==='__none') rawVisible.clear();
-    else rawVisible.has(k)? rawVisible.delete(k) : rawVisible.add(k);
-    renderRawAll();
-  });
+  $('#ctitle').textContent = '원데이터 중첩: 재무지표 + 가치평가(실제 단위)';
+  $('#normnote').textContent = '표준화하지 않은 실제 값을 겹쳤습니다. 축은 단위별로 나눴습니다. 억원(매출액·시가총액)과 원(EPS·BPS·주가·S-RIM·DCF·상대가치)은 왼쪽, %(영업이익률·ROE·부채비율·ROIC·WACC·ROIC−WACC)는 오른쪽입니다. 같은 축에 있는 선끼리만 비교하세요. ROIC−WACC는 0보다 크면 초록(가치 창출), 작으면 빨강(가치 훼손)으로 칠합니다.';
+  buildToggles(rawVisible, renderRawAll, true);
   const ys = yearsFor(BY);
-  const ds = MET.map((m,i)=>{ const pts = ys.map(y=>pick(m,y,BY)); const c = css(COLORS[i]);
-    return {label:`${m.name}(${m.unit})`, key:m.key, unit:m.unit, yAxisID:UNIT_AXIS[m.unit], data:pts.map(p=>p?p.v:null), _pts:pts,
-      borderColor:c, backgroundColor:c, borderWidth:2, pointRadius:3.5, pointHoverRadius:6,
-      pointBackgroundColor: pts.map(p=>p&&isEst(p)?css('--surface-1'):c), segment:segDash(pts), hidden:!rawVisible.has(m.key), tension:0}; });
+  const ds = XMET.map(m=>{ const pts = ys.map(y=>pick(m,y,BY));
+    const extra = {label:`${m.name}(${m.unit})`, unit:m.unit, yAxisID:UNIT_AXIS[m.unit]};
+    if (m.key==='v_spread') Object.assign(extra, {fill:{target:{value:0}, above:rgba('--good',0.18), below:rgba('--bad',0.18)}, borderColor:css('--text-secondary')});
+    return xDataset(m, pts.map(p=>p?p.v:null), pts, !rawVisible.has(m.key), extra); });
   const used = new Set(ds.filter(d=>!d.hidden).map(d=>d.yAxisID));
   const o = baseOpts();
   delete o.scales.y;
@@ -360,7 +394,7 @@ function renderRawAll(){
   o.scales.y_won = ax('y_won','left','원', '원', !used.has('y_eok'));
   o.scales.y_pct = ax('y_pct','right','%', '%', !used.has('y_eok') && !used.has('y_won'));
   o.plugins.tooltip.callbacks = {label: ctx => { const p = ctx.dataset._pts[ctx.dataIndex]; if(!p) return null;
-    const m = MET.find(x=>x.key===ctx.dataset.key); const r = yoy(m, ys[ctx.dataIndex], BY);
+    const m = XMET.find(x=>x.key===ctx.dataset.key); const r = yoy(m, ys[ctx.dataIndex], BY);
     return `${m.name}: ${fmt(p.v,m.unit)} ${m.unit} (${p.kind})${r?' · 전년 대비 '+yoyText(r):''}`; }};
   o.onClick = (e, els, chart) => { const x = chart.scales.x.getValueForPixel(e.x); if (x!=null) showDetail(ys[Math.round(x)]); };
   if (charts.combo) charts.combo.destroy();
@@ -403,7 +437,7 @@ function renderRaw(key){
 
 function showDetail(y){
   if (y==null) return;
-  const rows = MET.map(m=>{
+  const rows = XMET.map(m=>{
     const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};
     const part = s.partial && y===BY ? ` · 부분 실적(${s.partial.period}) ${fmt(s.partial.value,m.unit)}` : '';
     return `<tr><td class="l">${m.name}</td><td>${p?fmt(p.v,m.unit):'–'}</td><td class="l">${m.unit}</td><td class="l">${p?p.kind:'자료 없음'}${part}</td><td>${yoyText(yoy(m,y,BY))}</td><td class="l">${p&&p.p.status?badge(p.p.status):''}</td></tr>`;
@@ -459,7 +493,9 @@ function renderFacts(){
 
 function renderStatic(){
   $('#title').textContent = `${D.company.name} (${D.company.code})`;
-  $('#subtitle').textContent = `기준 연도 ${BY} · 화면 생성 ${D.generated_at} · 마지막 수집 ${D.last_collect||'–'} · 마지막 검증 ${D.last_verify||'–'}`;
+  $('#compsel').innerHTML = D.companies.map(c=>`<option value="${esc(c.stock_code)}" ${c.stock_code===D.company.code?'selected':''}>${esc(c.name||'')} (${esc(c.stock_code)})</option>`).join('');
+  $('#compsel').onchange = e => { location.href = companyUrl(e.target.value); };
+  $('#subtitle').textContent = `프로그램 버전 ${D.app_version||'?'} · 기준 연도 ${BY} · 화면 생성 ${D.generated_at} · 마지막 수집 ${D.last_collect||'–'} · 마지막 검증 ${D.last_verify||'–'}`;
   $('#by').value = BY;
   $('#complist').innerHTML = D.companies.map(c=>`<option value="${esc(c.name||c.stock_code)}">${esc(c.stock_code)}</option>`).join('');
   $('#comps').innerHTML = '<tr><th class="l">종목코드</th><th class="l">기업명</th><th>저장된 값</th><th class="l">마지막 수집일</th><th class="l"></th></tr>' +

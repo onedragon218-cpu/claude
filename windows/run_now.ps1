@@ -7,5 +7,6 @@ Push-Location $Root
 try {
     if ($args.Count -gt 0) { & $py -m analyzer analyze @args } else { & $py -m analyzer update-all }
 } finally { Pop-Location }
+if (-not (Test-ServerVersion).ok) { Stop-Server }   # 옛 버전 서버가 떠 있으면 새 코드로 교체
 Start-Server $py
 Start-Process $Url

@@ -111,6 +111,12 @@ Push-Location $Root
 try { & $py -m analyzer update-all } finally { Pop-Location }
 Stop-Server            # 이전 버전 서버가 떠 있으면 끄고 새 코드로 다시 시작
 Start-Server $py
+$v = Test-ServerVersion
+if ($v.ok) { Write-Host "      화면 서버 버전 확인: $($v.running) (폴더 $($v.root))" -ForegroundColor Green }
+else {
+    Write-Host "      경고: 화면 서버 버전이 맞지 않습니다. 실행 중 $($v.running), 이 폴더 $(Get-LocalVersion)" -ForegroundColor Red
+    Write-Host "      PC를 다시 시작하거나 windows\uninstall.bat 후 install.bat 을 실행하세요." -ForegroundColor Red
+}
 Start-Process $Url
 Write-Host ''
 Write-Host "설치 완료. 화면: $Url  (바탕화면 '재무분석 열기')" -ForegroundColor Green
