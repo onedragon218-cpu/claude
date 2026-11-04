@@ -121,11 +121,29 @@ class DartUnavailable(Exception):
     pass
 
 
+def key_file():
+    """저장소 밖의 사용자 폴더(윈도우: %APPDATA%\\corp-analyzer)에 키를 둔다. 저장소에 커밋될 일이 없다."""
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "corp-analyzer", "dart_api_key.txt")
+
+
 def api_key():
+    """1순위 환경변수 DART_API_KEY, 2순위 키 파일."""
     k = os.environ.get("DART_API_KEY", "").strip()
+    if not k and os.path.exists(key_file()):
+        with open(key_file(), encoding="utf-8") as f:
+            k = f.read().strip()
     if not k:
-        raise DartUnavailable("DART_API_KEY 환경변수가 없습니다.")
+        raise DartUnavailable("DART_API_KEY가 없습니다(환경변수 또는 키 파일).")
     return k
+
+
+def has_key():
+    try:
+        api_key()
+        return True
+    except DartUnavailable:
+        return False
 
 
 def _get(path, **params):

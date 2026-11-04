@@ -214,7 +214,7 @@ def collect(conn, code, P, stats, offline=False):
     if offline:
         return need
     corp = None
-    has_key = bool(os.environ.get("DART_API_KEY", "").strip())
+    has_key = dart.has_key()
     if not has_key:
         stats.notes.append("DART_API_KEY 없음 → DART 수집(공시 점검·사업보고서·주식 수·분기 실적) 건너뜀")
 

@@ -25,6 +25,12 @@ python -m analyzer serve                   # http://localhost:8765 에서 화면
 | `python -m analyzer update-all` | DB의 모든 기업 갱신(자동 실행용) |
 | `python -m unittest discover -s analyzer/tests -t .` | 시험 10개 |
 
+화면 C(통합 그래프)는 위쪽 탭으로 **표준화 비교**와 **지표별 원데이터**(실제 단위 그래프, 연도별 표)를 오갈 수 있습니다. 마지막으로 고른 탭은 브라우저에 기억됩니다.
+
+## 2-1. 윈도우11 PC에서 자동 실행
+
+`windows\install.bat`을 더블클릭하면 파이썬 확인(없으면 설치), DART 인증키 저장, 작업 스케줄러 등록(평일 07:13 수집, 로그인 시 화면 서버 시작), 바탕화면 바로가기까지 한 번에 처리합니다. 자세한 내용은 `windows/README.md`에 있습니다.
+
 ## 2. 자동 수집(GitHub Actions)
 
 이 개발 환경에서는 DART·FnGuide·네이버 접속이 막혀 있어서, **수집 코드는 GitHub 서버에서 자동으로 실행**되도록 `.github/workflows/collect.yml`을 넣었다.

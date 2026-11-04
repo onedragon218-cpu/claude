@@ -48,7 +48,19 @@ def do_analyze(code, base_year=None, offline=False, quiet=False):
     return res
 
 
+def _log_when_windowless():
+    """작업 스케줄러가 pythonw로 실행하면 화면 출력이 없으므로 data/logs/ 에 기록한다."""
+    if sys.stdout is None or os.environ.get("ANALYZER_LOG"):
+        import datetime as _dt
+        d = os.path.join(config.ROOT, "data", "logs")
+        os.makedirs(d, exist_ok=True)
+        f = open(os.path.join(d, f"run_{_dt.date.today():%Y%m%d}.log"), "a", encoding="utf-8", buffering=1)
+        f.write(f"\n===== {_dt.datetime.now():%Y-%m-%d %H:%M:%S} {' '.join(sys.argv[1:])} =====\n")
+        sys.stdout = sys.stderr = f
+
+
 def main(argv=None):
+    _log_when_windowless()
     ap = argparse.ArgumentParser(prog="analyzer")
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("analyze"); a.add_argument("code"); a.add_argument("--base-year", type=int); a.add_argument("--offline", action="store_true")

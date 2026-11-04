@@ -1,0 +1,24 @@
+{
+ "086900": {
+  "requests": {},
+  "total_requests": 0,
+  "reused_facts": 201,
+  "new_facts": 0,
+  "changed_facts": 0,
+  "notes": [
+   "수집 필요 항목: {\"share_years\": [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025], \"interim\": true}",
+   "DART_API_KEY 없음 → DART 수집(공시 점검·사업보고서·주식 수·분기 실적) 건너뜀"
+  ]
+ },
+ "213500": {
+  "requests": {},
+  "total_requests": 0,
+  "reused_facts": 206,
+  "new_facts": 0,
+  "changed_facts": 0,
+  "notes": [
+   "수집 필요 항목: {\"share_years\": [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025], \"interim\": true}",
+   "DART_API_KEY 없음 → DART 수집(공시 점검·사업보고서·주식 수·분기 실적) 건너뜀"
+  ]
+ }
+}
