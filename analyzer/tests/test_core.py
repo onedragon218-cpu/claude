@@ -248,6 +248,63 @@ class T(unittest.TestCase):
         self.assertAlmostEqual(r["cash_only"], 256.40748607, places=4)
         self.assertAlmostEqual(r["cfo"] + r["cfi"] + r["cff"] + r["fx"], r["cash_chg"], delta=0.5)   # 억원 단위
 
+    def test_xbrl_parser_consolidated_only(self):
+        from analyzer.collectors import dart_xbrl as x
+        ctx = lambda cid, mem, period, extra="": (f'<xbrli:context id="{cid}"><xbrli:entity><xbrli:segment>'
+            f'<xbrldi:explicitMember dimension="ifrs-full:ConsolidatedAndSeparateFinancialStatementsAxis">ifrs-full:{mem}</xbrldi:explicitMember>{extra}'
+            f'</xbrli:segment></xbrli:entity><xbrli:period>{period}</xbrli:period></xbrli:context>')
+        y25 = "<xbrli:startDate>2025-01-01</xbrli:startDate><xbrli:endDate>2025-12-31</xbrli:endDate>"
+        y24 = "<xbrli:startDate>2024-01-01</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate>"
+        q2 = "<xbrli:startDate>2025-04-01</xbrli:startDate><xbrli:endDate>2025-06-30</xbrli:endDate>"
+        xml = "<xbrli:xbrl>" + ctx("C25", "ConsolidatedMember", y25) + ctx("C24", "ConsolidatedMember", y24) + \
+            ctx("S25", "SeparateMember", y25) + ctx("Q2", "ConsolidatedMember", q2) + \
+            ctx("CX", "ConsolidatedMember", y25, '<xbrldi:explicitMember dimension="ifrs-full:ClassesOfPropertyPlantAndEquipmentAxis">ifrs-full:MachineryMember</xbrldi:explicitMember>') + \
+            ctx("I25", "ConsolidatedMember", "<xbrli:instant>2025-12-31</xbrli:instant>") + \
+            '<dart:AdjustmentsForDepreciationExpense contextRef="C25">700</dart:AdjustmentsForDepreciationExpense>' \
+            '<dart:AdjustmentsForDepreciationExpense contextRef="C24">680</dart:AdjustmentsForDepreciationExpense>' \
+            '<dart:AdjustmentsForDepreciationExpense contextRef="S25">1</dart:AdjustmentsForDepreciationExpense>' \
+            '<dart:AdjustmentsForDepreciationExpense contextRef="Q2">99</dart:AdjustmentsForDepreciationExpense>' \
+            '<ifrs-full:DepreciationPropertyPlantAndEquipment contextRef="CX">5</ifrs-full:DepreciationPropertyPlantAndEquipment>' \
+            '<dart:AdjustmentsForAmortisationExpense contextRef="C25">20</dart:AdjustmentsForAmortisationExpense>' \
+            '<ifrs-full:DepreciationRightofuseAssets contextRef="C25">50</ifrs-full:DepreciationRightofuseAssets>' \
+            '<ifrs-full:CurrentLeaseLiabilities contextRef="I25">40</ifrs-full:CurrentLeaseLiabilities>' \
+            '<ifrs-full:NoncurrentLeaseLiabilities contextRef="I25">90</ifrs-full:NoncurrentLeaseLiabilities></xbrli:xbrl>'
+        got = x.extract(x.parse_instance(xml))
+        self.assertEqual(got[(2025, "FY")], {"acc_dep": 700, "acc_amort": 20, "acc_rou_dep": 50, "acc_lease_xbrl": 130})
+        self.assertEqual(got[(2024, "FY")], {"acc_dep": 680})          # 분기 3개월 값·별도·다른 차원 값은 제외
+
+    def test_leverage_grading(self):
+        pipeline.analyze("253450", 2026, offline=True, conn=self.conn)
+        st = report.payload(self.conn, "253450", 2026)["stability"]
+        r22 = next(r for r in st["rows"] if r["year"] == 2022)
+        # 2022: EBITDA = 영업이익 + 감가상각비 11.5억 + 무형자산상각비 1,499.7억 + 사용권자산상각비 21.8억
+        self.assertAlmostEqual(r22["nd_ebitda"], r22["net_debt"] / r22["ebitda"])
+        self.assertEqual(r22["lev_grade"], "안전")
+        self.assertTrue(any("무형자산상각비가 영업이익보다" in n for n in r22["lev_notes"]))
+        r24 = next(r for r in st["rows"] if r["year"] == 2024)
+        self.assertEqual(r24["lev_grade"], "미확인")                    # 감가상각비 없음 → 단정하지 않음
+        # 판정 규칙 단위 시험
+        from analyzer import report as rp
+        class BK:
+            def __init__(s, d): s.d = d
+            def v(s, y, k, per="FY"): return s.d.get((y, k, per))
+            def ttm(s, *a): return None
+            def latest_interim(s, y): return "H1"
+        def grade(nd, op, dep, icr=None, kind="실적"):
+            rows = [{"year": 2025, "kind": kind, "net_debt": nd, "icr": icr}]
+            bk = BK({(2025, "acc_op", "FY"): op * 1e8, (2025, "acc_dep", "FY"): dep * 1e8, (2025, "acc_eq", "FY"): 1e11,
+                     (2025, "acc_op", "H1"): op * 1e8, (2025, "acc_dep", "H1"): dep * 1e8})
+            rp.grade_leverage(self.conn, "000000", rows, bk, {})
+            return rows[0]
+        self.assertEqual(grade(-10, 50, 10)["lev_grade"], "안전")      # 순현금
+        self.assertEqual(grade(150, 50, 10)["lev_grade"], "보통")      # 2.5배
+        self.assertEqual(grade(210, 50, 10)["lev_grade"], "주의")      # 3.5배
+        self.assertEqual(grade(210, 50, 10, icr=0.8)["lev_grade"], "위험")   # 이자보상배율 1 미만과 겹침
+        self.assertEqual(grade(300, 50, 10)["lev_grade"], "위험")      # 5배
+        g = grade(100, -30, 10)
+        self.assertEqual(g["lev_grade"], "위험"); self.assertIsNone(g["nd_ebitda"])   # EBITDA 적자, 계산 불가
+        self.assertTrue(grade(100, 50, 10, kind="현재(H1말)")["lev_halfyear"])         # TTM 불가 → 반기 기준 표시
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>

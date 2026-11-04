@@ -45,6 +45,13 @@ MAP.update({
     "acc_cash_only": (("BS",), ["ifrs-full_CashAndCashEquivalents"], ["현금및현금성자산"]),
     "acc_cfi": (("CF",), ["ifrs-full_CashFlowsFromUsedInInvestingActivities"], ["투자활동현금흐름", "투자활동으로인한현금흐름"]),
     "acc_cff": (("CF",), ["ifrs-full_CashFlowsFromUsedInFinancingActivities"], ["재무활동현금흐름", "재무활동으로인한현금흐름"]),
+    # 감가상각비·무형자산상각비(현금흐름표 조정 항목에 있을 때만, 없으면 XBRL 주석에서 보충)
+    "acc_dep": (("CF",), ["dart_AdjustmentsForDepreciationExpense", "ifrs-full_AdjustmentsForDepreciationExpense"],
+                ["감가상각비", "유형자산감가상각비", "유형자산상각비"]),
+    "acc_amort": (("CF",), ["dart_AdjustmentsForAmortisationExpense", "ifrs-full_AdjustmentsForAmortisationExpense"],
+                  ["무형자산상각비"]),
+    "acc_rou_dep": (("CF",), [], ["사용권자산감가상각비", "사용권자산상각비"]),
+    "acc_da_total": (("CF",), ["ifrs-full_AdjustmentsForDepreciationAndAmortisationExpense"], ["감가상각비및무형자산상각비", "감가상각비와상각비"]),
     "acc_fx": (("CF",), ["ifrs-full_EffectOfExchangeRateChangesOnCashAndCashEquivalents"],
                ["현금및현금성자산에대한환율변동효과", "외화표시현금및현금성자산의환율변동효과", "현금및현금성자산의환율변동효과"]),
 })
@@ -52,13 +59,16 @@ MAP.update({
 SUM = {
     "acc_debt": re.compile(r"(차입금|사채|리스부채|유동성장기부채)"),
     "acc_cash": re.compile(r"^(현금및현금성자산|단기금융상품)$"),
+    "acc_lease_face": re.compile(r"리스부채"),
 }
 SUM_EXCLUDE = re.compile(r"(사채할인|상환할증|전환권조정|대여금|이자|미지급|충당)")
 ALL_KEYS = list(MAP) + list(SUM)
-ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"}   # 회사마다 부호 표기가 달라 절댓값 사용
-CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_cfi", "acc_cff", "acc_fx"}
+ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_dep", "acc_amort", "acc_rou_dep",
+            "acc_da_total"}   # 회사마다 부호 표기가 달라 절댓값 사용
+CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_cfi", "acc_cff", "acc_fx",
+           "acc_dep", "acc_amort", "acc_rou_dep", "acc_da_total"}
 FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
-PARSER_VERSION = 3   # 계정을 늘리면 올린다 → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
+PARSER_VERSION = 4   # 계정을 늘리면 올린다 → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
 
 
 def _num(s):

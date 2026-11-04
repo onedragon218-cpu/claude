@@ -218,13 +218,18 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 
 <section id="H">
   <div class="card">
-    <h2>재무 안정성</h2>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">재무 안정성</h2>
+      <div id="levbadge"></div>
+    </div>
     <p class="muted" id="hnote"></p>
     <div id="hwarn"></div>
     <div class="grid7" style="margin-top:8px">
       <div class="card" style="margin:0"><h3>부채비율 (%)</h3><div class="muted" id="hs-debt"></div><div class="chartbox"><canvas id="h-debt"></canvas></div></div>
       <div class="card" style="margin:0"><h3>이자보상배율 (배)</h3><div class="muted" id="hs-icr"></div><div class="chartbox"><canvas id="h-icr"></canvas></div></div>
       <div class="card" style="margin:0"><h3>순차입금 (억원)</h3><div class="muted" id="hs-nd"></div><div class="chartbox"><canvas id="h-nd"></canvas></div></div>
+      <div class="card" style="margin:0;grid-column:span 2"><h3>순차입금 ÷ EBITDA (배) · 몇 년치 현금 창출로 빚을 갚을 수 있는지</h3><div class="muted" id="hs-lev"></div><div class="chartbox"><canvas id="h-lev"></canvas></div>
+        <p class="muted" style="margin:6px 0 0">구간 기준은 <b>실무 경험칙이며 법정 기준이 아닙니다</b>(설정: analyzer/assumptions.json '순차입금_EBITDA_구간'). EBITDA = 영업이익 + 감가상각비 + 무형자산상각비(DART 현금흐름표·XBRL 주석, 없으면 WiseReport 교차 확인값). 감가상각비를 찾지 못한 연도는 '미확인'으로 비워 둡니다.</p></div>
       <div class="card" style="margin:0"><h3>현금 잔액 (억원)</h3><div class="muted" id="hs-cash"></div><div class="chartbox"><canvas id="h-cash"></canvas></div></div>
       <div class="card" style="margin:0;grid-column:span 2"><h3>현금 증감 원인 (억원)</h3><div class="muted" id="hs-cf"></div><div class="chartbox"><canvas id="h-cf"></canvas></div></div>
     </div>
@@ -836,6 +841,46 @@ function renderRisk(){
   $('#riskbar').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg);margin:0;cursor:pointer" id="riskgo" title="눌러서 재무 안정성 화면 보기"><b>⚠ 재무 안정성 주의</b> · ${w.map(esc).join(' · ')} <span class="muted">→ H. 재무 안정성</span></div>`;
   $('#riskgo').onclick = ()=>document.querySelector('#tabs button[data-s="H"]').click();
 }
+
+// ---- 순차입금 ÷ EBITDA 구간 ----
+const bandPlugin = {id:'bands', beforeDatasetsDraw(chart, args, opts){
+  if (!opts || !opts.bands) return; const {ctx, chartArea:a, scales:{y}} = chart;
+  opts.bands.forEach(b=>{ const top = y.getPixelForValue(Math.min(b.to, y.max)), bot = y.getPixelForValue(Math.max(b.from, y.min));
+    if (bot <= a.top || top >= a.bottom) return; ctx.save(); ctx.fillStyle = b.color;
+    ctx.fillRect(a.left, Math.max(top, a.top), a.right - a.left, Math.min(bot, a.bottom) - Math.max(top, a.top)); ctx.restore(); }); }};
+function renderLev(){
+  const rows = ST.rows||[], R = ST.lev_rules || {}, warnAt = R['주의_이상']||3, dangerAt = R['위험_이상']||4, safeAt = R['안전_미만']||1;
+  const labels = rows.map(r=> r.kind==='실적' ? String(r.year) : r.year+'(현재)');
+  const vals = rows.map(r=> r.lev_halfyear ? null : r.nd_ebitda);
+  const finite = vals.filter(v=>v!=null); const ymax = Math.max(dangerAt+1.5, ...finite.map(v=>v+0.5)); const ymin = Math.min(0, ...finite.map(v=>v-0.5));
+  const gradeColor = g => g==='위험'?css('--bad'):g==='주의'?css('--warn'):g==='보통'?css('--s1'):g==='안전'?css('--good'):css('--text-muted');
+  const o = baseOpts(); o.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}};
+  o.scales.y.min = ymin; o.scales.y.max = Math.ceil(ymax); o.scales.y.ticks.callback = v => v + '배';
+  o.plugins.bands = {bands:[{from:warnAt, to:dangerAt, color:rgba('--warn',0.16)}, {from:dangerAt, to:1e9, color:rgba('--bad',0.14)}]};
+  o.plugins.tooltip.callbacks = {label: ctx => { if (ctx.dataset._ref) return null; const r = rows[ctx.dataIndex]; return r.nd_ebitda==null? null : `순차입금 ÷ EBITDA: ${r.nd_ebitda.toFixed(2)}배 → ${r.lev_grade}`; },
+    afterBody: items => { const r = rows[items[0].dataIndex]; const out = [];
+      if (r.net_debt!=null) out.push(`순차입금 ${fmt(r.net_debt,'억원')}억 ÷ EBITDA ${r.ebitda==null?'–':fmt(r.ebitda,'억원')+'억'}`);
+      if (r.ebitda_src) out.push('EBITDA 출처: ' + r.ebitda_src); if (r.ebitda_basis) out.push('기준: ' + r.ebitda_basis);
+      if (r.nd_ratio!=null) out.push(`순차입금비율 ${fmt(r.nd_ratio,'%')}% (${r.nd_ratio_zone})`);
+      (r.lev_notes||[]).forEach(n=>out.push('· ' + n)); if (r.lev_grade==='미확인') out.push('판정: 미확인'); return out; }};
+  const ds = [{label:'순차입금 ÷ EBITDA', data: vals, borderColor: css('--text-primary'), backgroundColor: css('--text-primary'), borderWidth:2.25, tension:0,
+      pointRadius: rows.map(r=> r.lev_grade && r.lev_grade!=='미확인' ? 6 : 0), pointBackgroundColor: rows.map(r=>gradeColor(r.lev_grade)), pointBorderColor: css('--surface-1'), pointBorderWidth: 2,
+      pointStyle: rows.map(r=> r.lev_trend ? 'triangle' : 'circle'),
+      segment:{borderDash: ctx => (rows[ctx.p1DataIndex] && rows[ctx.p1DataIndex].kind!=='실적') ? [6,4] : undefined}},
+    {label:`주의 ${warnAt}배`, _ref:true, data: rows.map(()=>warnAt), borderColor: css('--warn'), borderDash:[5,4], borderWidth:1.5, pointRadius:0},
+    {label:`위험 ${dangerAt}배`, _ref:true, data: rows.map(()=>dangerAt), borderColor: css('--bad'), borderDash:[5,4], borderWidth:1.5, pointRadius:0}];
+  if (charts['h-lev']) charts['h-lev'].destroy();
+  charts['h-lev'] = mkChart($('#h-lev'), {type:'line', data:{labels, datasets:ds}, options:o, plugins:[bandPlugin]});
+  const graded = rows.filter(r=>r.lev_grade && r.lev_grade!=='미확인' && !r.lev_halfyear);
+  const unk = rows.filter(r=>r.lev_grade==='미확인').map(r=>r.year);
+  const last = graded[graded.length-1];
+  $('#hs-lev').innerHTML = (last ? `${last.year}년 <b>${last.nd_ebitda.toFixed(2)}배 → ${esc(last.lev_grade)}</b> (점 색: 초록 안전·파랑 보통·노랑 주의·빨강 위험, ▲ = 악화 추세)` : '판정할 수 있는 연도가 없습니다') +
+    (unk.length ? ` · <span class="muted">미확인(감가상각비 미확보 등): ${unk.join(', ')}</span>` : '');
+  // 알림 배지
+  const al = ST.lev_alert;
+  $('#levbadge').innerHTML = al ? `<span class="badge ${al.lev_grade==='위험'?'b-ERROR':'b-WARN'}" style="font-size:13px;padding:4px 10px;cursor:help" title="${esc(`${al.year}년 순차입금 ÷ EBITDA ${al.nd_ebitda==null?'계산 불가':al.nd_ebitda.toFixed(2)+'배'} → ${al.lev_grade}\n기준(실무 경험칙): 주의 ${warnAt}배 이상, 위험 ${dangerAt}배 이상 또는 EBITDA ≤ 0\n` + (al.lev_notes||[]).join('\n'))}">⚠ 차입 부담 ${esc(al.lev_grade)} (${al.year}년 ${al.nd_ebitda==null?'EBITDA 적자':al.nd_ebitda.toFixed(1)+'배'})${al.lev_trend?' · 악화 추세':''}</span>` : '';
+}
+
 function renderH(){
   const rows = ST.rows||[], ind = ST.industry||{};
   const labels = rows.map(r=> r.kind==='실적' ? String(r.year) : r.year+'(현재)');
@@ -885,6 +930,7 @@ function renderH(){
       {type:'line', label:'현금 순증감', data: rows.map(r=>r.cash_chg), borderColor: css('--text-primary'), backgroundColor: css('--text-primary'), borderWidth:2.25, pointRadius:4, pointStyle:'rectRot', tension:0, order:1, stack:'line'}];
     if (charts['h-cf']) charts['h-cf'].destroy();
     charts['h-cf'] = mkChart($('#h-cf'), {type:'bar', data:{labels, datasets:ds}, options:o}); }
+  renderLev();
   const lastA = [...rows].reverse().find(r=>r.kind==='실적' && r.debt_ratio!=null);
   if (lastA){
     $('#hs-debt').innerHTML = `${lastA.year}년 <b>${fmt(lastA.debt_ratio,'%')}%</b>${lastA.ind_debt_ratio?` · 업종 ${fmt(lastA.ind_debt_ratio,'%')}% (${(lastA.debt_ratio/lastA.ind_debt_ratio).toFixed(1)}배)`:''}`;
@@ -895,10 +941,10 @@ function renderH(){
     $('#hs-cash').innerHTML = lastA.cash_only!=null ? `${lastA.year}년말 <b>${fmt(lastA.cash_only,'억원')}억원</b>${lastA.cash_chg!=null?` (전년 대비 ${lastA.cash_chg>=0?'+':''}${fmt(lastA.cash_chg,'억원')}억원)`:''}${streak>=2?` · <b style="color:var(--bad)">${streak}년 연속 감소</b>`:''}${sameCash?' · 단기금융상품 없음(두 값 같음)':''}` : '현금 자료 없음';
     $('#hs-cf').innerHTML = lastA.cfo!=null ? `${lastA.year}년: 영업 ${lastA.cfo>=0?'+':''}${fmt(lastA.cfo,'억원')} · 투자 ${lastA.cfi>=0?'+':''}${fmt(lastA.cfi,'억원')} · 재무 ${lastA.cff>=0?'+':''}${fmt(lastA.cff,'억원')} → 순증감 <b>${lastA.cash_chg>=0?'+':''}${fmt(lastA.cash_chg,'억원')}억원</b> · 영업이 마이너스면 본업에서 현금이 빠져나간 것, 재무가 플러스면 차입·증자로 채운 것` : '현금흐름표 자료 없음';
   }
-  $('#htable').innerHTML = '<tr><th>연도</th><th class="l">구분</th><th>부채비율</th><th>업종 평균</th><th>업종 대비</th><th>이자보상배율</th><th>업종 평균</th><th>영업이익(억)</th><th>이자지급(억)</th><th>순차입금(억)</th><th>현금(억)</th><th>현금 증감(억)</th><th>영업CF(억)</th><th>투자CF(억)</th><th>재무CF(억)</th><th class="l">메모</th></tr>' +
+  $('#htable').innerHTML = '<tr><th>연도</th><th class="l">구분</th><th>부채비율</th><th>업종 평균</th><th>업종 대비</th><th>이자보상배율</th><th>업종 평균</th><th>영업이익(억)</th><th>이자지급(억)</th><th>순차입금(억)</th><th>EBITDA(억)</th><th>순차입금÷EBITDA</th><th class="l">판정</th><th>순차입금비율</th><th>현금(억)</th><th>현금 증감(억)</th><th>영업CF(억)</th><th>투자CF(억)</th><th>재무CF(억)</th><th class="l">메모</th></tr>' +
     rows.map(r=>`<tr><td>${r.year}</td><td class="l">${esc(r.kind)}</td><td>${r.debt_ratio==null?'–':fmt(r.debt_ratio,'%')+'%'}</td><td>${r.ind_debt_ratio==null?'–':fmt(r.ind_debt_ratio,'%')+'%'}</td><td>${r.debt_ratio!=null&&r.ind_debt_ratio?(r.debt_ratio/r.ind_debt_ratio).toFixed(2)+'배':'–'}</td>`+
-      `<td style="${r.icr!=null&&r.icr<1?'color:var(--bad);font-weight:600':''}">${r.icr==null?'–':r.icr.toFixed(2)+'배'}</td><td>${r.ind_icr==null?'–':r.ind_icr.toFixed(2)+'배'}</td><td>${r.op==null?'–':fmt(r.op/1e8,'억원')}</td><td>${r.interest==null?'–':fmt(r.interest/1e8,'억원')}</td><td>${r.net_debt==null?'–':fmt(r.net_debt,'억원')}</td><td>${r.cash_only==null?'–':fmt(r.cash_only,'억원')}</td><td style="${r.cash_chg!=null&&r.cash_chg<0?'color:var(--bad)':''}">${r.cash_chg==null?'–':(r.cash_chg>=0?'+':'')+fmt(r.cash_chg,'억원')}</td><td>${r.cfo==null?'–':fmt(r.cfo,'억원')}</td><td>${r.cfi==null?'–':fmt(r.cfi,'억원')}</td><td>${r.cff==null?'–':fmt(r.cff,'억원')}</td>`+
-      `<td class="l" style="white-space:normal">${esc([r.icr_why, r.net_debt_why, r.flow_basis?('현금흐름 '+r.flow_basis):null].filter(Boolean).join(' / '))}</td></tr>`).join('');
+      `<td style="${r.icr!=null&&r.icr<1?'color:var(--bad);font-weight:600':''}">${r.icr==null?'–':r.icr.toFixed(2)+'배'}</td><td>${r.ind_icr==null?'–':r.ind_icr.toFixed(2)+'배'}</td><td>${r.op==null?'–':fmt(r.op/1e8,'억원')}</td><td>${r.interest==null?'–':fmt(r.interest/1e8,'억원')}</td><td>${r.net_debt==null?'–':fmt(r.net_debt,'억원')}</td><td>${r.ebitda==null?'–':fmt(r.ebitda,'억원')}</td><td>${r.nd_ebitda==null?'–':r.nd_ebitda.toFixed(2)+'배'}</td><td class="l">${r.lev_grade?(r.lev_grade==='위험'?'<span class="badge b-ERROR">위험</span>':r.lev_grade==='주의'?'<span class="badge b-WARN">주의</span>':esc(r.lev_grade)):'–'}${r.lev_trend?' ▲악화':''}${r.lev_halfyear?' <span class="muted">(반기 기준, 비교 주의)</span>':''}</td><td>${r.nd_ratio==null?'–':fmt(r.nd_ratio,'%')+'% '+esc(r.nd_ratio_zone||'')}</td><td>${r.cash_only==null?'–':fmt(r.cash_only,'억원')}</td><td style="${r.cash_chg!=null&&r.cash_chg<0?'color:var(--bad)':''}">${r.cash_chg==null?'–':(r.cash_chg>=0?'+':'')+fmt(r.cash_chg,'억원')}</td><td>${r.cfo==null?'–':fmt(r.cfo,'억원')}</td><td>${r.cfi==null?'–':fmt(r.cfi,'억원')}</td><td>${r.cff==null?'–':fmt(r.cff,'억원')}</td>`+
+      `<td class="l" style="white-space:normal">${esc([r.icr_why, r.net_debt_why, r.flow_basis?('현금흐름 '+r.flow_basis):null, r.ebitda_src?('EBITDA: '+r.ebitda_src):null].concat(r.lev_notes||[]).filter(Boolean).join(' / '))}</td></tr>`).join('');
   $('#hsrc').innerHTML = `회사 값: DART 연결재무제표로 계산. 부채비율 = 부채총계 ÷ 자본총계, 이자보상배율 = 영업이익 ÷ 이자지급(현금흐름표, 영업·재무활동 분류 합계), 순차입금 = 차입금·사채·리스부채 − 현금·단기금융상품. 현금 = 재무상태표 현금및현금성자산, 현금 증감 원인 = 현금흐름표 영업·투자·재무활동 현금흐름과 환율변동효과(합계가 잔액 증감과 다르면 '기타·차이'로 표시). 업종 평균: ${esc(ind.source||'')} · 한국은행 이자보상비율은 손익계산서의 이자비용 기준이라 회사 값(현금 이자지급 기준)과 정의가 조금 다릅니다. 업종 평균은 가장 최근 공표 연도까지만 있습니다.`;
 }
 

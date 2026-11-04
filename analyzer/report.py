@@ -164,6 +164,7 @@ def stability(conn, code, P, vrows, comp):
                      "net_debt_why": None if nd is not None else "자료 없음",
                      "ind_debt_ratio": None, "ind_icr": None, "all_debt_ratio": None, "all_icr": None,
                      "flow_basis": f"{per} 누적(전년말 대비)", **cash_of(cy, per)})
+    grade_leverage(conn, code, rows, bk, vr)
     # 경고(사실만): 최근 실적 연도 기준
     warn = []
     act = [r for r in rows if r["kind"] == "실적"]
@@ -180,5 +181,114 @@ def stability(conn, code, P, vrows, comp):
     cur = next((r for r in rows if r["kind"] != "실적"), None)
     if cur and cur["icr"] is not None and cur["icr"] < 1:
         warn.append(f"현재(최근 12개월) 이자보상배율 {cur['icr']:.2f}배")
-    return {"rows": rows, "warnings": warn, "industry": {"item": bm["item"], "name": bm["name"], "source": bm["source"],
+    lev = [r for r in rows if r.get("lev_grade") not in (None, "미확인") and not r.get("lev_halfyear")]
+    lev_alert = lev[-1] if lev and lev[-1]["lev_grade"] in ("주의", "위험") else None
+    from . import valuation as _v
+    return {"rows": rows, "warnings": warn, "lev_alert": lev_alert,
+            "lev_rules": _v.load_assumptions().get("순차입금_EBITDA_구간"),
+            "nd_ratio_rules": _v.load_assumptions().get("순차입금비율_구간"), "industry": {"item": bm["item"], "name": bm["name"], "source": bm["source"],
             "missing_reason": bm["missing_reason"], "induty_code": induty}}
+
+
+def da_of(bk, y, per="FY"):
+    """감가상각비+무형자산상각비(+사용권자산 상각). 합계 계정이 있으면 그것. 없으면 None(미확인)."""
+    tot = bk.v(y, "acc_da_total", per)
+    if tot is not None:
+        return tot, "감가상각비·상각비 합계"
+    dep, amo, rou = bk.v(y, "acc_dep", per), bk.v(y, "acc_amort", per), bk.v(y, "acc_rou_dep", per)
+    if dep is None:
+        return None, None
+    return dep + (amo or 0) + (rou or 0), "감가상각비" + (" + 무형자산상각비" if amo is not None else "") + \
+        (" + 사용권자산상각비" if rou else "")
+
+
+def grade_leverage(conn, code, rows, bk, vr):
+    """순차입금 ÷ EBITDA 판정(실무 경험칙). 기준값은 assumptions.json '순차입금_EBITDA_구간'."""
+    from . import db as _db, valuation as _v
+    A = _v.load_assumptions()
+    R = A.get("순차입금_EBITDA_구간", {})
+    NR = A.get("순차입금비율_구간", {})
+    safe, warn_at, danger_at = R.get("안전_미만", 1.0), R.get("주의_이상", 3.0), R.get("위험_이상", 4.0)
+    icr_cut = R.get("이자보상배율_미만이면_주의를_위험으로", 1.0)
+    streak_need = R.get("악화추세_연속연수", 2)
+    # WiseReport EBITDA(교차 확인값): {연도: 원}
+    wr = {o["fiscal_year"]: o["value"] for o in conn.execute(
+        "SELECT * FROM observations WHERE stock_code=? AND metric='ebitda_wr' ORDER BY id", (code,))}
+    prev_ratio, streak = None, 0
+    for r in rows:
+        y = r["year"]
+        half = r["kind"] != "실적"
+        per = None
+        if half:
+            per = bk.latest_interim(y)
+        notes = []
+        # EBITDA
+        if not half:
+            op = bk.v(y, "acc_op")
+            da, da_src = da_of(bk, y)
+        else:
+            op_t = bk.ttm(y, "acc_op", per)
+            da_now, da_src = da_of(bk, y, per)
+            da_prev_fy, _ = da_of(bk, y - 1)
+            da_prev_p, _ = da_of(bk, y - 1, per)
+            if op_t is not None and None not in (da_now, da_prev_fy, da_prev_p):
+                op, da = op_t, da_prev_fy + da_now - da_prev_p
+                r["ebitda_basis"] = "최근 12개월(TTM)"
+            else:
+                op, da = bk.v(y, "acc_op", per), da_now
+                r["lev_halfyear"] = True
+                r["ebitda_basis"] = f"{per} 누적(연간 아님) — 반기 기준, 비교 주의(배수가 약 2배로 보임)"
+        ebitda = op + da if op is not None and da is not None else None
+        src = "DART(영업이익 + " + (da_src or "") + ")" if ebitda is not None else None
+        if ebitda is None and not half and y in wr:
+            ebitda, src = wr[y], "WiseReport(영업이익+감가상각비, 교차 확인값)"
+            notes.append("DART에서 감가상각비를 찾지 못해 WiseReport EBITDA 사용")
+        if ebitda is not None and y in wr and src.startswith("DART"):
+            d = (ebitda - wr[y]) / abs(wr[y]) if wr[y] else None
+            r["ebitda_wr"] = wr[y] / 1e8
+            if d is not None and abs(d) > 0.05:
+                notes.append(f"WiseReport EBITDA {wr[y] / 1e8:,.0f}억과 {d:+.0%} 차이(상각 범위 정의 차이 가능)")
+        amo = bk.v(y, "acc_amort", per if half else "FY")
+        if amo and op is not None and amo > abs(op) and op is not None:
+            notes.append("무형자산상각비가 영업이익보다 커서 EBITDA가 커 보이고 배수가 낮게(안전하게) 나올 수 있음")
+        r["ebitda"] = None if ebitda is None else ebitda / 1e8
+        r["ebitda_src"] = src
+        nd = r.get("net_debt")
+        # 리스부채: 재무상태표 본문에 리스부채 줄이 없고 XBRL 주석에 있으면 순차입금에 더함
+        lease_face = bk.v(y, "acc_lease_face", per if half else "FY")
+        lease_x = bk.v(y, "acc_lease_xbrl", per if half else "FY")
+        if nd is not None and not lease_face and lease_x:
+            nd = nd + lease_x / 1e8
+            r["net_debt"] = nd
+            notes.append(f"재무상태표 본문에 없는 리스부채 {lease_x / 1e8:,.0f}억(XBRL 주석)을 순차입금에 포함")
+        eq = bk.v(y, "acc_eq", per if half else "FY")
+        r["nd_ratio"] = nd / (eq / 1e8) * 100 if nd is not None and eq else None
+        nr = r["nd_ratio"]
+        r["nd_ratio_zone"] = None if nr is None else ("안전" if nr <= NR.get("안전_이하", 50) else
+                                                      "보통" if nr <= NR.get("주의_초과", 100) else "주의")
+        # 판정
+        ratio, grade = None, None
+        if nd is None:
+            grade = "미확인"; notes.append(r.get("net_debt_why") or "순차입금 계산 불가")
+        elif ebitda is None:
+            grade = "미확인"; notes.append("감가상각비를 원본에서 찾지 못함(단정하지 않음)")
+        elif ebitda <= 0:
+            grade = "위험"; notes.append("EBITDA 적자, 계산 불가")
+        else:
+            ratio = nd / r["ebitda"]
+            grade = "안전" if ratio < safe else "보통" if ratio < warn_at else "주의" if ratio < danger_at else "위험"
+            if ratio < 0:
+                notes.append("순현금(현금이 빚보다 많음)")
+        if grade == "주의" and r.get("icr") is not None and r["icr"] < icr_cut:
+            grade = "위험"; notes.append(f"이자보상배율 {r['icr']:.2f}배(1배 미만)와 겹쳐 주의 → 위험")
+        r["nd_ebitda"], r["lev_grade"] = ratio, grade
+        # 악화 추세(실적 연도의 배수가 연속 상승)
+        if ratio is not None and not r.get("lev_halfyear"):
+            streak = streak + 1 if prev_ratio is not None and ratio > prev_ratio else 0
+            prev_ratio = ratio
+            r["lev_trend"] = streak >= streak_need and ratio > 0   # 순차입금이 있을 때만(순현금 축소는 별도 의미)
+            if r["lev_trend"]:
+                notes.append(f"배수 {streak}년 연속 상승(악화 추세)")
+        else:
+            r["lev_trend"] = False
+        r["lev_notes"] = notes

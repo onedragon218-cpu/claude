@@ -15,7 +15,8 @@ from . import config, db
 from .collectors import dart, fnguide, manual, naver, prices, wisereport
 
 CORE_ACC = ["acc_revenue", "acc_op", "acc_ni_owner", "acc_eq_owner", "acc_eq", "acc_liab", "acc_eps_basic"]
-ACC_UNIT = {k: ("원" if k != "acc_eps_basic" else "원/주") for k in dart.ALL_KEYS}
+XBRL_ONLY_KEYS = ["acc_lease_xbrl"]   # XBRL 주석에서만 나오는 계정
+ACC_UNIT = {k: ("원" if k != "acc_eps_basic" else "원/주") for k in dart.ALL_KEYS + XBRL_ONLY_KEYS}
 RAW_DIR = os.path.join(config.DATA_DIR, "raw")
 
 
@@ -67,7 +68,7 @@ def select_facts(conn, code, y, period, via=None, stats=None):
     """같은 연도·계정의 여러 관측값 중 대표값을 고른다.
     1순위: 그 연도 자신의 보고서(정정 공시가 있으면 가장 최근 접수번호)
     2순위: 그 연도를 처음으로 담은 후속 보고서(원래 숫자에 가장 가까움)"""
-    for key in dart.ALL_KEYS:
+    for key in dart.ALL_KEYS + XBRL_ONLY_KEYS:
         # 대표값은 DART 원본에서만 고른다(WiseReport 등 다른 출처는 교차 검증용 관측값)
         obs = [o for o in db.observations(conn, code, y, key, period) if o["source"] == "DART" and o["report_year"] is not None]
         if not obs:
@@ -345,6 +346,13 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
                 stats.notes.append(f"{P['current']} {dart.REPRT_NAME[reprt]} 미확보: {e}")
                 break
 
+    # 4-2) 감가상각비·무형자산상각비·리스부채: 재무제표 본문에 없는 연도만 XBRL 원본(주석)에서 보충
+    if has_key:
+        try:
+            ensure_xbrl(conn, code, P, stats)
+        except dart.DartUnavailable as e:
+            stats.notes.append(f"XBRL 원본 미확보: {e}")
+
     # 5) 주가: 빠진 연말 종가 또는 기준일 주가
     if need["price_years"] or need["asof_price"]:
         try:
@@ -387,12 +395,79 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
 def record_cross_check(conn, code, actuals, url):
     """WiseReport의 과거 실적(매출액·영업이익)을 교차 검증용 관측값으로 저장한다(검증 항목 10)."""
     for a in actuals:
-        key = {"revenue": "acc_revenue", "op_income": "acc_op"}.get(a["metric"])
+        key = {"revenue": "acc_revenue", "op_income": "acc_op", "ebitda": "ebitda_wr"}.get(a["metric"])
         if key:
             db.add_observation(conn, code, a["target_year"], key, a["value"] * 1e8, unit="원",
                                basis=a.get("basis"), source="WiseReport", source_ref=url.split("&sDT")[0],
                                report_year=None, col="실적(억원 반올림)")
     conn.commit()
+
+
+def _has_da(conn, code, y, per):
+    for k in ("acc_da_total", "acc_dep"):
+        r = db.current_fact(conn, code, y, k, per)
+        if r is not None and r["value"] is not None:
+            return True
+    return False
+
+
+def _report_rcept(conn, code, y, reprt):
+    """그 연도·보고서 종류의 접수번호(정정 공시가 있으면 가장 최근). 공시 목록 → 이미 받은 재무제표 순으로 찾는다."""
+    kind = {"11011": "사업보고서", "11012": "반기보고서", "11013": "분기보고서", "11014": "분기보고서"}[reprt]
+    month = {"11011": "12", "11012": "06", "11013": "03", "11014": "09"}[reprt]
+    r = conn.execute("SELECT rcept_no FROM disclosures WHERE stock_code=? AND report_nm LIKE ? ORDER BY rcept_no DESC LIMIT 1",
+                     (code, f"%{kind}%({y}.{month})%")).fetchone()
+    if r:
+        return r["rcept_no"]
+    per = dart.REPRT_PERIOD[reprt]
+    r = conn.execute("SELECT source_ref FROM observations WHERE stock_code=? AND fiscal_year=? AND period=? AND "
+                     "report_year=? AND source='DART' ORDER BY source_ref DESC LIMIT 1", (code, y, per, y)).fetchone()
+    return r["source_ref"] if r else None
+
+
+def ingest_xbrl(conn, code, rcept_no, report_year, values, stats=None):
+    for (y, per), vals in values.items():
+        for k, v in vals.items():
+            db.add_observation(conn, code, y, k, v, period=per, unit="원", basis="CFS", source="DART",
+                               source_ref=rcept_no, report_year=report_year, col="XBRL주석")
+        select_facts(conn, code, y, per, via="DART XBRL 원본(주석)", stats=stats)
+    conn.commit()
+
+
+def ensure_xbrl(conn, code, P, stats):
+    """감가상각비가 없는 연도만 그 연도 보고서의 XBRL을 받는다(한 파일에 당기·전기 2개 연도). 받은 파일은 보관."""
+    from .collectors import dart_xbrl
+    jobs = []
+    for y in sorted(P["past"], reverse=True):
+        if not _has_da(conn, code, y, "FY"):
+            jobs.append((y, "11011"))
+    cy = P["current"]
+    per = next((p for p in ("Q3", "H1", "Q1") if db.current_fact(conn, code, cy, "acc_revenue", p)), None)
+    if per and not _has_da(conn, code, cy, per):
+        jobs.append((cy, {"Q3": "11014", "H1": "11012", "Q1": "11013"}[per]))
+    for y, reprt in jobs:
+        per = dart.REPRT_PERIOD[reprt]
+        if _has_da(conn, code, y, per):          # 앞서 받은 파일의 전기 값으로 채워졌으면 건너뜀
+            continue
+        rc = _report_rcept(conn, code, y, reprt)
+        if not rc:
+            stats.notes.append(f"{y} {dart.REPRT_NAME[reprt]} 접수번호를 몰라 XBRL을 받지 못함(공시 목록 확인 후 다시 시도)")
+            continue
+        key = f"{code}:{rc}"
+        if db.fetched_recently(conn, "dart_xbrl", key, config.TTL_DAYS["dart_report_missing"]) and \
+                not os.path.exists(dart_xbrl.path_for(code, rc)):
+            continue
+        try:
+            if not os.path.exists(dart_xbrl.path_for(code, rc)):
+                stats.req("DART")
+            vals = dart_xbrl.fetch(code, rc, reprt)
+            ingest_xbrl(conn, code, rc, y, vals, stats)
+            db.log_fetch(conn, "dart_xbrl", key, code, True, len(vals))
+        except (dart.DartUnavailable, ValueError) as e:
+            db.log_fetch(conn, "dart_xbrl", key, code, False, 0, str(e))
+            stats.notes.append(f"{y} XBRL 원본 미확보: {e}")
+            if "API_KEY" in str(e) or "접속 실패" in str(e):
+                break
 
 
 def check_disclosures(conn, code, lst):

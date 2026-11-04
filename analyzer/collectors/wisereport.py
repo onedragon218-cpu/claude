@@ -91,6 +91,20 @@ def parse_opinion(page):
     return None
 
 
+def parse_fundamentals(page):
+    """기업개요 '주요지표' 표의 EBITDA(억원) → [(year, 'A'|'E', value)]. WiseReport 정의: 영업이익 + 감가상각비"""
+    for t in re.findall(r"<table.*?</table>", page, re.S):
+        txt = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", t)))
+        if "EBITDA" not in txt or "주요지표" not in txt:
+            continue
+        cols = re.findall(r"(20\d\d)/\d\d\((A|E)\)", txt)
+        m = re.search(r"EBITDA\s+(-?[\d,]+(?:\.\d+)?)억원\s+(-?[\d,]+(?:\.\d+)?)억원", txt)
+        if cols and m:
+            vals = [_num(m.group(1)), _num(m.group(2))]
+            return [(int(y), k, v) for (y, k), v in zip(cols[:2], vals) if v is not None]
+    return []
+
+
 def parse_header(page):
     """기업개요 화면 머리글 → {market, krx_sector, wics}. 예: 'KOSPI : 코스피 종이·목재 WICS : 종이와목재'"""
     txt = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", page)))
@@ -134,7 +148,11 @@ def fetch(code, as_of=None):
         raise ConsensusUnavailable("WiseReport에 이 종목의 컨센서스 자료가 없음")
     op = None
     try:
-        op = parse_opinion(_get(PAGE_URL.format(code=code)))
+        page = _get(PAGE_URL.format(code=code))
+        op = parse_opinion(page)
+        for y, k, v in parse_fundamentals(page):     # EBITDA(실적은 교차 검증용, 추정치는 컨센서스로)
+            (act if k == "A" else est).append({"target_year": y, "metric": "ebitda", "value": v, "unit": "억원",
+                                               "kind": "실적" if k == "A" else "추정", "basis": basis})
     except ConsensusUnavailable:
         pass
     if op:
