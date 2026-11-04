@@ -22,16 +22,16 @@ def latest_raw(root, code):
     return files[-1] if files else None
 
 
-def fetch(root, code, today=None):
+def fetch(root, code, today=None, rawdir=None):
     """공개 페이지를 한 번 받아 보관한다. 반환: (경로 또는 None, 설명)"""
     import requests
     today = today or date.today().strftime("%Y%m%d")
     try:
-        r = requests.get(URL.format(code=code), timeout=30)
+        r = requests.get(URL.format(code=code), headers={"User-Agent": "fintrack/0.2 (personal research tool; Windows)"}, timeout=30)
         r.raise_for_status()
     except Exception as e:
         return None, f"조회 실패: {type(e).__name__}: {e}"[:300]
-    p = os.path.join(raw_dir(root), f"{code}_c1010001_{today}.html.gz")
+    p = os.path.join(rawdir or raw_dir(root), f"{code}_c1010001_{today}.html.gz")
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with gzip.open(p, "wt", encoding="utf-8") as f:
         f.write(r.text)
