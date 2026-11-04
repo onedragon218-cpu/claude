@@ -23,6 +23,7 @@
   --good:#58c487; --good-bg:#16301f; --warn:#e2ac4f; --warn-bg:#352813; --bad:#f2814f; --bad-bg:#3a1d12; --none:#8b96a1; --none-bg:#23292e;
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; color-scheme:dark; }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{background:var(--bg); color:var(--ink); font-family:var(--f-body); font-size:14px; line-height:1.55; margin:0}
 .wrap{max-width:1180px; margin:0 auto; padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px)); padding-block:20px 56px; display:flex; flex-direction:column; gap:28px}
 h1,h2,h3{text-wrap:balance; margin:0}
@@ -108,22 +109,78 @@ details>summary{cursor:pointer; padding:12px 16px; font-weight:600}
 details>div{padding:0 16px 16px}
 pre.cmd{font-family:var(--f-data); font-size:12.5px; background:var(--line-2); padding:10px 12px; border-radius:8px; overflow-x:auto; margin:0}
 ul.plain{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:4px}
+.appbar{background:var(--surface); border-bottom:1px solid var(--line)}
+.appbar .in{max-width:1180px; margin:0 auto; padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px)); padding-block:12px; display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center}
+.brand{font-weight:700; letter-spacing:-.01em; font-size:15px; display:flex; align-items:center; gap:8px}
+.appbar #b-settings{margin-left:auto}
+@media (max-width:640px){ .appbar .searchbox{order:3; flex-basis:100%} }
+.brand i{width:10px; height:10px; border-radius:3px; background:var(--accent); display:inline-block}
+.searchbox{position:relative; flex:1 1 320px; min-width:0; display:flex; gap:8px}
+.searchbox input{flex:1; min-width:0; font:inherit; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink)}
+.searchbox input:focus{outline:2px solid var(--accent); outline-offset:0; border-color:transparent}
+.btn{font:inherit; font-size:13px; font-weight:600; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--ink); cursor:pointer; white-space:nowrap}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--surface)}
+.btn:disabled{opacity:.5; cursor:default}
+.btn.ghost{border-color:transparent; color:var(--ink-2)}
+.dropdown{position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:20; background:var(--surface); border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.12); max-height:340px; overflow:auto}
+.dropdown button{display:flex; justify-content:space-between; gap:8px; width:100%; text-align:left; font:inherit; padding:9px 12px; border:0; background:none; color:var(--ink); cursor:pointer}
+.dropdown button:hover,.dropdown button:focus{background:var(--line-2)}
+.dropdown p{margin:0; padding:9px 12px; font-size:12px; color:var(--ink-3)}
+.tabs{background:var(--surface); border-bottom:1px solid var(--line)}
+.tabs .in{max-width:1180px; margin:0 auto; padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px)); display:flex; gap:2px; overflow-x:auto}
+.tabs button{font:inherit; font-size:13.5px; padding:10px 14px 9px; border:0; border-bottom:2px solid transparent; background:none; color:var(--ink-2); cursor:pointer; white-space:nowrap; display:flex; gap:6px; align-items:baseline}
+.tabs button small{font-family:var(--f-data); font-size:11px; color:var(--ink-3)}
+.tabs button[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent); font-weight:600}
+.jobbox{border:1px solid var(--line); background:var(--surface); border-radius:10px; padding:12px 14px; font-size:12.5px; display:flex; flex-direction:column; gap:6px}
+.jobbox ol{margin:0; padding-left:30px; max-height:180px; overflow:auto; color:var(--ink-2); font-family:var(--f-data); font-size:12px}
+.empty{background:var(--surface); border:1px dashed var(--line); border-radius:12px; padding:28px; display:flex; flex-direction:column; gap:12px; max-width:640px}
+dialog{border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--ink); padding:0; width:min(560px, calc(100vw - 32px))}
+dialog::backdrop{background:rgba(10,14,18,.45)}
+dialog .body{padding:20px; display:flex; flex-direction:column; gap:18px}
+dialog .row{display:flex; flex-direction:column; gap:6px}
+dialog input[type=password]{font:inherit; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); min-width:0; flex:1}
+.path{font-family:var(--f-data); font-size:12px; background:var(--line-2); padding:8px 10px; border-radius:6px; word-break:break-all}
+.msg{font-size:12.5px}
+.msg.err{color:var(--bad)} .msg.ok{color:var(--good)}
+[data-static="1"] .app-only{display:none!important}
 @media (prefers-reduced-motion: reduce){ *{transition:none!important; animation:none!important} }
 </style>
 
+<div class="appbar app-only"><div class="in">
+  <span class="brand"><i aria-hidden="true"></i>fintrack</span>
+  <form class="searchbox" id="f-search" autocomplete="off">
+    <label for="q" class="label" style="position:absolute;left:-9999px">종목 검색</label>
+    <input id="q" type="search" placeholder="종목코드 또는 회사명 (예: 213500, 한솔제지)" aria-autocomplete="list" aria-controls="dd">
+    <button class="btn primary" id="b-go" type="submit">분석</button>
+    <div class="dropdown" id="dd" hidden></div>
+  </form>
+  <button class="btn ghost" id="b-settings" type="button">설정</button>
+</div></div>
+<div class="tabs app-only" id="tabs-wrap" hidden><div class="in" role="tablist" id="tabs"></div></div>
 <nav class="toc" aria-label="목차"><div class="in">
   <a href="#status">수집 현황</a><a href="#combined">통합 그래프</a><a href="#each">개별 그래프</a>
-  <a href="#rawdata">원본 데이터</a><a href="#report">검증 보고서</a><a href="#howto">실행 방법</a>
+  <a href="#rawdata">원본 데이터</a><a href="#report">검증 보고서</a><a href="#howto">갱신과 저장</a>
 </div></nav>
 
 <div class="wrap">
+  <div class="jobbox app-only" id="job" hidden><div style="display:flex;justify-content:space-between;gap:8px"><b id="job-title"></b><span class="muted" id="job-state"></span></div><ol id="job-lines"></ol></div>
+  <div class="empty app-only" id="empty" hidden>
+    <h2>분석할 종목을 입력하세요</h2>
+    <p class="muted" style="margin:0">위 입력란에 종목코드나 회사명을 넣고 <b>분석</b>을 누르면 과거 10년 실적과 향후 전망을 모아 이 자리에 그래프를 만듭니다. 분석한 종목은 탭으로 남아 다음에도 바로 열립니다.</p>
+    <p class="muted" style="margin:0" id="empty-key"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="b-sample" type="button">예시 불러오기(한솔제지, 인증키 불필요)</button><button class="btn ghost" id="b-settings2" type="button">설정 열기</button></div>
+  </div>
+  <div id="dash" style="display:flex;flex-direction:column;gap:28px">
   <header class="top">
     <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
       <span class="label" id="h-eyebrow"></span>
       <h1 id="h-name"></h1>
       <div class="meta" id="h-meta"></div>
     </div>
-    <div class="periods" id="h-periods"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+      <div class="periods" id="h-periods"></div>
+      <button class="btn app-only" id="b-refresh" type="button" title="새 공시·정정 공시·컨센서스·시세만 다시 조회합니다">최신 정보로 갱신</button>
+    </div>
   </header>
 
   <section id="status">
@@ -172,25 +229,25 @@ ul.plain{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:4
   </section>
 
   <section id="howto">
-    <div class="sec-head"><h2>실행 방법</h2></div>
-    <div class="panel" style="display:flex;flex-direction:column;gap:10px">
-      <pre class="cmd">python3 -m fintrack run 213500                # 기준 연도 = 올해 자동
-python3 -m fintrack run 213500 --base-year 2027
-python3 -m fintrack run 005930                # 다른 종목 (data/companies.json에 먼저 등록)</pre>
-      <p class="muted" style="margin:0">같은 종목을 다시 실행하면 DB에서 검증된 값을 먼저 꺼내고, 없는 연도·지표와 갱신 주기가 지난 컨센서스만 새로 조회합니다.</p>
+    <div class="sec-head"><h2>갱신과 저장</h2></div>
+    <div class="panel" style="display:flex;flex-direction:column;gap:8px">
+      <p class="muted" style="margin:0"><b>최신 정보로 갱신</b>은 새로 생겼을 수 있는 것만 조회합니다. 사업보고서 정정 공시, 올해 새 분기·반기 보고서, FnGuide 컨센서스, 오늘 시세입니다. 이미 검증한 과거 값은 다시 받지 않습니다.</p>
+      <p class="muted" style="margin:0">컨센서스는 갱신할 때마다 그날 값이 따로 쌓입니다. 아래 '컨센서스 시점별 기록'에서 전망이 어떻게 바뀌었는지 볼 수 있습니다. 값이 바뀐 실적은 이전 값을 지우지 않고 '변경 이력'에 남깁니다.</p>
+      <p class="faint" style="margin:0;font-size:12px" id="howto-path"></p>
     </div>
   </section>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-const D = __DATA__;
+const BOOT = __BOOT__;
+let D, B, YEARS;
 const $ = s => document.querySelector(s);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const SLOT = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
 const ST_KO = {VERIFIED:'검증 완료',UNVERIFIED:'미검증',CONFLICT:'불일치',CORRECTED:'정정됨',STALE:'갱신 필요',MISSING:'미확보',PASS:'통과',WARN:'주의',FAIL:'실패'};
 const KIND_KO = {actual:'확정 실적',partial:'올해 부분 실적',consensus:'컨센서스',unverified:'미검증 전망'};
-const B = D.base, YEARS = [...D.actualYears, B, ...D.futureYears];
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const chip = st => `<span class="chip st-${st}">${ST_KO[st]||st}</span>`;
 function fmt(v, unit){ if(v==null||isNaN(v)) return '–';
@@ -201,33 +258,35 @@ function yoy(cur, prev){ if(cur==null||prev==null||prev===0) return null; return
 const yoyTxt = (c,p,unit) => { if(c==null||p==null) return '';
   if(unit==='%') { const d=c-p; return `전년 대비 ${d>=0?'+':''}${d.toFixed(2)}%p`; }
   const r=yoy(c,p); return r==null?'':`전년 대비 ${r>=0?'+':''}${r.toFixed(1)}%`; };
-let state = {mode:'spec', unv:false, on:Object.fromEntries(D.metrics.map(m=>[m.key,true]))};
+let state = {mode:'spec', unv:false, on:{}};
 try{ const s=JSON.parse(localStorage.getItem('fintrack-view')||'null'); if(s) state={...state,...s}; }catch(e){}
 const save = () => { try{ localStorage.setItem('fintrack-view', JSON.stringify(state)); }catch(e){} };
 
 /* ---------- 머리말 ---------- */
-$('#h-eyebrow').textContent = `${D.company.market} · ${D.company.code} · 연결 기준`;
+function drawHeader(){
+$('#h-eyebrow').textContent = `${[D.company.market, D.company.code, D.basis+' 기준'].filter(Boolean).join(' · ')}`;
 $('#h-name').textContent = D.company.name;
 $('#h-meta').innerHTML = `<span>기준 연도 <b class="num">${B}</b></span><span>마지막 수집 <span class="num">${esc((D.lastCollected||'').slice(0,10))}</span></span><span>마지막 검증 <span class="num">${esc((D.lastVerified||'').slice(0,10))}</span></span>`;
 $('#h-periods').innerHTML = `<div><span class="label">확정 실적</span><b>${D.actualYears[0]}–${D.actualYears.at(-1)}</b></div><div><span class="label">올해</span><b>${B}</b></div><div><span class="label">컨센서스</span><b>${D.futureYears[0]}–${D.futureYears.at(-1)}</b></div>`;
+}
 
 /* ---------- 수집 현황 ---------- */
-(function(){
+function drawStatus(){
   const c = Object.fromEntries(D.counts.map(r=>[r.status,r.n])); const tot = D.counts.reduce((a,r)=>a+r.n,0);
   const missingCells = D.gaps.length;
   const cards = [['저장된 값',tot,'현재 버전 기준'],['검증 완료',c.VERIFIED||0,'재사용 대상'],['미검증',c.UNVERIFIED||0,'단일 출처·원문 미확인'],['불일치',c.CONFLICT||0,'출처 간 차이'],['미확보 칸',missingCells,`${B}–${D.futureYears.at(-1)} 전망`]];
   $('#st-cards').innerHTML = cards.map(([k,v,s])=>`<div class="stat"><span class="label">${k}</span><b>${v}</b><span class="faint" style="font-size:12px">${s}</span></div>`).join('');
-  $('#st-dates').textContent = `실행 ${D.runs.length}회`;
+  $('#st-dates').textContent = `최근 실행 ${D.runs.length}회`;
   const ch = {'raw-cache':'보관 원본','api':'API','web':'웹 조회','manual':'수동 입력','skipped-reuse':'재사용'};
-  $('#st-runs').innerHTML = D.runs.slice(-3).map((r,i,arr)=>{ const s=r.summary||{};
+  $('#st-runs').innerHTML = D.runs.slice(0,3).map((r,i,arr)=>{ const s=r.summary||{};
     return `<div style="display:flex;flex-direction:column;gap:6px;${i? 'border-top:1px solid var(--line-2);padding-top:10px;margin-top:10px':''}">
       <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b class="num">${esc(r.started_at)}</b>
       <span class="muted">조회 <b class="num">${s['외부·원본 조회']??'-'}</b> · 재사용 <b class="num">${s['재사용(조회 생략)']??'-'}</b> · 신규 저장 <b class="num">${s['신규 저장']??'-'}</b></span></div>
       <ul class="plain" style="font-size:12px">${r.fetches.map(f=>`<li><span class="chip ${f.channel==='skipped-reuse'?'st-VERIFIED':f.result==='ok'?'st-CORRECTED':'st-FAIL'}">${ch[f.channel]||f.channel}</span> ${esc(f.source)} · ${esc(f.target)} <span class="faint">${esc(f.detail)}</span></li>`).join('')}</ul></div>`; }).join('');
   const g = {}; D.gaps.forEach(x=>{ (g[x.year]=g[x.year]||[]).push(x.metric); });
   $('#st-gaps').innerHTML = `<ul class="plain">${Object.entries(g).map(([y,ms])=>`<li><b class="num">${y}</b> 검증된 전망 없음: ${ms.join(', ')}</li>`).join('')}</ul>
-    <p class="faint" style="font-size:12px;margin:8px 0 0">빈칸은 추정해서 채우지 않습니다. 증권사 리포트나 FnGuide 연도별 컨센서스를 확보하면 <span class="mono">data/manual</span>에 넣고 다시 실행하면 됩니다.</p>`;
-})();
+    <p class="faint" style="font-size:12px;margin:8px 0 0">빈칸은 추정해서 채우지 않습니다. <b>최신 정보로 갱신</b>을 누르면 FnGuide에서 다시 찾고, 추정 기관이 없는 종목은 계속 빈칸으로 둡니다.</p>`;
+}
 
 /* ---------- 계열 만들기 ---------- */
 function seriesOf(m){
@@ -354,8 +413,112 @@ $('#t-unv').onchange = e => { state.unv = e.target.checked; save(); drawLegend()
 function renderAll(){ Chart.defaults.font.family = '"IBM Plex Sans KR", sans-serif'; Chart.defaults.color = css('--ink-2');
   $('#m-spec').setAttribute('aria-pressed', state.mode==='spec'); $('#m-mm').setAttribute('aria-pressed', state.mode==='mm');
   drawLegend(); drawAll(); drawCards(); }
-drawTables();
-if (window.Chart) renderAll(); else document.querySelectorAll('.chart-box,.mini').forEach(el=>el.innerHTML='<p class="muted">그래프 라이브러리를 불러오지 못했습니다. 아래 표에서 같은 값을 볼 수 있습니다.</p>');
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>window.Chart && renderAll());
-new MutationObserver(()=>window.Chart && renderAll()).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+/* ---------- 한 종목 그리기 ---------- */
+function mount(data){
+  D = data; B = D.base; YEARS = [...D.actualYears, B, ...D.futureYears];
+  D.metrics.forEach(m => { if(state.on[m.key] === undefined) state.on[m.key] = true; });
+  $('#dash').hidden = false;
+  drawHeader(); drawStatus(); drawTables();
+  if (window.Chart) renderAll();
+  else document.querySelectorAll('.chart-box,.mini').forEach(el=>el.innerHTML='<p class="muted">그래프 라이브러리를 불러오지 못했습니다. 아래 표에서 같은 값을 볼 수 있습니다.</p>');
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>window.Chart && D && renderAll());
+new MutationObserver(()=>window.Chart && D && renderAll()).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+
+/* ---------- 앱(로컬 서버) ---------- */
+const APP = {state:null, current:null, polling:null};
+async function api(path, opts={}){
+  const r = await fetch(path, {...opts, headers:{'Content-Type':'application/json', 'X-FT-Token':BOOT.token, ...(opts.headers||{})}});
+  let j = {}; try{ j = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(j.error || `요청 실패(${r.status})`);
+  return j;
+}
+function drawTabs(){
+  const cs = APP.state.companies;
+  $('#tabs-wrap').hidden = !cs.length;
+  $('#tabs').innerHTML = cs.map(c=>`<button role="tab" type="button" data-code="${esc(c.code)}" aria-selected="${c.code===APP.current}">${esc(c.name)} <small>${esc(c.code)}</small></button>`).join('');
+  $('#tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>openCompany(b.dataset.code));
+}
+async function loadState(){
+  APP.state = await api('/api/state');
+  $('#empty-key').innerHTML = APP.state.key_set ? `DART 인증키 등록됨(${esc(APP.state.key_where)}).`
+    : `<b>DART 인증키가 아직 없습니다.</b> 오른쪽 위 <b>설정</b>에서 등록하면 전체 상장사를 분석할 수 있습니다.`;
+  $('#howto-path').textContent = `작업 폴더: ${APP.state.workdir}`;
+  drawTabs();
+}
+async function openCompany(code){
+  APP.current = code; drawTabs();
+  try{ history.replaceState(null, '', '#c'+code); }catch(e){}
+  try{ mount(await api('/api/company/'+code)); $('#empty').hidden = true; }
+  catch(e){ $('#dash').hidden = true; showJobMsg(`${code}: ${e.message}`); }
+}
+function showJobMsg(t){ $('#job').hidden=false; $('#job-title').textContent=t; $('#job-state').textContent=''; $('#job-lines').innerHTML=''; }
+async function runJob(code, refresh, sample=false){
+  $('#b-go').disabled = $('#b-refresh').disabled = $('#b-sample').disabled = true;
+  $('#job').hidden = false; $('#job-title').textContent = `${code} ${refresh?'갱신':'분석'} 중`; $('#job-state').textContent = '시작'; $('#job-lines').innerHTML='';
+  try{
+    const {job} = sample ? await api('/api/sample', {method:'POST', body:'{}'}) : await api('/api/analyze', {method:'POST', body:JSON.stringify({code, refresh})});
+    await new Promise((res, rej) => { APP.polling = setInterval(async ()=>{
+      try{ const j = await api('/api/job/'+job);
+        $('#job-lines').innerHTML = j.lines.map(l=>`<li>${esc(l)}</li>`).join(''); $('#job-lines').scrollTop = 1e6;
+        $('#job-state').textContent = j.status==='running' ? '진행 중' : j.status==='done' ? '완료' : '오류';
+        if(j.status!=='running'){ clearInterval(APP.polling); j.status==='done' ? res(j) : rej(new Error(j.error)); }
+      }catch(e){ clearInterval(APP.polling); rej(e); } }, 700); });
+    $('#job-title').textContent = `${code} ${refresh?'갱신':'분석'} 완료`;
+    await loadState(); await openCompany(sample ? APP.state.companies.at(-1).code : code);
+  }catch(e){ $('#job-title').textContent = `실패: ${e.message}`; }
+  finally{ $('#b-go').disabled = $('#b-refresh').disabled = $('#b-sample').disabled = false; }
+}
+/* 검색 */
+let tmr;
+$('#q').addEventListener('input', e => { clearTimeout(tmr); const q = e.target.value.trim(); if(!q){ $('#dd').hidden = true; return; }
+  tmr = setTimeout(async ()=>{ try{ const r = await api('/api/search?q='+encodeURIComponent(q));
+    $('#dd').innerHTML = r.items.map(i=>`<button type="button" data-code="${esc(i.stock_code)}"><span>${esc(i.name)} <span class="faint mono">${esc(i.stock_code)}</span></span><span class="faint">${i.analyzed?'분석함 · 열기':'분석'}</span></button>`).join('')
+      + (r.note? `<p>${esc(r.note)}</p>` : '') + (!r.items.length && !r.note ? '<p>찾은 종목이 없습니다</p>' : '');
+    $('#dd').hidden = false;
+    $('#dd').querySelectorAll('button').forEach(b=>b.onclick=()=>pick(b.dataset.code, r.items.find(i=>i.stock_code===b.dataset.code).analyzed));
+  }catch(err){ $('#dd').innerHTML = `<p>${esc(err.message)}</p>`; $('#dd').hidden = false; } }, 250); });
+function pick(code, analyzed){ $('#dd').hidden = true; $('#q').value = ''; analyzed ? openCompany(code) : runJob(code, false); }
+$('#f-search').addEventListener('submit', e => { e.preventDefault(); const q = $('#q').value.trim();
+  if(/^\d{6}$/.test(q)){ const known = APP.state.companies.some(c=>c.code===q); pick(q, known); return; }
+  const first = $('#dd').querySelector('button'); if(first) first.click(); });
+document.addEventListener('click', e => { if(!e.target.closest('#f-search')) $('#dd').hidden = true; });
+$('#b-refresh').onclick = () => APP.current && runJob(APP.current, true);
+$('#b-sample').onclick = () => runJob('213500', false, true);
+/* 설정 */
+function settingsDialog(){
+  const s = APP.state; const dlg = document.createElement('dialog');
+  dlg.innerHTML = `<form method="dialog" class="body" id="f-set">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>설정</h2><button class="btn ghost" value="close">닫기</button></div>
+    <div class="row"><span class="label">작업 폴더</span><div class="path">${esc(s.workdir)}</div>
+      <div><button class="btn" type="button" id="b-wd">다른 폴더 고르기</button></div>
+      <span class="faint" style="font-size:12px">DB(fintrack.sqlite), 받은 원본(raw), 공유용 화면(output)이 모두 이 폴더에 저장됩니다. 이 폴더만 백업하면 됩니다.</span></div>
+    <div class="row"><span class="label">DART 인증키</span>
+      <span>${s.key_set? `${chip('VERIFIED')} 등록됨 · 저장 위치: ${esc(s.key_where)}` : chip('MISSING')+' 미등록'}</span>
+      <div style="display:flex;gap:8px"><input type="password" id="k" autocomplete="off" spellcheck="false" placeholder="영문·숫자 40자"><button class="btn primary" type="button" id="b-k">저장</button></div>
+      ${s.key_set? '<div><button class="btn ghost" type="button" id="b-kdel">등록된 키 삭제</button></div>':''}
+      <span class="faint" style="font-size:12px">키는 Windows 자격 증명 관리자에만 저장되고, 파일·화면·기록에는 남지 않습니다. 발급: opendart.fss.or.kr → 인증키 신청/관리</span>
+      <span class="msg" id="k-msg"></span></div>
+  </form>`;
+  document.body.appendChild(dlg); dlg.showModal();
+  dlg.addEventListener('close', ()=>dlg.remove());
+  dlg.querySelector('#b-k').onclick = async () => { const m = dlg.querySelector('#k-msg');
+    try{ await api('/api/key', {method:'POST', body:JSON.stringify({key:dlg.querySelector('#k').value})}); dlg.querySelector('#k').value='';
+      m.className='msg ok'; m.textContent='저장했습니다.'; await loadState(); }catch(e){ m.className='msg err'; m.textContent=e.message; } };
+  const del = dlg.querySelector('#b-kdel'); if(del) del.onclick = async () => { await api('/api/key/delete',{method:'POST',body:'{}'}); await loadState(); dlg.close(); };
+  dlg.querySelector('#b-wd').onclick = async () => { const m = dlg.querySelector('#k-msg');
+    try{ await api('/api/workdir', {method:'POST', body:'{}'}); await loadState(); dlg.close(); APP.current=null; boot(); }catch(e){ m.className='msg err'; m.textContent=e.message; } };
+}
+$('#b-settings').onclick = settingsDialog; $('#b-settings2').onclick = settingsDialog;
+
+async function boot(){
+  if(BOOT.static){ document.documentElement.dataset.static = '1'; mount(BOOT.data); return; }
+  $('#dash').hidden = true;
+  try{ await loadState(); }catch(e){ showJobMsg('서버에 연결하지 못했습니다: '+e.message); return; }
+  const want = (location.hash.match(/^#c(\w{6})$/)||[])[1];
+  const cs = APP.state.companies;
+  if(!cs.length){ $('#empty').hidden = false; return; }
+  openCompany(cs.some(c=>c.code===want) ? want : cs[0].code);
+}
+boot();
 </script>

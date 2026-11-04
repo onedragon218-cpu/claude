@@ -8,9 +8,15 @@ from datetime import datetime, date
 
 from . import config
 from .db import now
+from .secret import get_dart_key
 from .sources import dart, fnguide, krx, wisereport
 
 EOK = 1e8
+
+
+def _jload(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _days_since(s):
@@ -27,6 +33,8 @@ class Collector:
         self.progress = progress or (lambda msg: None)
         self.settings = settings or {}
         self.p = config.periods(base_year)
+        self.has_key = bool(get_dart_key())
+        self._nokey_logged = False
         self.stats = {"fetched": 0, "reused": 0, "inserted": 0, "same": 0, "new_version": 0, "failed": 0, "missing": []}
         c = store.company(stock_code)
         if not c:
@@ -56,6 +64,15 @@ class Collector:
         else:
             self.stats["failed"] += 1
 
+    def need_key(self, what):
+        """인증키가 없으면 한 번만 알리고 False."""
+        if self.has_key:
+            return True
+        if not self._nokey_logged:
+            self.log("DART", "인증키 없음", "api", "fail", f"설정에서 DART 인증키를 등록하면 {what} 등을 받습니다. 지금은 보관 원본만 사용")
+            self._nokey_logged = True
+        return False
+
     def run_all(self):
         steps = [self.corrections, self.actuals, self.shares, self.partial, self.prices, self.consensus, self.manual_extra]
         for f in steps:
@@ -68,7 +85,7 @@ class Collector:
 
     # ---------- 0. 정정 공시(갱신 때만) ----------
     def corrections(self):
-        if not self.refresh or self.offline:
+        if not self.refresh or self.offline or not self.need_key("정정 공시"):
             return
         a = self.p["actual"]
         found, msg = dart.corrections(self.info["corp_code"], f"{a[0] + 1}0101", date.today().strftime("%Y%m%d"))
@@ -105,8 +122,11 @@ class Collector:
         reused = [y for y in years if y not in need]
         if reused:
             self.log(dart.SOURCE, f"{min(reused)}~{max(reused)} 중 {len(reused)}개년", "skipped-reuse", "ok", "VERIFIED 원값 재사용, 조회 안 함")
-        if need:
+        if need and (self.has_key or self.offline or all(
+                os.path.exists(os.path.join(self.w.rawdir("dart"), f"{self.code}_CFS_11011_{ry}.json.gz")) for ry in dart.plan_reports(need))):
             self._fetch_annual(need)
+        elif need:
+            self.need_key("사업보고서")
         for y in self.p["actual"]:
             have = {r["item"] for r in self.s.current(self.code, fiscal_year=y, kind="ACTUAL", period="FY")}
             self.stats["missing"] += [f"{y} {a}" for a in config.REQUIRED_ACCOUNTS if a not in have]
@@ -139,6 +159,9 @@ class Collector:
     def shares(self):
         if self.offline:
             return
+        if not self.has_key and not any(os.path.exists(os.path.join(self.w.rawdir("dart"), f"{self.code}_shares_11011_{y}.json.gz")) for y in self.p["actual"]):
+            self.need_key("주식 수")
+            return
         todo = []
         for y in self.p["actual"]:
             rows = self.s.current(self.code, fiscal_year=y, item="shares_common", kind="ACTUAL")
@@ -165,7 +188,7 @@ class Collector:
         if have and not self.refresh:
             self.log(dart.SOURCE_PARTIAL, f"{b} {have[0]['period']}", "skipped-reuse", "ok", "보유분 재사용(갱신 때 새 보고서 확인)")
             return
-        if self.offline:
+        if self.offline or not self.need_key("올해 분기·반기 보고서"):
             return self._manual_partial()
         reprt, d, ch = dart.latest_partial(self.w, self.code, self.info["corp_code"], b)
         if not reprt:
@@ -185,7 +208,7 @@ class Collector:
     def _manual_partial(self):
         b = self.p["base"]
         for path in sorted(glob.glob(os.path.join(self.w.manual, f"{self.code}_{b}*.json"))):
-            m = json.load(open(path, encoding="utf-8"))
+            m = _jload(path)
             if m.get("fiscal_year") != b or "accounts" not in m:
                 continue
             for item, v in m["accounts"].items():
@@ -235,7 +258,7 @@ class Collector:
         path = os.path.join(self.w.manual, f"{self.code}_prices.json")
         if not todo or not os.path.exists(path):
             return
-        m = json.load(open(path, encoding="utf-8"))
+        m = _jload(path)
         n = 0
         for y in todo:
             if str(y) in m["year_end_close"]:
@@ -347,7 +370,7 @@ class Collector:
         path = os.path.join(self.w.manual, f"{self.code}_consensus_unverified.json")
         if not os.path.exists(path):
             return
-        m = json.load(open(path, encoding="utf-8"))
+        m = _jload(path)
         n = 0
         for y, row in m["years"].items():
             for item, v in row.items():

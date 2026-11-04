@@ -1,12 +1,14 @@
-"""DB → 한 장짜리 HTML 화면.
+"""화면 자료 만들기와 공유용 HTML 내보내기.
 
-output/<종목>.html          : 브라우저에서 바로 여는 완성 문서
-output/<종목>.fragment.html : 같은 내용, 문서 껍데기 없이(Artifact 게시용)
+- 화면 서버는 collect()가 만든 JSON을 받아 그린다.
+- export()는 같은 화면을 파일 한 장(<작업 폴더>/output/<종목>.html)으로 저장한다. 인터넷 없이 열린다.
 """
 import json, os
-from . import config
+from . import config, paths
 
-TEMPLATE = os.path.join(os.path.dirname(__file__), "template.html")
+TEMPLATE = os.path.join(os.path.dirname(__file__), "app.html")
+VENDOR = os.path.join(paths.CODE_DIR, "vendor", "chart.umd.4.4.1.js")
+CDN = '<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>'
 
 
 def _rows(cur):
@@ -16,59 +18,63 @@ def _rows(cur):
 def collect(store, code, p, series, run_id):
     c = store.company(code)
     con = store.con
-    metrics = []
-    for key, name, unit in config.METRICS:
-        s = series[key]
-        metrics.append({"key": key, "name": name, "unit": unit,
-                        **{slot: {str(y): v for y, v in s[slot].items()} for slot in ("actual", "partial", "consensus", "unverified")}})
+    metrics = [{"key": k, "name": n, "unit": u,
+                **{slot: {str(y): v for y, v in series[k][slot].items()} for slot in ("actual", "partial", "consensus", "unverified")}}
+               for k, n, u in config.METRICS]
     raw = {}
     for r in store.current(code, kind="ACTUAL", period="FY"):
-        raw.setdefault(str(r["fiscal_year"]), {})[r["item"]] = {"v": r["value"], "status": r["status"], "ref": r["source_ref"]}
-    counts = _rows(con.execute(
-        "SELECT status, COUNT(*) n FROM observations WHERE stock_code=? AND is_current=1 GROUP BY status", (code,)))
-    by_kind = _rows(con.execute(
-        "SELECT kind, status, COUNT(*) n FROM observations WHERE stock_code=? AND is_current=1 GROUP BY kind, status", (code,)))
+        raw.setdefault(str(r["fiscal_year"]), {})[r["item"]] = {"v": r["value"], "status": r["status"], "ref": r["source_ref"], "basis": r["basis"]}
+    counts = _rows(con.execute("SELECT status, COUNT(*) n FROM observations WHERE stock_code=? AND is_current=1 GROUP BY status", (code,)))
     last = con.execute("SELECT MAX(collected_at) c, MAX(verified_at) v FROM observations WHERE stock_code=?", (code,)).fetchone()
-    runs = _rows(con.execute("SELECT * FROM runs WHERE stock_code=? ORDER BY started_at", (code,)))
+    runs = _rows(con.execute("SELECT * FROM runs WHERE stock_code=? AND finished_at IS NOT NULL ORDER BY started_at DESC LIMIT 5", (code,)))
     for r in runs:
         r["summary"] = json.loads(r["summary"]) if r["summary"] else None
         r["fetches"] = _rows(con.execute("SELECT source,target,channel,result,detail FROM fetch_log WHERE run_id=? ORDER BY id", (r["run_id"],)))
     checks = _rows(con.execute(
         "SELECT fiscal_year, item, check_name, result, detail FROM validation_results WHERE run_id=? ORDER BY "
         "CASE result WHEN 'FAIL' THEN 0 WHEN 'WARN' THEN 1 ELSE 2 END, fiscal_year", (run_id,)))
-    changes = _rows(con.execute("SELECT * FROM change_log WHERE stock_code=? ORDER BY id DESC", (code,)))
+    changes = _rows(con.execute("SELECT * FROM change_log WHERE stock_code=? ORDER BY id DESC LIMIT 200", (code,)))
     snaps = _rows(con.execute(
         "SELECT fiscal_year, item, value, source, as_of, collected_at, status, status_note, version, is_current, extra "
-        "FROM observations WHERE stock_code=? AND kind='CONSENSUS' ORDER BY fiscal_year, item, collected_at", (code,)))
-    gaps = []
-    for y in [p["base"]] + p["future"]:
-        for m in metrics:
-            if str(y) not in m["consensus"] and not (m["key"] == "market_cap" and str(y) in m["actual"]):
-                gaps.append({"year": y, "metric": m["name"]})
-    return {"company": {"code": code, "name": c["name"], "market": c["market"]},
+        "FROM observations WHERE stock_code=? AND kind='CONSENSUS' AND item IN ('revenue','op','eps','bps','roe','debt_ratio') "
+        "ORDER BY collected_at DESC, fiscal_year, item LIMIT 400", (code,)))
+    gaps = [{"year": y, "metric": m["name"]} for y in [p["base"]] + p["future"] for m in metrics
+            if str(y) not in m["consensus"] and m["key"] != "market_cap"]
+    basis = {r["basis"] for r in store.current(code, kind="ACTUAL", period="FY") if r["basis"]}
+    return {"company": {"code": code, "name": c["name"], "market": c["market"] or ""},
+            "basis": "별도" if basis == {"OFS"} else "연결",
             "base": p["base"], "actualYears": p["actual"], "futureYears": p["future"],
-            "metrics": metrics, "raw": raw, "counts": counts, "byKind": by_kind,
+            "metrics": metrics, "raw": raw, "counts": counts,
             "lastCollected": last["c"], "lastVerified": last["v"], "runs": runs, "checks": checks,
             "changes": changes, "snapshots": snaps, "gaps": gaps}
 
 
-def write(store, code, p, series, run_id):
-    data = collect(store, code, p, series, run_id)
+def render_html(data=None, token="", static=False):
     tpl = open(TEMPLATE, encoding="utf-8").read()
-    frag = tpl.replace("__DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/")) \
-              .replace("__TITLE__", f"{data['company']['name']} 재무 추이")
-    out_dir = os.path.join(config.ROOT, "output")
-    os.makedirs(out_dir, exist_ok=True)
-    fpath = os.path.join(out_dir, f"{code}.fragment.html")
-    open(fpath, "w", encoding="utf-8").write(frag)
-    # 로컬 파일은 인터넷 없이도 열리도록 Chart.js를 문서 안에 넣는다(Artifact용 조각은 cdnjs 사용).
-    cdn = '<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>'
-    vend = os.path.join(config.ROOT, "vendor", "chart.umd.4.4.1.js")
-    if os.path.exists(vend):
-        frag = frag.replace(cdn, "<script>" + open(vend, encoding="utf-8").read().replace("</script", "<\\/script") + "</script>")
-    full = ('<!doctype html>\n<html lang="ko"><head><meta charset="utf-8">'
+    boot = {"static": static, "token": token, "data": data}
+    html = tpl.replace("__BOOT__", json.dumps(boot, ensure_ascii=False).replace("</", "<\\/"))
+    title = f"{data['company']['name']} 재무 추이" if (static and data) else "기업 재무 추이"
+    return html.replace("__TITLE__", title)
+
+
+def _inline_vendor(html):
+    if os.path.exists(VENDOR):
+        return html.replace(CDN, "<script>" + open(VENDOR, encoding="utf-8").read().replace("</script", "<\\/script") + "</script>")
+    return html
+
+
+def full_document(fragment):
+    return ('<!doctype html>\n<html lang="ko"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body>\n'
-            + frag + "\n</body></html>\n")
-    path = os.path.join(out_dir, f"{code}.html")
-    open(path, "w", encoding="utf-8").write(full)
+            + fragment + "\n</body></html>\n")
+
+
+def export(store, w, code, p, series, run_id):
+    data = collect(store, code, p, series, run_id)
+    frag = render_html(data, static=True)
+    with open(os.path.join(w.output, f"{code}.fragment.html"), "w", encoding="utf-8") as f:
+        f.write(frag)
+    path = os.path.join(w.output, f"{code}.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(full_document(_inline_vendor(frag)))
     return path

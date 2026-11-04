@@ -135,9 +135,9 @@ def parse(path):
         if "시가총액" in tx and ("종가" in tx or "발행주식수" in tx) and "price" not in out["market"]:
             m = re.search(r"종가\s*/?\s*전일대비\s*([\d,]+)", tx)
             if m: out["market"]["price"] = _num(m.group(1))
-            m = re.search(r"시가총액[^\d]{0,30}?([\d,]+)", tx)
+            m = re.search(r"시가총액[^\d]{0,30}?(\d[\d,]*)", tx)
             if m: out["market"]["market_cap_eok"] = _num(m.group(1))
-            m = re.search(r"발행주식수[^\d]{0,30}?([\d,]+)", tx)
+            m = re.search(r"발행주식수[^\d]{0,30}?(\d[\d,]*)", tx)
             if m: out["market"]["shares_common"] = _num(m.group(1))
         if "추정기관수" in tx and "n_estimates" not in out:
             nums = re.findall(r"-?[\d,]+(?:\.\d+)?", tx.split("추정기관수", 1)[-1])
