@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f6f6f4; --surface-1:#fcfcfb; --surface-2:#f0efec; --border:#e2e1dc;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#7b7a75; --grid:#e8e7e2;
+  --accent:#2a78d6;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6;
+  --good:#1a7f37; --warn:#9a6700; --bad:#cf222e; --info:#52514e;
+  --good-bg:#e6f4ea; --warn-bg:#fff4d6; --bad-bg:#fde8e8; --info-bg:#efefec;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#121211; --surface-1:#1a1a19; --surface-2:#232321; --border:#33332f;
+    --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#8f8e86; --grid:#2c2c29;
+    --accent:#3987e5;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9;
+    --good:#4ac26b; --warn:#d4a72c; --bad:#ff7b72; --info:#c3c2b7;
+    --good-bg:#12321d; --warn-bg:#3a2e0b; --bad-bg:#3d1716; --info-bg:#262624;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#121211; --surface-1:#1a1a19; --surface-2:#232321; --border:#33332f;
+  --text-primary:#f0efec; --text-secondary:#c3c2b7; --text-muted:#8f8e86; --grid:#2c2c29;
+  --accent:#3987e5;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9;
+  --good:#4ac26b; --warn:#d4a72c; --bad:#ff7b72; --info:#c3c2b7;
+  --good-bg:#12321d; --warn-bg:#3a2e0b; --bad-bg:#3d1716; --info-bg:#262624;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text-primary);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif}
+header{padding:20px 16px 0;max-width:1200px;margin:0 auto}
+h1{font-size:22px;margin:0 0 2px}
+.sub{color:var(--text-secondary);font-size:13px}
+nav{display:flex;gap:4px;flex-wrap:wrap;max-width:1200px;margin:14px auto 0;padding:0 16px}
+nav button{border:1px solid var(--border);background:var(--surface-1);color:var(--text-secondary);padding:7px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:14px}
+nav button.on{background:var(--text-primary);color:var(--surface-1);border-color:var(--text-primary)}
+main{max-width:1200px;margin:0 auto;padding:16px}
+section{display:none} section.on{display:block}
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px}
+.card h2{font-size:16px;margin:0 0 4px} .card h3{font-size:15px;margin:0 0 4px}
+.muted{color:var(--text-muted);font-size:12.5px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+label{font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px}
+input,select{font:inherit;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-1);color:var(--text-primary)}
+button.primary{font:inherit;padding:8px 16px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+.tile .k{font-size:12.5px;color:var(--text-secondary)} .tile .v{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.grid7{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
+.chartbox{position:relative;height:240px} .chartbox.big{height:420px}
+.toggles{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
+.tg{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:13px;cursor:pointer;background:var(--surface-1);color:var(--text-primary);user-select:none}
+.tg.off{opacity:.45} .sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+.tablewrap{overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}
+th{color:var(--text-secondary);font-weight:600;background:var(--surface-2);position:sticky;top:0}
+td.l,th.l{text-align:left}
+td.est{font-style:italic;color:var(--text-secondary)}
+.badge{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:999px;font-weight:600}
+.b-VERIFIED,.b-OK{background:var(--good-bg);color:var(--good)}
+.b-UNVERIFIED,.b-WARN,.b-STALE{background:var(--warn-bg);color:var(--warn)}
+.b-CONFLICT,.b-ERROR,.b-MISSING{background:var(--bad-bg);color:var(--bad)}
+.b-CORRECTED,.b-INFO{background:var(--info-bg);color:var(--info)}
+.legendnote{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--text-secondary);margin-top:8px}
+.dash{display:inline-block;width:22px;border-top:2px dashed var(--text-secondary);vertical-align:middle}
+.solid{display:inline-block;width:22px;border-top:2px solid var(--text-secondary);vertical-align:middle}
+.detail{margin-top:12px}
+a{color:var(--accent)}
+code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.5px}
+.warnbox{border-left:3px solid var(--warn);background:var(--warn-bg);padding:8px 12px;border-radius:6px;font-size:13.5px;margin:8px 0}
+@media (max-width:520px){.grid7{grid-template-columns:1fr}.chartbox.big{height:320px}}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <div class="sub" id="subtitle"></div>
+</header>
+<nav id="tabs">
+  <button data-s="A" class="on">A. 기업 검색</button>
+  <button data-s="B">B. 수집 현황</button>
+  <button data-s="C">C. 통합 그래프</button>
+  <button data-s="D">D. 개별 그래프</button>
+  <button data-s="E">E. 원본 데이터</button>
+  <button data-s="F">F. 검증 보고서</button>
+</nav>
+<main>
+<section id="A" class="on">
+  <div class="card">
+    <h2>기업 검색과 분석 실행</h2>
+    <div class="row">
+      <label>종목코드 또는 기업명<input id="q" placeholder="예: 213500" list="complist"></label>
+      <datalist id="complist"></datalist>
+      <label>기준 연도<input id="by" type="number" min="2000" max="2100" style="width:110px"></label>
+      <button class="primary" id="run">분석 실행</button>
+    </div>
+    <p class="muted" id="runhint"></p>
+    <div id="runresult"></div>
+  </div>
+  <div class="card">
+    <h2>데이터베이스에 있는 기업</h2>
+    <div class="tablewrap"><table id="comps"></table></div>
+  </div>
+</section>
+
+<section id="B">
+  <div class="tiles" id="tiles"></div>
+  <div class="card" style="margin-top:16px">
+    <h2>지표별 확보 현황</h2>
+    <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
+    <div class="tablewrap"><table id="coverage"></table></div>
+  </div>
+  <div class="card"><h2>최근 수집 기록</h2><p class="muted">같은 자료를 다시 요청하지 않았는지 이 기록으로 확인할 수 있습니다.</p>
+    <div class="tablewrap"><table id="fetchlog"></table></div></div>
+</section>
+
+<section id="C">
+  <div class="card">
+    <h2>7개 지표 통합 추이(표준화)</h2>
+    <p class="muted" id="normnote"></p>
+    <div class="toggles" id="toggles"></div>
+    <div class="chartbox big"><canvas id="combo"></canvas></div>
+    <div class="legendnote"><span><span class="solid"></span> 실적</span><span><span class="dash"></span> 전망(컨센서스)·현재 연도</span><span>점이 없는 연도 = 자료 없음(선을 잇지 않음)</span><span>그래프의 연도를 누르면 원래 단위 값이 아래에 나옵니다</span></div>
+    <div class="detail" id="detail"></div>
+  </div>
+  <div class="card"><h3>지표별 표준화 방식</h3><div class="tablewrap"><table id="normtable"></table></div></div>
+</section>
+
+<section id="D"><div class="grid7" id="singles"></div></section>
+
+<section id="E">
+  <div class="card">
+    <h2>연도별 지표(원래 단위)</h2>
+    <p class="muted">기울임 글씨 = 전망 또는 부분 실적. 칸에 마우스를 올리면 출처와 상태가 보입니다.</p>
+    <div class="tablewrap"><table id="pivot"></table></div>
+  </div>
+  <div class="card">
+    <h2>저장된 원본 값(현재 버전)</h2>
+    <div class="row"><label>종류<select id="ffilter"><option value="all">전체</option><option value="acc">원천 계정</option><option value="metric">7개 지표</option><option value="other">주가·주식 수</option></select></label></div>
+    <div class="tablewrap" style="max-height:520px;overflow:auto;margin-top:8px"><table id="facts"></table></div>
+  </div>
+  <div class="card">
+    <h2>컨센서스 시점별 기록</h2>
+    <p class="muted">컨센서스는 수집 기준일마다 따로 저장하며 덮어쓰지 않습니다.</p>
+    <div class="tablewrap"><table id="cons"></table></div>
+  </div>
+</section>
+
+<section id="F">
+  <div class="tiles" id="vtiles"></div>
+  <div class="card" style="margin-top:16px"><h2>검증 결과(10개 항목)</h2><div class="tablewrap"><table id="vtable"></table></div></div>
+  <div class="card"><h2>데이터 변경 이력</h2><p class="muted">값은 덮어쓰지 않고 새 버전으로 쌓습니다.</p><div class="tablewrap"><table id="hist"></table></div></div>
+  <div class="card"><h2>미확보 데이터</h2><div class="tablewrap"><table id="miss"></table></div></div>
+</section>
+</main>
+
+<script>
+const D = /*__DATA__*/null;
+const $ = s => document.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const COLORS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
+const MET = D.metrics;
+const MNAME = Object.fromEntries(MET.map(m=>[m.key,m.name]));
+const MUNIT = Object.fromEntries(MET.map(m=>[m.key,m.unit]));
+const ACC = D.accounts;
+let BY = D.periods.base_year;
+const visible = new Set(MET.map(m=>m.key));
+const charts = {};
+
+const fmt = (v, u) => {
+  if (v === null || v === undefined || Number.isNaN(v)) return '–';
+  const d = (u === '%' ) ? 2 : (Math.abs(v) >= 100 ? 0 : 2);
+  return v.toLocaleString('ko-KR', {maximumFractionDigits:d, minimumFractionDigits:0});
+};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const badge = s => s ? `<span class="badge b-${esc(s)}">${esc(s)}</span>` : '';
+const yearsFor = by => Array.from({length:13}, (_,i)=>by-10+i);
+
+// 연도별로 그래프에 쓸 값을 고른다(실적 / 현재 연도 / 전망 구분)
+function pick(m, y, by){
+  const s = (D.series[m.key]||{})[y]; if(!s) return null;
+  if (y < by) return s.fy && s.fy.value!=null ? {v:s.fy.value, kind:'실적', p:s.fy} : null;
+  if (y === by){
+    if (m.stock && s.partial && s.partial.value!=null) return {v:s.partial.value, kind:'현재(부분 실적)', p:s.partial};
+    if (s.est) return {v:s.est.value, kind:'전망', p:s.est};
+    if (m.key==='op_margin' && s.partial && s.partial.value!=null) return {v:s.partial.value, kind:'현재(부분 실적)', p:s.partial};
+    return null;
+  }
+  if (s.est) return {v:s.est.value, kind:'전망', p:s.est};
+  return null;
+}
+const isEst = pt => pt && pt.kind !== '실적';
+function yoy(m, y, by){
+  const a = pick(m, y-1, by), b = pick(m, y, by);
+  if(!a || !b || a.v === 0) return null;
+  if (m.unit === '%') return {pp: b.v - a.v};
+  if (a.v < 0) return null;
+  return {pct: (b.v/a.v - 1)*100};
+}
+const yoyText = r => !r ? '' : (r.pp!==undefined ? `${r.pp>=0?'+':''}${r.pp.toFixed(1)}%p` : `${r.pct>=0?'+':''}${r.pct.toFixed(1)}%`);
+
+// 표준화: 기준값이 양수이고 모든 값이 양수면 첫해=100 지수, 아니면 0~100 최소·최대 정규화
+function normalize(m, ys, by){
+  const pts = ys.map(y => pick(m, y, by));
+  const vals = pts.filter(Boolean).map(p=>p.v);
+  if (!vals.length) return {method:'자료 없음', data: ys.map(()=>null), pts};
+  const baseIdx = pts.findIndex(Boolean);
+  const base = pts[baseIdx].v;
+  const maxAbs = Math.max(...vals.map(Math.abs));
+  const allPos = vals.every(v=>v>0);
+  if (allPos && base > 0 && base >= 0.05*maxAbs){
+    return {method:`지수(${ys[baseIdx]}년=100)`, data: pts.map(p=>p? p.v/base*100 : null), pts};
+  }
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  return {method:`0~100 정규화(최솟값 ${fmt(mn,m.unit)}→0, 최댓값 ${fmt(mx,m.unit)}→100)`,
+          data: pts.map(p=>p? (mx===mn?50:(p.v-mn)/(mx-mn)*100) : null), pts, minmax:true};
+}
+
+function segDash(pts){ return { borderDash: ctx => (isEst(pts[ctx.p0DataIndex]) || isEst(pts[ctx.p1DataIndex])) ? [6,4] : undefined }; }
+
+function baseOpts(){
+  return {responsive:true, maintainAspectRatio:false, animation:false, spanGaps:false,
+    interaction:{mode:'index', intersect:false},
+    scales:{x:{grid:{display:false}, ticks:{color:css('--text-secondary')}, border:{color:css('--border')}},
+            y:{grid:{color:css('--grid')}, ticks:{color:css('--text-secondary')}, border:{display:false}}},
+    plugins:{legend:{display:false}, tooltip:{backgroundColor:css('--surface-1'), titleColor:css('--text-primary'),
+      bodyColor:css('--text-primary'), borderColor:css('--border'), borderWidth:1, padding:10}}};
+}
+
+function renderCombo(){
+  const ys = yearsFor(BY);
+  const ds = [], norms = {};
+  MET.forEach((m,i)=>{
+    const n = normalize(m, ys, BY); norms[m.key]=n;
+    const c = css(COLORS[i]);
+    ds.push({label:m.name, key:m.key, data:n.data, borderColor:c, backgroundColor:c, borderWidth:2, pointRadius:3.5,
+      pointHoverRadius:6, pointBackgroundColor: n.pts.map(p=> p && isEst(p) ? css('--surface-1') : c),
+      segment: segDash(n.pts), hidden: !visible.has(m.key), tension:0});
+  });
+  const o = baseOpts();
+  o.scales.y.title = {display:true, text:'표준화 값', color:css('--text-muted')};
+  o.plugins.tooltip.callbacks = {label: ctx => {
+    const m = MET.find(x=>x.key===ctx.dataset.key); const p = norms[m.key].pts[ctx.dataIndex];
+    if(!p) return `${m.name}: 자료 없음`;
+    return `${m.name}: ${fmt(p.v,m.unit)} ${m.unit} (${p.kind}) · 표준화 ${ctx.parsed.y.toFixed(1)}`;
+  }};
+  o.onClick = (e, els, chart) => {
+    const x = chart.scales.x.getValueForPixel(e.x); if (x==null) return; showDetail(ys[Math.round(x)]);
+  };
+  if (charts.combo) charts.combo.destroy();
+  charts.combo = new Chart($('#combo'), {type:'line', data:{labels:ys.map(y=> y>BY? y+'E' : y===BY? y+'(현재)': String(y)), datasets:ds}, options:o});
+  $('#normtable').innerHTML = '<tr><th class="l">지표</th><th class="l">단위</th><th class="l">표준화 방식</th><th class="l">이유</th></tr>' +
+    MET.map(m=>{ const n=norms[m.key]; return `<tr><td class="l">${m.name}</td><td class="l">${m.unit}</td><td class="l">${esc(n.method)}</td><td class="l">${n.minmax?'0 이하 값이 있거나 기준값이 0에 가까워 단순 비율을 쓰지 않음':'기준값이 양수라 첫해 대비 비율 사용'}</td></tr>`;}).join('');
+  $('#normnote').textContent = `분석 기간 ${ys[0]}~${ys[12]} (과거 ${ys[0]}~${BY-1}, 현재 ${BY}, 전망 ${BY+1}~${BY+2}). 단위가 다른 지표를 한 축에 놓기 위해 표준화했습니다. 실제 값은 D·E 화면에서 확인하세요.`;
+  $('#toggles').innerHTML = MET.map((m,i)=>`<span class="tg ${visible.has(m.key)?'':'off'}" data-k="${m.key}" role="button" aria-pressed="${visible.has(m.key)}"><span class="sw" style="background:var(${COLORS[i]})"></span>${m.name}</span>`).join('') +
+    '<span class="tg" data-k="__all">모두 보기</span>';
+  document.querySelectorAll('#toggles .tg').forEach(el=>el.onclick=()=>{
+    const k = el.dataset.k;
+    if (k==='__all') MET.forEach(m=>visible.add(m.key)); else visible.has(k)? visible.delete(k) : visible.add(k);
+    renderCombo();
+  });
+}
+
+function showDetail(y){
+  if (y==null) return;
+  const rows = MET.map(m=>{
+    const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};
+    const part = s.partial && y===BY ? ` · 부분 실적(${s.partial.period}) ${fmt(s.partial.value,m.unit)}` : '';
+    return `<tr><td class="l">${m.name}</td><td>${p?fmt(p.v,m.unit):'–'}</td><td class="l">${m.unit}</td><td class="l">${p?p.kind:'자료 없음'}${part}</td><td>${yoyText(yoy(m,y,BY))}</td><td class="l">${p&&p.p.status?badge(p.p.status):''}</td></tr>`;
+  }).join('');
+  $('#detail').innerHTML = `<h3>${y}년 원래 단위 값</h3><div class="tablewrap"><table><tr><th class="l">지표</th><th>값</th><th class="l">단위</th><th class="l">구분</th><th>전년 대비</th><th class="l">상태</th></tr>${rows}</table></div>`;
+}
+
+function renderSingles(){
+  const ys = yearsFor(BY);
+  $('#singles').innerHTML = MET.map((m,i)=>`<div class="card"><h3>${m.name} <span class="muted">(${m.unit})</span></h3><div class="muted" id="sum-${m.key}"></div><div class="chartbox"><canvas id="c-${m.key}"></canvas></div><div class="muted" id="src-${m.key}" style="margin-top:6px"></div></div>`).join('');
+  MET.forEach((m,i)=>{
+    const pts = ys.map(y=>pick(m,y,BY)); const c = css(COLORS[i]);
+    const o = baseOpts();
+    o.plugins.tooltip.callbacks = {label: ctx => { const p = pts[ctx.dataIndex]; if(!p) return '자료 없음';
+      const r = yoy(m, ys[ctx.dataIndex], BY);
+      return [`${fmt(p.v,m.unit)} ${m.unit} (${p.kind})`, r?`전년 대비 ${yoyText(r)}`:'', p.p.status?`상태: ${p.p.status}`:'', p.p.note?String(p.p.note).slice(0,70):''].filter(Boolean); }};
+    if (charts[m.key]) charts[m.key].destroy();
+    charts[m.key] = new Chart($('#c-'+m.key), {type:'line', data:{labels:ys.map(y=> y>BY? y+'E' : y===BY? y+'(현재)': String(y)),
+      datasets:[{data:pts.map(p=>p?p.v:null), borderColor:c, backgroundColor:c, borderWidth:2, pointRadius:4, pointHoverRadius:6,
+        pointBackgroundColor: pts.map(p=>p&&isEst(p)?css('--surface-1'):c), segment:segDash(pts), tension:0}]}, options:o});
+    const lastA = [...ys].reverse().find(y=>y<BY && pick(m,y,BY));
+    const r = lastA ? yoy(m,lastA,BY) : null;
+    const cnt = pts.filter(Boolean).length;
+    $('#sum-'+m.key).innerHTML = lastA ? `최근 실적 ${lastA}년 <b>${fmt(pick(m,lastA,BY).v,m.unit)} ${m.unit}</b> ${r?'· 전년 대비 '+yoyText(r):''} · 표시 ${cnt}/13개 연도` : '실적 자료 없음';
+    const srcs = new Set(), dates = new Set(); let caution = false;
+    pts.forEach(p=>{ if(!p) return; if(p.p.source) srcs.add(p.p.source==='derived'?'DART 계정으로 계산':p.p.source); if(p.p.provider) srcs.add(p.p.provider+' 컨센서스'); if(p.p.collected_at) dates.add(p.p.collected_at); if(p.p.as_of && p.kind==='전망') dates.add(p.p.as_of); if(p.p.status && p.p.status!=='VERIFIED') caution = true; });
+    const s = (D.series[m.key]||{})[BY]; const part = s && s.partial && !m.stock ? ` · ${BY}년 부분 실적(${s.partial.period}): ${fmt(s.partial.value,m.unit)} ${m.unit}` : '';
+    $('#src-'+m.key).innerHTML = `출처: ${[...srcs].join(', ')||'–'} · 수집일: ${[...dates].sort().slice(-1)[0]||'–'}${part}` + (caution? `<div class="warnbox">일부 값이 미검증(UNVERIFIED)입니다. 툴팁의 상태와 F 화면을 확인하세요.</div>`:'');
+  });
+}
+
+function renderPivot(){
+  const ys = yearsFor(BY);
+  let h = '<tr><th class="l">지표</th><th class="l">단위</th>' + ys.map(y=>`<th>${y>BY?y+'E':y===BY?y+'*':y}</th>`).join('') + '</tr>';
+  MET.forEach(m=>{
+    h += `<tr><td class="l">${m.name}</td><td class="l">${m.unit}</td>` + ys.map(y=>{
+      const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};
+      let txt = p? fmt(p.v,m.unit) : '–', cls = p&&isEst(p)?'est':'', tip = p? `${p.kind} · ${p.p.status||''} · ${p.p.source||p.p.provider||''} ${p.p.source_ref||''} ${p.p.note||''}` : '자료 없음';
+      if(!p && y===BY && s.partial){ txt = fmt(s.partial.value,m.unit)+'<sub>'+s.partial.period+'</sub>'; cls='est'; tip=`부분 실적 ${s.partial.period} (연간 아님) · ${s.partial.note||''}`; }
+      const warn = p && p.p.status && p.p.status!=='VERIFIED' && p.kind==='실적' ? ' ⚠' : '';
+      return `<td class="${cls}" title="${esc(tip)}">${txt}${warn}</td>`;
+    }).join('') + '</tr>';
+  });
+  $('#pivot').innerHTML = h + `<tr><td class="l muted" colspan="${ys.length+2}">* ${BY}년: 부채비율·BPS·시가총액은 최신 실제값, 매출·EPS·ROE는 컨센서스(없으면 아래첨자로 부분 실적 표시). E = 컨센서스 전망. ⚠ = 미검증 값.</td></tr>`;
+}
+
+function renderFacts(){
+  const f = $('#ffilter').value;
+  const rows = D.facts.filter(r => f==='all' || (f==='acc'&&r.metric.startsWith('acc_')) || (f==='metric'&&MNAME[r.metric]) || (f==='other'&&!r.metric.startsWith('acc_')&&!MNAME[r.metric]));
+  $('#facts').innerHTML = '<tr><th>연도</th><th class="l">기간</th><th class="l">항목</th><th>값</th><th class="l">단위</th><th class="l">기준</th><th class="l">구분</th><th class="l">상태</th><th class="l">출처</th><th class="l">원본 식별</th><th class="l">자료 기준일</th><th class="l">수집일</th><th>버전</th><th class="l">메모</th></tr>' +
+    rows.map(r=>`<tr><td>${r.fiscal_year}</td><td class="l">${r.period}</td><td class="l">${esc(MNAME[r.metric]||ACC[r.metric]||r.metric)}</td><td>${fmt(r.value, r.unit)}</td><td class="l">${esc(r.unit)}</td><td class="l">${esc(r.basis)}</td><td class="l">${esc(r.data_type)}</td><td class="l">${badge(r.status)}</td><td class="l">${esc(r.source)}</td><td class="l">${r.source_url?`<a href="${esc(r.source_url)}" target="_blank" rel="noopener">${esc(r.source_ref)}</a>`:esc(String(r.source_ref||'').slice(0,60))}</td><td class="l">${esc(r.as_of)}</td><td class="l">${esc(r.collected_at)}</td><td>${r.version}</td><td class="l">${esc(r.status_note||'')}</td></tr>`).join('');
+}
+
+function renderStatic(){
+  $('#title').textContent = `${D.company.name} (${D.company.code})`;
+  $('#subtitle').textContent = `기준 연도 ${BY} · 화면 생성 ${D.generated_at} · 마지막 수집 ${D.last_collect||'–'} · 마지막 검증 ${D.last_verify||'–'}`;
+  $('#by').value = BY;
+  $('#complist').innerHTML = D.companies.map(c=>`<option value="${esc(c.stock_code)}">${esc(c.name||'')}</option>`).join('');
+  $('#comps').innerHTML = '<tr><th class="l">종목코드</th><th class="l">기업명</th><th>저장된 값</th><th class="l">마지막 수집일</th></tr>' +
+    D.companies.map(c=>`<tr><td class="l">${esc(c.stock_code)}</td><td class="l">${esc(c.name||'')}</td><td>${c.n}</td><td class="l">${esc(c.last||'–')}</td></tr>`).join('');
+  const served = location.protocol.startsWith('http') && !location.hostname.endsWith('claude.ai');
+  $('#runhint').innerHTML = served ? '분석 실행을 누르면 DB에 없는 자료만 수집한 뒤 화면을 다시 만듭니다.' :
+    '이 파일은 저장된 결과 화면입니다. 기준 연도는 여기서 바로 바꿀 수 있고, 새 종목 분석은 터미널에서 <code>python -m analyzer analyze 종목코드</code> 또는 <code>python -m analyzer serve</code> 후 이 화면에서 실행하세요.';
+  const lr = D.last_run;
+  if (lr) $('#runresult').innerHTML = `<div class="muted">최근 실행: 외부 요청 ${lr.total_requests}건 · 재사용 ${lr.reused_facts}개 · 신규 ${lr.new_facts}개 · 변경 ${lr.changed_facts}개</div><ul class="muted">${(lr.notes||[]).map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`;
+  // B
+  const sc = D.status_counts; const tot = Object.values(sc).reduce((a,b)=>a+b,0);
+  const missN = D.missing.length;
+  const stale = sc.STALE||0;
+  $('#tiles').innerHTML = [['저장된 값(현재 버전)',tot],['검증 완료',sc.VERIFIED||0],['미검증',sc.UNVERIFIED||0],['불일치',sc.CONFLICT||0],['갱신 필요(STALE)',stale],['미확보 칸',missN],['마지막 수집일',D.last_collect||'–'],['마지막 검증일',(D.last_verify||'–').slice(0,10)]]
+    .map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v" style="${typeof v==='string'?'font-size:17px':''}">${v}</div></div>`).join('');
+  const ys = yearsFor(BY);
+  $('#coverage').innerHTML = '<tr><th class="l">지표</th>' + ys.map(y=>`<th>${y>BY?y+'E':y}</th>`).join('') + '</tr>' + MET.map(m=>'<tr><td class="l">'+m.name+'</td>'+ys.map(y=>{
+    const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};
+    let sym = ''; if(p){ sym = p.kind==='전망'?'◇': p.kind==='실적'? (p.p.status==='VERIFIED'?'●':'◐') : '△'; } else if (y===BY && s.partial) sym='△';
+    return `<td style="text-align:center" title="${p?esc(p.kind+' '+(p.p.status||'')):'미확보'}">${sym}</td>`; }).join('')+'</tr>').join('');
+  $('#fetchlog').innerHTML = '<tr><th class="l">시각</th><th class="l">출처</th><th class="l">대상</th><th class="l">결과</th><th>항목 수</th><th class="l">메모</th></tr>' +
+    D.fetch_log.map(r=>`<tr><td class="l">${esc(r.fetched_at)}</td><td class="l">${esc(r.source)}</td><td class="l">${esc(r.key)}</td><td class="l">${r.ok?badge('OK'):badge('MISSING')}</td><td>${r.n_items}</td><td class="l">${esc(String(r.note||'').slice(0,90))}</td></tr>`).join('');
+  // E consensus
+  $('#cons').innerHTML = D.consensus.length ? '<tr><th class="l">수집 기준일</th><th>대상 연도</th><th class="l">지표</th><th>값</th><th class="l">단위</th><th class="l">증권사</th><th>추정 개수</th><th class="l">제공기관</th><th class="l">기준</th></tr>' +
+    D.consensus.map(c=>`<tr><td class="l">${esc(c.as_of)}</td><td>${c.target_year}</td><td class="l">${esc(MNAME[c.metric]||c.metric)}</td><td>${fmt(c.value,c.unit)}</td><td class="l">${esc(c.unit)}</td><td class="l">${esc(c.broker)}</td><td>${c.n_estimates??'–'}</td><td class="l">${esc(c.provider)}</td><td class="l">${esc(c.basis)}</td></tr>`).join('')
+    : '<tr><td class="l">저장된 컨센서스가 없습니다(미확보). 자동 수집(FnGuide 공개 화면)이 성공하거나 CSV를 넣으면 여기에 시점별로 쌓입니다.</td></tr>';
+  // F
+  const vs = {}; D.validation.forEach(v=>vs[v.level]=(vs[v.level]||0)+1);
+  $('#vtiles').innerHTML = ['ERROR','WARN','MISSING','INFO'].map(k=>`<div class="tile"><div class="k">${badge(k)}</div><div class="v">${vs[k]||0}</div></div>`).join('');
+  $('#vtable').innerHTML = '<tr><th>번호</th><th class="l">검사 항목</th><th>연도</th><th class="l">지표</th><th class="l">수준</th><th class="l">내용</th></tr>' +
+    (D.validation.length? D.validation.map(v=>`<tr><td>${v.check_no}</td><td class="l">${esc(v.check_name)}</td><td>${v.fiscal_year??'–'}</td><td class="l">${esc(MNAME[v.metric]||v.metric||'–')}</td><td class="l">${badge(v.level)}</td><td class="l" style="white-space:normal">${esc(v.message)}</td></tr>`).join('') : '<tr><td colspan="6" class="l">문제 없음</td></tr>');
+  $('#hist').innerHTML = D.history.length ? '<tr><th>연도</th><th class="l">기간</th><th class="l">항목</th><th>기존 값</th><th>변경 값</th><th class="l">변경 이유</th><th class="l">기존 출처</th><th class="l">새 출처</th><th class="l">시각</th></tr>' +
+    D.history.map(h=>`<tr><td>${h.fiscal_year}</td><td class="l">${h.period}</td><td class="l">${esc(MNAME[h.metric]||ACC[h.metric]||h.metric)}</td><td>${fmt(h.old_value)}</td><td>${fmt(h.new_value)}</td><td class="l">${esc(h.change_reason)}</td><td class="l">${esc(String(h.old_ref||'').slice(0,40))}</td><td class="l">${esc(String(h.new_ref||'').slice(0,40))}</td><td class="l">${esc(h.created_at)}</td></tr>`).join('')
+    : '<tr><td class="l">아직 변경된 값이 없습니다.</td></tr>';
+  $('#miss').innerHTML = '<tr><th>연도</th><th class="l">지표</th><th class="l">이유</th></tr>' + D.missing.map(m=>`<tr><td>${m.year}</td><td class="l">${esc(MNAME[m.metric])}</td><td class="l">${esc(m.reason)}</td></tr>`).join('');
+}
+
+function renderAll(){ renderStatic(); renderCombo(); renderSingles(); renderPivot(); renderFacts(); }
+
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
+  document.querySelectorAll('main section').forEach(s=>s.classList.toggle('on', s.id===b.dataset.s));
+  Object.values(charts).forEach(c=>c.resize());
+});
+$('#ffilter').onchange = renderFacts;
+$('#by').onchange = () => { const v = parseInt($('#by').value); if (v>1990 && v<2100){ BY=v; renderAll(); } };
+$('#run').onclick = async () => {
+  const q = $('#q').value.trim() || D.company.code; const by = parseInt($('#by').value) || BY;
+  if (!(location.protocol.startsWith('http') && !location.hostname.endsWith('claude.ai'))) {
+    $('#runresult').innerHTML = `<p>터미널에서 실행하세요: <code>python -m analyzer analyze ${esc(q)} --base-year ${by}</code></p>`; return; }
+  $('#runresult').textContent = '분석 중… (DB에 없는 자료만 수집합니다)';
+  try {
+    const r = await fetch(`/api/analyze?code=${encodeURIComponent(q)}&base_year=${by}`, {method:'POST'});
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    location.href = `/company/${j.code}?base_year=${by}`;
+  } catch(e){ $('#runresult').textContent = '실패: ' + e.message; }
+};
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
+renderAll();
+</script>
+</body>
+</html>

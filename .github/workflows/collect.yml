@@ -1,0 +1,57 @@
+name: 재무데이터 자동 수집
+
+# 매주 월·목 오전 7시 13분(한국시간)에 DB에 있는 모든 기업을 갱신하고, 바뀐 DB와 화면을 저장소에 커밋한다.
+# 이미 확보·검증된 값은 다시 받지 않고, 빠진 값·신규 공시·정정 공시·컨센서스·기준일 주가만 받는다.
+# 주의: schedule(예약 실행)은 저장소 기본 브랜치에 이 파일이 있어야 동작한다.
+on:
+  schedule:
+    - cron: "13 22 * * 0,3"   # UTC 일·수 22:13 = 한국시간 월·목 07:13
+  workflow_dispatch:
+    inputs:
+      codes:
+        description: "분석할 종목코드(띄어쓰기로 구분, 비우면 DB의 모든 기업)"
+        required: false
+        default: ""
+      base_year:
+        description: "기준 연도(비우면 실행 연도)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 수집·검증·화면 생성
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          TZ: Asia/Seoul
+          IN_CODES: ${{ github.event.inputs.codes }}
+          IN_BASE_YEAR: ${{ github.event.inputs.base_year }}
+        run: |
+          # 입력값은 숫자만 허용(셸 주입 방지)
+          ARGS=()
+          if [[ "$IN_BASE_YEAR" =~ ^[0-9]{4}$ ]]; then ARGS+=(--base-year "$IN_BASE_YEAR"); fi
+          for c in $IN_CODES; do if [[ "$c" =~ ^[0-9]{6}$ ]]; then ARGS+=("$c"); fi; done
+          # 종목코드를 비우면 DB에 저장된 모든 기업을 갱신한다
+          python -m analyzer update-all "${ARGS[@]}"
+          python -m unittest discover -s analyzer/tests -t . -v
+      - name: 결과 커밋
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/analyzer.db data/output data/corp_codes.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -m "자동 수집: $(date +%Y-%m-%d) 재무데이터 갱신"
+          git push

@@ -1,0 +1,53 @@
+{
+ "_source": "KIS 국내주식 기간별시세(inquire-daily-itemchartprice), PlayMCP koreaStock 경유, 연봉(period=Y), 수정주가 아님(is_adjusted=false)",
+ "_collected_at": "2026-11-04",
+ "stock_code": "086900",
+ "share_class": "보통주",
+ "rows": [
+  {
+   "date": "20161229",
+   "close": 356600
+  },
+  {
+   "date": "20171228",
+   "close": 484900
+  },
+  {
+   "date": "20181228",
+   "close": 577800
+  },
+  {
+   "date": "20191230",
+   "close": 300900
+  },
+  {
+   "date": "20201230",
+   "close": 175000
+  },
+  {
+   "date": "20211230",
+   "close": 143900
+  },
+  {
+   "date": "20221229",
+   "close": 128000
+  },
+  {
+   "date": "20231228",
+   "close": 241000
+  },
+  {
+   "date": "20241230",
+   "close": 124800
+  },
+  {
+   "date": "20251230",
+   "close": 120800
+  },
+  {
+   "date": "20261104",
+   "close": 61600,
+   "_note": "수집 시점(2026-11-04 장중 가능) 값. 확정 종가 아님"
+  }
+ ]
+}
