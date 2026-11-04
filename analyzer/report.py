@@ -82,6 +82,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "last_collect": last_collect, "last_verify": last_verify,
         "companies": companies,
         "last_run": last_run,
+        "stability": stability(conn, code, P, vres["rows"], comp),
         "app_version": __import__("analyzer").__version__,
         "valuation": {"rows": vres["rows"], "assumptions": vres["assumptions"], "base_year": P["base_year"]},
         "total_facts": len(cur), "total_versions": len(allf),
@@ -109,3 +110,61 @@ def render(data, out_path=None):
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         open(out_path, "w", encoding="utf-8").write(html)
     return html
+
+
+def stability(conn, code, P, vrows, comp):
+    """재무 안정성: 부채비율·이자보상배율·순차입금과 한국은행 업종 평균, 경고."""
+    from . import benchmark, valuation
+    bk = valuation.Book(conn, code)
+    induty = comp["induty_code"] if comp is not None and "induty_code" in comp.keys() else None
+    bm = benchmark.for_company(induty)
+    vr = {r["year"]: r for r in vrows}
+    rows = []
+
+    def icr_of(op, ip):
+        if op is None:
+            return None, "영업이익 없음"
+        if not ip:
+            return None, "이자지급 없음(무차입 또는 자료 없음) → 배율 계산 안 함"
+        return op / ip, None
+
+    for y in P["past"]:
+        ip = (bk.v(y, "acc_int_paid") or 0) + (bk.v(y, "acc_int_paid_fin") or 0)
+        icr, why = icr_of(bk.v(y, "acc_op"), ip)
+        r = vr.get(y) or {}
+        nd = None if r.get("debt") is None else (r["debt"] - (r.get("cash") or 0)) / 1e8
+        rows.append({"year": y, "kind": "실적", "debt_ratio": bk.v(y, "debt_ratio"), "icr": icr, "icr_why": why,
+                     "op": bk.v(y, "acc_op"), "interest": ip or None, "net_debt": nd,
+                     "net_debt_why": None if nd is not None else ("차입금이 재무상태표에 따로 표시되지 않음" if r else "자료 없음"),
+                     "ind_debt_ratio": bm["debt_ratio"].get(y), "ind_icr": bm["icr"].get(y),
+                     "all_debt_ratio": bm["all_debt_ratio"].get(y), "all_icr": bm["all_icr"].get(y)})
+    cy = P["current"]
+    per = bk.latest_interim(cy)
+    if per:
+        op = bk.ttm(cy, "acc_op", per)
+        ip = (bk.ttm(cy, "acc_int_paid", per) or 0) + (bk.ttm(cy, "acc_int_paid_fin", per) or 0)
+        icr, why = icr_of(op, ip)
+        r = vr.get(cy) or {}
+        nd = None if r.get("debt") is None else (r["debt"] - (r.get("cash") or 0)) / 1e8
+        rows.append({"year": cy, "kind": f"현재({per}말·최근12개월)", "debt_ratio": bk.v(cy, "debt_ratio", per),
+                     "icr": icr, "icr_why": why, "op": op, "interest": ip or None, "net_debt": nd,
+                     "net_debt_why": None if nd is not None else "자료 없음",
+                     "ind_debt_ratio": None, "ind_icr": None, "all_debt_ratio": None, "all_icr": None})
+    # 경고(사실만): 최근 실적 연도 기준
+    warn = []
+    act = [r for r in rows if r["kind"] == "실적"]
+    last = next((r for r in reversed(act) if r["debt_ratio"] is not None), None)
+    if last:
+        if last["ind_debt_ratio"]:
+            ratio = last["debt_ratio"] / last["ind_debt_ratio"]
+            if ratio >= 1.5:
+                warn.append(f"{last['year']}년 부채비율 {last['debt_ratio']:.0f}% = 업종 평균 {last['ind_debt_ratio']:.0f}%의 "
+                            f"{ratio:.1f}배")
+    low = [r["year"] for r in act if r["icr"] is not None and r["icr"] < 1]
+    if low:
+        warn.append("이자보상배율 1배 미만(영업이익으로 이자를 다 못 냄): " + ", ".join(f"{y}년" for y in low))
+    cur = next((r for r in rows if r["kind"] != "실적"), None)
+    if cur and cur["icr"] is not None and cur["icr"] < 1:
+        warn.append(f"현재(최근 12개월) 이자보상배율 {cur['icr']:.2f}배")
+    return {"rows": rows, "warnings": warn, "industry": {"item": bm["item"], "name": bm["name"], "source": bm["source"],
+            "missing_reason": bm["missing_reason"], "induty_code": induty}}

@@ -73,13 +73,23 @@ def connect(path=None):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(companies)")]
+    if "induty_code" not in cols:   # 업종코드(한국표준산업분류) 칸 추가
+        conn.execute("ALTER TABLE companies ADD COLUMN induty_code TEXT")
+        conn.commit()
     return conn
+
+
+def set_induty(conn, stock_code, induty_code):
+    conn.execute("UPDATE companies SET induty_code=? WHERE stock_code=?", (induty_code, stock_code))
+    conn.commit()
 
 
 def ensure_company(conn, stock_code, name=None, corp_code=None):
     row = conn.execute("SELECT * FROM companies WHERE stock_code=?", (stock_code,)).fetchone()
     if row is None:
-        conn.execute("INSERT INTO companies VALUES (?,?,?,?,?)", (stock_code, corp_code, name, now(), now()))
+        conn.execute("INSERT INTO companies (stock_code, corp_code, name, created_at, updated_at) VALUES (?,?,?,?,?)",
+                     (stock_code, corp_code, name, now(), now()))
     else:
         conn.execute("UPDATE companies SET name=COALESCE(?,name), corp_code=COALESCE(?,corp_code), updated_at=? "
                      "WHERE stock_code=?", (name, corp_code, now(), stock_code))

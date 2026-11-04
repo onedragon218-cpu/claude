@@ -1,1 +1,1 @@
-{"name": "한솔제지", "corp_code": "01060744", "_note": "DART 고유번호는 PlayMCP opendart find_company로 확인(2026-11-04)"}
+{"name": "한솔제지", "corp_code": "01060744", "_note": "DART 고유번호는 PlayMCP opendart find_company로 확인(2026-11-04); 업종코드(induty_code)는 DART 기업개황(company.json)으로 확인(2026-11-04)", "induty_code": "171"}

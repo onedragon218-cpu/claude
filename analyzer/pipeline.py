@@ -189,6 +189,8 @@ def import_seed(conn, code, base_year, stats=None):
     if os.path.exists(meta):
         m = json.load(open(meta, encoding="utf-8"))
         db.ensure_company(conn, code, m.get("name"), m.get("corp_code"))
+        if m.get("induty_code"):
+            db.set_induty(conn, code, m["induty_code"])
     for f in sorted(glob.glob(os.path.join(folder, "dart_*_CFS.json"))):
         n += ingest_statement(conn, code, json.load(open(f, encoding="utf-8")), "CFS",
                               via="OpenDART 응답 저장본(PlayMCP opendart 경유)", stats=stats)
@@ -275,6 +277,20 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
                 stats.notes.append(f"{y}년 정정 공시 발견 → 해당 연도만 다시 수집")
     except dart.DartUnavailable as e:
         stats.notes.append(f"공시 목록 점검 건너뜀: {e}")
+
+    # 1-2) 업종코드(업종 평균 기준선용): DART 기업개황에서 한 번만
+    try:
+        row = conn.execute("SELECT induty_code FROM companies WHERE stock_code=?", (code,)).fetchone()
+        if has_key and (row is None or not row["induty_code"]) and \
+                not db.fetched_recently(conn, "dart_company", code, config.TTL_DAYS["dart_report_missing"]):
+            stats.req("DART")
+            info = dart.get_json("company.json", corp_code=_corp())
+            if info.get("induty_code"):
+                db.set_induty(conn, code, info["induty_code"])
+                db.ensure_company(conn, code, info.get("stock_name") or info.get("corp_name"))
+            db.log_fetch(conn, "dart_company", code, code, bool(info.get("induty_code")), 1)
+    except dart.DartUnavailable as e:
+        stats.notes.append(f"업종코드 미확보: {e}")
 
     # 2) 빠진 연도의 사업보고서
     for y in (need["statement_years"] if has_key else []):
@@ -563,6 +579,14 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
     if use_seed and not db.last_fetch(conn, "seed", code) and os.path.isdir(os.path.join(config.SEED_DIR, code)):
         import_seed(conn, code, P["current"], stats)
         stats.notes.append("저장 원본(seed) 가져오기 완료")
+    meta = os.path.join(config.SEED_DIR, code, "company.json")
+    row = conn.execute("SELECT induty_code FROM companies WHERE stock_code=?", (code,)).fetchone()
+    if os.path.exists(meta) and (row is None or not row["induty_code"]):
+        with open(meta, encoding="utf-8") as f:
+            m = json.load(f)
+        db.ensure_company(conn, code, m.get("name"), m.get("corp_code"))
+        if m.get("induty_code"):
+            db.set_induty(conn, code, m["induty_code"])
     if reparse_cached(conn, code, stats):
         stats.notes.append(f"해석 규칙 v{dart.PARSER_VERSION}로 보관 원본 재해석(외부 요청 없음)")
     stats.reused = existed

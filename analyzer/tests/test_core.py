@@ -162,6 +162,22 @@ class T(unittest.TestCase):
         self.assertIsNone(mt[2019]["roic"]); self.assertIn("roic", mt[2019]["missing"])
         self.assertIsNone(mt[2019]["debt"])
 
+    def test_industry_benchmark_and_stability(self):
+        from analyzer import benchmark
+        self.assertEqual(benchmark.ecos_item("171"), "C17")
+        self.assertEqual(benchmark.ecos_item("59114"), "J59")
+        self.assertEqual(benchmark.ecos_item("211"), "C21")
+        b = benchmark.for_company("171")
+        self.assertEqual(b["debt_ratio"][2025], 96)                 # 한국은행 기업경영분석 C17 2025
+        self.assertAlmostEqual(b["icr"][2025], 1.9683)
+        self.assertIsNone(benchmark.for_company("999")["item"])    # 자료 없는 업종은 기준선 없음
+        pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
+        st = report.payload(self.conn, "213500", 2026)["stability"]
+        r24 = next(r for r in st["rows"] if r["year"] == 2024)
+        self.assertAlmostEqual(r24["icr"], 21991294920 / r24["interest"], places=6)
+        self.assertLess(r24["icr"], 1)
+        self.assertTrue(any("1배 미만" in w for w in st["warnings"]))
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>
