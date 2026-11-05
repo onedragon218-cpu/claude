@@ -313,6 +313,13 @@ class T(unittest.TestCase):
             "op_income": {"0": {"median": 0.90, "n": 3}, "11": {"median": 0.70, "n": 3}},
             "eps": {"0": {"median": 0.85, "n": 3}, "11": {"median": 0.60, "n": 3}}}}
         today = dt.date(2026, 11, 5)
+        from analyzer import valuation
+        A = valuation.load_assumptions()
+        self.assertEqual(calibration.factor("eps", 2026, today=today, cal=cal)[0], 0.83)      # 기본: 고정 0.83
+        self.assertEqual(calibration.factor("revenue", 2026, today=today, cal=cal)[0], 1.0)   # 매출은 할인 안 함
+        A2 = dict(A, 컨센서스_보정=dict(A["컨센서스_보정"], 방식="측정"))
+        um.patch.object(valuation, "load_assumptions", return_value=A2).start()
+        self.addCleanup(um.patch.stopall)
         f, why = calibration.factor("eps", 2026, today=today, cal=cal)      # 올해: 약 2개월 전 → 가장 가까운 0개월
         self.assertEqual(f, 0.85)
         f, why = calibration.factor("eps", 2027, today=today, cal=cal)      # 내년: 14개월 → 측정 범위 밖, 11개월 근사
@@ -337,6 +344,23 @@ class T(unittest.TestCase):
         self.assertEqual(r["years"][2025]["kind"], "실적")
         self.assertAlmostEqual(r["years"][2025]["raw"]["revenue"], 22900.40442405)
         self.assertAlmostEqual(r["years"][2026]["raw"]["op_margin"], 686 / 23488 * 100)
+
+    def test_roic_wacc_estimate_is_conservative(self):
+        from analyzer import valuation
+        pipeline.analyze("253450", 2026, offline=True, conn=self.conn)
+        for y, op, bps in ((2027, 588.2, 30000.0), (2028, 690.1, 31000.0)):
+            db.add_consensus(self.conn, "253450", y, "op_income", op, "WiseReport", "2026-11-04")
+            db.add_consensus(self.conn, "253450", y, "bps", bps, "WiseReport", "2026-11-04")
+        rows = valuation.run(self.conn, "253450", config.periods(2026))["rows"]
+        base = next(r for r in reversed(rows) if r.get("roic") is not None and not r.get("estimated"))
+        est = [r for r in rows if r.get("estimated")]
+        self.assertTrue(est)
+        for r in est:
+            self.assertGreater(r["year"], base["year"])
+            self.assertGreaterEqual(r["wacc"], base["wacc"])                  # WACC는 높게
+            self.assertGreaterEqual(r["ic"], base["ic"])                      # 투하자본은 크게
+            self.assertGreaterEqual(r["tax"], valuation.load_assumptions()["대체세율"])
+            self.assertTrue(any("예상(보수적 추정)" in n for n in r["notes"]))
 
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>

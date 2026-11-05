@@ -356,7 +356,7 @@ function pickVal(m, y){
   const row = ((D.valuation||{}).rows||[]).find(r=>r.year===y); if (!row) return null;
   const v = m.f(row); if (v==null || Number.isNaN(v) || (m.unit==='원' && v<=0)) return null;
   const k = String(row.kind);
-  const kind = k.startsWith('실적') ? '실적' : k.startsWith('현재') ? '현재(부분 실적)' : '전망';
+  const kind = (row.estimated && ['v_roic','v_wacc','v_spread'].includes(m.key)) ? '예상(보수적 추정)' : k.startsWith('실적') ? '실적' : k.startsWith('현재') ? '현재(부분 실적)' : '전망';
   return {v, kind, p:{status: row.caution?'UNVERIFIED':'VERIFIED', note:(row.notes||[]).join(' / '), source:'가치평가 계산', as_of:null}};
 }
 function pick(m, y, by){
@@ -686,6 +686,19 @@ function renderStatic(){
 }
 
 
+// ---- 예상 구간 배경(ROIC·WACC 보수적 추정이 들어간 연도부터 끝까지) ----
+const estZonePlugin = {id:'estZone', beforeDatasetsDraw(chart, args, opts){
+  if (!opts || opts.from==null) return; const {ctx, chartArea:a, scales:{x}} = chart;
+  const n = chart.data.labels.length; if (opts.from >= n) return;
+  const step = n > 1 ? (x.getPixelForValue(1) - x.getPixelForValue(0)) : (a.right - a.left);
+  const left = Math.max(a.left, x.getPixelForValue(opts.from) - step/2);
+  ctx.save(); ctx.fillStyle = rgba('--text-muted', 0.12); ctx.fillRect(left, a.top, a.right - left, a.bottom - a.top);
+  ctx.strokeStyle = css('--text-muted'); ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(left, a.top); ctx.lineTo(left, a.bottom); ctx.stroke();
+  ctx.setLineDash([]); ctx.fillStyle = css('--text-secondary'); ctx.font = '600 12px sans-serif'; ctx.textAlign = 'left';
+  String(opts.label || '예상').split('\n').forEach((t,i)=>ctx.fillText(t, left + 6, a.top + 14 + i*15)); ctx.restore(); }};
+const estFrom = rows => { const i = rows.findIndex(r => r.estimated); return i < 0 ? null : i; };
+const EST_LABEL = '예상(보수적 추정)\n실제 값 아님';
+
 // ---- G. 가치평가 ----
 const V = D.valuation || {rows:[], assumptions:{}};
 const VROWS = V.rows || [];
@@ -792,10 +805,11 @@ function renderGAll(byNote){
       return `${ctx.dataset.label}: ${won(v)}원${g}`; },
     afterBody: items => { const r = rows[items[0].dataIndex]; return (r.spread!=null ? [`ROIC−WACC: ${(r.spread*100).toFixed(2)}%p ${r.spread>0?'(가치 창출)':'(가치 훼손)'}`] : []).concat(gapNotes(r.year)); }};
   if (charts.g) charts.g.destroy();
-  charts.g = mkChart($('#gchart'), {type:'line', data:{labels, datasets:ds}, options:o});
+  o.plugins.estZone = {from: estFrom(rows), label: '예상(보수적 추정)\nROIC·WACC는 실제 값 아님'};
+  charts.g = mkChart($('#gchart'), {type:'line', data:{labels, datasets:ds}, options:o, plugins:[estZonePlugin]});
   $('#glog').onchange = ()=>renderGAll(byNote);
   const last = [...rows].reverse().find(r=>r.price && r.median);
-  const lastR = [...rows].reverse().find(r=>r.spread!=null);
+  const lastR = [...rows].reverse().find(r=>r.spread!=null && !r.estimated);   // 요약은 실제 값만
   $('#gsum').innerHTML = (last ? `<span>${last.year} 주가 <b>${won(last.price)}원</b> · 종합 <b>${won(last.median)}원</b> (괴리율 ${last.gap>=0?'+':''}${pct(last.gap,0)})</span>` : '') +
     (lastR ? `<span>${lastR.year} ROIC <b>${pct(lastR.roic,2)}</b> vs WACC <b>${pct(lastR.wacc,2)}</b> → ${lastR.spread>0?'가치 창출':'가치 훼손'}</span>` : '<span>ROIC·WACC 계산 가능한 연도 없음</span>');
   $('#glegend').innerHTML = '<span><span class="solid"></span> 주당가치(원, 왼쪽 축)</span><span><span class="dash"></span> 현재·전망 구간</span><span>▲ 점선 = ROIC·WACC·Ke(%, 오른쪽 축)</span><span>초록 = ROIC>WACC, 빨강 = ROIC<WACC</span>';
@@ -805,23 +819,30 @@ function renderGRoic(byNote){
   $('#gtitle').textContent='ROIC와 WACC 겹쳐 보기(%)';
   $('#gnote').textContent='ROIC(투하자본이익률)가 WACC(가중평균자본비용)보다 높으면 투자한 돈으로 자본비용 이상을 버는 것(가치 창출, 초록), 낮으면 가치 훼손(빨강)입니다.'+byNote;
   $('#gtoggles').style.display='none'; $('#glogrow').style.display='none';
-  const rows = VROWS.filter(r=>!String(r.kind).startsWith('전망'));
-  const labels = rows.map(r=> String(r.kind).startsWith('현재')? r.year+'(현재)' : String(r.year));
+  const rows = VROWS.filter(r=>!String(r.kind).startsWith('전망') || r.roic!=null);
+  const labels = rows.map(r=> r.estimated ? r.year+'(예상)' : String(r.kind).startsWith('현재')? r.year+'(현재)' : String(r.year));
+  const eSeg = {borderDash: ctx => (rows[ctx.p1DataIndex]||{}).estimated ? [6,4] : undefined};
+  const eFill = c => rows.map(r=> r.estimated ? css('--surface-1') : css(c));
   const P = k => rows.map(r=> r[k]==null? null : r[k]*100);
   const o = baseOpts();
   o.scales.y.ticks.callback = v => v.toFixed(0)+'%';
-  o.plugins.tooltip.callbacks = {label: ctx => ctx.parsed.y==null? null : `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}%`,
-    afterBody: items => { const r = rows[items[0].dataIndex]; return (r.spread!=null ? [`차이(ROIC−WACC): ${(r.spread*100).toFixed(2)}%p`] : ['차이: 계산 불가']).concat(gapNotes(r.year, ['roic','wacc'])); }};
+  o.plugins.estZone = {from: estFrom(rows), label: EST_LABEL};
+  o.plugins.tooltip.callbacks = {label: ctx => ctx.parsed.y==null? null : `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}%${rows[ctx.dataIndex].estimated && ctx.dataset.label!=='자기자본비용 Ke' ? ' (예상)' : ''}`,
+    afterBody: items => { const r = rows[items[0].dataIndex];
+      const est = r.estimated ? ['※ 예상값(보수적 추정, 실제 아님)'].concat((r.notes||[]).filter(n=>n.includes('예상'))) : [];
+      return (r.spread!=null ? [`차이(ROIC−WACC): ${(r.spread*100).toFixed(2)}%p`] : ['차이: 계산 불가']).concat(est, gapNotes(r.year, ['roic','wacc'])); }};
   if (charts.g) charts.g.destroy();
   charts.g = mkChart($('#gchart'), {type:'line', data:{labels, datasets:[
     {label:'ROIC', data:P('roic'), borderColor:css('--s1'), backgroundColor:css('--s1'), borderWidth:2.5, pointRadius:4, spanGaps:JOIN_GAPS, tension:0,
-     fill:{target:1, above:rgba('--good',0.18), below:rgba('--bad',0.18)}},
-    {label:'WACC', data:P('wacc'), borderColor:css('--s2'), backgroundColor:css('--s2'), borderWidth:2.5, pointRadius:4, spanGaps:JOIN_GAPS, tension:0},
+     pointBackgroundColor:eFill('--s1'), segment:eSeg, fill:{target:1, above:rgba('--good',0.18), below:rgba('--bad',0.18)}},
+    {label:'WACC', data:P('wacc'), borderColor:css('--s2'), backgroundColor:css('--s2'), borderWidth:2.5, pointRadius:4, spanGaps:JOIN_GAPS, tension:0,
+     pointBackgroundColor:eFill('--s2'), segment:eSeg},
     {label:'자기자본비용 Ke', data:P('ke'), borderColor:css('--text-muted'), backgroundColor:css('--text-muted'), borderWidth:1.25, borderDash:[3,3], pointRadius:0, spanGaps:JOIN_GAPS, tension:0},
-  ]}, options:Object.assign(o, {plugins:Object.assign(o.plugins,{legend:{display:true, labels:{color:css('--text-secondary'), boxWidth:14}}})})});
-  const ok = rows.filter(r=>r.spread!=null); const pos = ok.filter(r=>r.spread>0).length;
+  ]}, options:Object.assign(o, {plugins:Object.assign(o.plugins,{legend:{display:true, labels:{color:css('--text-secondary'), boxWidth:14}}})}), plugins:[estZonePlugin]});
+  const ok = rows.filter(r=>r.spread!=null && !r.estimated); const pos = ok.filter(r=>r.spread>0).length;   // 요약은 실제 값만
   $('#gsum').innerHTML = ok.length ? `<span>ROIC > WACC인 해 <b>${pos} / ${ok.length}</b></span><span>평균 차이 <b>${(ok.reduce((a,r)=>a+r.spread,0)/ok.length*100).toFixed(2)}%p</b></span><span>최근(${ok[ok.length-1].year}) ROIC <b>${pct(ok[ok.length-1].roic,2)}</b> · WACC <b>${pct(ok[ok.length-1].wacc,2)}</b></span>` : '<span>ROIC·WACC를 계산할 수 있는 연도가 없습니다(차입금 미식별 등).</span>';
-  $('#glegend').innerHTML = '<span>ROIC = 영업이익×(1−세율) ÷ 평균 투하자본(자본총계+차입금−현금)</span><span>WACC = 시가총액 비중×Ke + 차입금 비중×Kd×(1−세율)</span>';
+  $('#glegend').innerHTML = '<span>ROIC = 영업이익×(1−세율) ÷ 평균 투하자본(자본총계+차입금−현금)</span><span>WACC = 시가총액 비중×Ke + 차입금 비중×Kd×(1−세율)</span>' +
+    (estFrom(rows)!=null ? '<span><b>회색 배경·점선·빈 점 = 예상(보수적 추정)</b>: 증권사 컨센서스에 ROIC·WACC가 없어 직접 추정. 영업이익 컨센서스 ×0.83 보정, 세율·투하자본은 크게, WACC는 높게 잡음</span>' : '');
 }
 
 function renderGTable(byNote){
@@ -831,10 +852,20 @@ function renderGTable(byNote){
   const f2 = x => x==null?'–':x.toFixed(2);
   $('#gtable').innerHTML = '<tr>'+H.map((h,i)=>`<th class="${i<2?'l':''}">${h}</th>`).join('')+'</tr>' + VROWS.map(r=>{
     const v=r.values||{}, m=r.mult||{}, fa=r.fair||{};
-    const cells=[r.year, r.kind, won(r.price), won(v.srim), won(v.dcf), won(v.dcf_e), won(v.per), won(v.pbr), won(v.psr), `<b>${won(r.median)}</b>`, r.gap==null?'–':(r.gap>=0?'+':'')+pct(r.gap,0),
+    const cells=[r.year, r.kind + (r.estimated ? ' · ROIC·WACC 예상' : ''), won(r.price), won(v.srim), won(v.dcf), won(v.dcf_e), won(v.per), won(v.pbr), won(v.psr), `<b>${won(r.median)}</b>`, r.gap==null?'–':(r.gap>=0?'+':'')+pct(r.gap,0),
       pct(r.rf,2), pct(r.ke,2), pct(r.kd,2), pct(r.tax,1), pct(r.wacc,2), pct(r.roic,2), r.spread==null?'–':(r.spread*100).toFixed(2)+'%p',
       eok(r.nopat), eok(r.nopat_w), eok(r.ic), eok(r.fcff), eok(r.fcff_w), eok(r.debt), eok(r.cash), pct(r.roe_w,2), f2(m.per), f2(m.pbr), f2(m.psr), f2(fa.per), f2(fa.pbr), f2(fa.psr)];
     return `<tr class="${vIsEst(r)?'':''}">`+cells.map((c,i)=>`<td class="${i<2?'l':''} ${vIsEst(r)&&i>=2?'est':''}">${c}</td>`).join('')+'</tr>'; }).join('');
+}
+
+function calibHtml(){
+  const C = D.calibration || {}; const f = C.factors || {};
+  const ys = [...new Set(Object.keys(f).map(k=>k.split(':')[0]))];
+  if (!ys.length) return '';
+  const nm = {revenue:'매출', op_income:'영업이익(·영업이익률)', eps:'EPS(·ROE)'};
+  return `<h3 style="margin-top:14px">컨센서스 보정계수(그래프·가치평가에 적용, 원래 값은 DB에 보관)</h3><div class="tablewrap"><table><tr><th class="l">지표</th>${ys.map(y=>`<th>${y}E</th>`).join('')}<th class="l">근거</th></tr>` +
+    ['revenue','op_income','eps'].map(m=>`<tr><td class="l">${nm[m]}</td>${ys.map(y=>`<td>×${(f[y+':'+m]||{}).factor?.toFixed(2) ?? '–'}</td>`).join('')}<td class="l" style="white-space:normal">${esc((f[ys[0]+':'+m]||{}).why||'')}</td></tr>`).join('') + '</table></div>' +
+    (C.measured ? `<p class="muted">참고(적용 안 함): ${esc(C.measured)}</p>` : '');
 }
 
 function renderGAssump(){
@@ -857,6 +888,7 @@ function renderGAssump(){
   ];
   $('#gpanel-assump').innerHTML = `<div class="tablewrap"><table><tr><th class="l">항목</th><th class="l">계산식</th><th class="l">값·규칙</th></tr>${rows.map(r=>`<tr><td class="l">${r[0]}</td><td class="l">${r[1]}</td><td class="l" style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
     <h3 style="margin-top:14px">연도별 무위험수익률(국고채 10년, %)</h3><div class="tablewrap"><table><tr>${Object.keys(rf).filter(k=>!k.startsWith('_')).map(k=>`<th>${k}</th>`).join('')}</tr><tr>${Object.entries(rf).filter(([k])=>!k.startsWith('_')).map(([k,v])=>`<td>${v}</td>`).join('')}</tr></table></div>
+    ${calibHtml()}
     <div class="warnbox">베타는 기업별로 받지 않고 ${A['베타']}로 일괄 적용했습니다. 차입이 많은 기업은 실제 Ke가 더 높을 수 있어, WACC가 낮게 나오고 DCF가 크게 나올 수 있습니다.</div>`;
 }
 

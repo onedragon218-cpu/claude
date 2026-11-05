@@ -325,6 +325,17 @@ def calibration_info(P):
         for m in ("revenue", "op_income", "eps"):
             f, why = calibration.factor(m, y)
             out["factors"][f"{y}:{m}"] = {"factor": f, "why": why}
+    if cal and cal.get("factors"):   # 측정값은 참고로만 보여 준다(적용은 assumptions.json 방식을 따름)
+        name = {"revenue": "매출", "op_income": "영업이익", "eps": "EPS"}
+        parts = []
+        for m in ("revenue", "op_income", "eps"):
+            b = cal["factors"].get(m) or {}
+            seg = [f"{k}개월 전 ×{b[k]['median']:.2f}(n={b[k]['n']})" for k in ("11", "6", "1") if k in b]
+            if seg:
+                parts.append(f"{name[m]} " + ", ".join(seg))
+        if parts:
+            out["measured"] = (f"{cal['fiscal_year']}년 컨센서스 대비 실제 중앙값(기업 {cal.get('companies')}곳, "
+                               f"WiseReport 컨센서스 추이): " + " / ".join(parts))
     return out
 
 

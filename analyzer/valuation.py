@@ -112,6 +112,57 @@ def _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals):
     return out
 
 
+def estimate_roic_wacc(A, rows, cons, P):
+    """ROIC·WACC 예상값(보수적). 증권사 컨센서스에는 ROIC·WACC가 없어서, 실제 값이 있는 마지막 시점을 기준으로 추정한다.
+    - ROIC(예상) = 보정 후 컨센서스 영업이익 × (1 − 세율) ÷ 투하자본
+        세율 = 기준 시점 유효세율과 대체세율 중 높은 쪽, 투하자본 = 기준 시점 실제값과 '컨센서스 BPS × 주식 수 + 기준 시점 순차입금' 중 큰 쪽
+    - WACC(예상) = 기준 시점 WACC와 '그 연도 금리로 다시 계산한 WACC'(기준 시점 비중·타인자본비용 유지) 중 높은 쪽
+    값이 낮게 나오는 쪽(ROIC)·높게 나오는 쪽(WACC)을 골라 판단이 낙관적으로 흐르지 않게 한다."""
+    from . import calibration
+    base = next((r for r in reversed(rows) if r.get("roic") is not None and r.get("wacc") is not None
+                 and r.get("ic") and not r.get("estimated")), None)
+    if base is None:
+        return
+    for fy in [P["current"]] + P["future"]:
+        row = next((r for r in rows if r["year"] == fy), None)
+        if row is not None and row.get("roic") is not None:
+            continue                              # 실제(최근 12개월) 값이 있으면 예상하지 않음
+        op = cons.get((fy, "op_income"))
+        if op is None:
+            continue
+        f_op, why = calibration.factor("op_income", fy)
+        op_adj = op * f_op * 1e8
+        tax = max(base.get("tax") or 0, A["대체세율"])
+        nopat = op_adj * (1 - tax)
+        ic = base["ic"]
+        bps, sh = cons.get((fy, "bps")), base.get("shares")
+        ic_bps = None
+        if bps and sh and base.get("eq") and base.get("eq_owner") and base.get("debt") is not None:
+            ic_bps = bps * sh * (base["eq"] / base["eq_owner"]) + (base["debt"] - (base.get("cash") or 0))
+            ic = max(ic, ic_bps)
+        roic = nopat / ic if ic and ic > 0 else None
+        rf, _ = _rf(A, fy)
+        ke = rf + A["베타"] * A["시장위험프리미엄_ERP"]
+        wacc_now = None
+        if base.get("mcap") and base.get("debt") is not None:
+            E, D = base["mcap"] * 1e8, base["debt"]
+            kd = base.get("kd") or (rf + A["타인자본비용_가산"])
+            wacc_now = E / (D + E) * ke + (D / (D + E) * kd * (1 - tax) if D else 0)
+        wacc = max(x for x in (base["wacc"], wacc_now) if x is not None)
+        note = (f"ROIC·WACC 예상(보수적 추정): {base['year']}년 실제값 기준. 영업이익 컨센서스 {op:,.0f}억 × 보정 {f_op:.2f}, "
+                f"세율 {tax:.0%}, 투하자본 {ic / 1e8:,.0f}억(실제 {base['ic'] / 1e8:,.0f}억"
+                + (f", BPS 기준 {ic_bps / 1e8:,.0f}억" if ic_bps else "") + " 중 큰 값), "
+                f"WACC {base['wacc']:.1%}(기준) / {wacc_now:.1%}(올해 금리 재계산) 중 높은 값" if wacc_now is not None else "")
+        if row is None:
+            row = {"year": fy, "kind": "전망(컨센서스)", "price": None, "values": {}, "median": None, "gap": None,
+                   "fair": {}, "mult": {}, "notes": [], "caution": True}
+            rows.append(row)
+            rows.sort(key=lambda r: r["year"])
+        row.update(roic=roic, wacc=wacc, ke=row.get("ke", ke), spread=roic - wacc if roic is not None else None,
+                   nopat=nopat, ic=ic, tax=tax, estimated=True)
+        row["notes"] = (row.get("notes") or []) + [note]
+
+
 def _median(xs):
     xs = [x for x in xs if x is not None]
     return statistics.median(xs) if xs else None
@@ -236,7 +287,7 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
         "nopat": nopat, "ic": ic, "fcff": fcff, "fcff_w": fcff_w, "debt": debt, "cash": cash,
         "net_debt": debt - (cash or 0) if debt is not None else None, "roe_w": roe_w,
         "mult": mult, "fair": dict(fair), "notes": notes,
-        "nopat_w": nopat_w,
+        "nopat_w": nopat_w, "eq": eq, "eq_owner": eq_owner,
         "missing": _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals),
     }
 
@@ -361,6 +412,8 @@ def run(conn, code, P):
                      "gap": None, "ke": ke, "fair": fair, "mult": {}, "notes": ["컨센서스 EPS·BPS·ROE·매출로 계산, DCF 제외",
                                f"보정계수 적용: EPS·ROE ×{fe:.2f}, 매출 ×{fr:.2f} ({why_e})"],
                      "caution": True})
+
+    estimate_roic_wacc(A, rows, cons, P)
 
     # 검증 항목 11~12
     for r in rows:

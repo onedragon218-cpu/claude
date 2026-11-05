@@ -99,9 +99,15 @@ def factor(metric, target_year, today=None, cal=None):
     A = valuation.load_assumptions().get("컨센서스_보정", {})
     if not A.get("사용", True):
         return 1.0, "보정 끔(설정)"
-    manual = (A.get("직접입력") or {}).get(metric)
+    key0 = {"net_income": "eps"}.get(metric, metric)
+    manual = (A.get("직접입력") or {}).get(key0)
     if manual:
         return float(manual), "직접 입력한 계수"
+    if A.get("방식", "고정") == "고정":
+        v = (A.get("고정계수") or {}).get(key0)
+        if v is not None:
+            return float(v), f"고정 보정계수 {float(v):.2f}(설정 '고정계수', 실무 경험칙)"
+        return 1.0, "보정 대상 아님"
     cal = cal or load()
     key = {"revenue": "revenue", "op_income": "op_income", "eps": "eps", "net_income": "eps"}.get(metric)
     if not cal or not key or not cal["factors"].get(key):
