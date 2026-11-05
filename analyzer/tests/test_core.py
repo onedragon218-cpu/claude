@@ -395,6 +395,60 @@ class T(unittest.TestCase):
         self.assertEqual(report._revision(-50, -80), (None, "적자확대"))
         self.assertFalse(report.consensus_trend(self.conn, "999999", P)["available"])
 
+    def test_segments_keywords_and_products(self):
+        from analyzer import segments
+        from analyzer.collectors import wisereport
+        self.assertEqual(segments.auto_keywords("인쇄용지, 특수지"), ["인쇄용지", "특수지"])
+        self.assertEqual(segments.auto_keywords("건설부문"), ["건설"])
+        self.assertEqual(segments.auto_keywords("제품(수출)"), [])
+        self.assertEqual(segments.auto_keywords("드라마 판매"), ["드라마"])
+        page = '<h6>주요제품 매출구성(2026 / 06)</h6><script>var chartData1 = [["산업용지",27.34],["건설부문",3.76]];</script>'
+        self.assertEqual(wisereport.parse_products(page), ("2026-06", [("산업용지", 27.34), ("건설부문", 3.76)]))
+
+    def test_news_flow_groups_and_clusters(self):
+        from analyzer import segments
+        db.ensure_company(self.conn, "000001", "가나제지", None)
+        db.add_segments(self.conn, "000001", "2026-06", [("산업용지", 30.0, None, "%", None), ("기타", 5.0, None, "%", None)], "테스트")
+        db.add_news(self.conn, "000001", [
+            {"published": "2026-09-22", "title": "가나제지, 백판지 판매 증가로 산업용지 호조"},
+            {"published": "2026-09-23", "title": "산업용지 호조…가나제지 백판지 판매 증가"},
+            {"published": "2026-09-25", "title": "가나제지 대표 교체"}], "테스트")
+        f = segments.news_flow(self.conn, "000001", "가나제지", "2026-01-01")
+        self.assertEqual(f["flow"]["산업용지"]["count"], 2)
+        top = f["flow"]["산업용지"]["months"][0]["top"]
+        self.assertEqual((len(top), top[0]["n"]), (1, 2))          # 비슷한 제목 2건은 한 묶음
+        self.assertTrue(top[0]["link"].startswith("https://search.naver.com/"))   # 링크 없으면 제목 검색
+        self.assertEqual(f["flow"]["회사 전반"]["count"], 1)
+        self.assertEqual(f["flow"]["기타"]["count"], 0)           # '기타'는 키워드가 없어 아무것도 안 걸림
+
+    def test_peers_by_segment_keywords(self):
+        from analyzer import segments
+        P = config.periods(2026)
+        for code, name, segs in (("000001", "가나제지", [("산업용지", 30.0)]), ("000002", "다라판지", [("백판지, 산업용지", 80.0)]),
+                                 ("000003", "마바수출", [("제품(수출)", 90.0)])):
+            db.ensure_company(self.conn, code, name, None)
+            db.add_segments(self.conn, code, "2026-06", [(n, p, None, "%", None) for n, p in segs], "테스트")
+            db.put_fact(self.conn, code, 2025, "revenue", 1000.0, unit="억원", source="derived")
+        self.assertEqual(segments.company_metrics(self.conn, "000002", 2025)["revenue"], 1000.0)
+        _, gs, _ = segments.groups(self.conn, "000001")
+        pr = segments.peers(self.conn, "000001", P, gs)
+        cands = pr["by_segment"]["산업용지"]
+        self.assertEqual([c["code"] for c in cands], ["000002"])
+        self.assertEqual(cands[0]["match"], "사업부 일치")
+
+    def test_news_google_rss_parse(self):
+        from analyzer.collectors import news
+        rss = """<rss><channel><item><title>가나제지 증설 - 한국경제</title><link>https://news.google.com/x</link>
+        <pubDate>Tue, 22 Sep 2026 01:00:00 GMT</pubDate><source url="https://hankyung.com">한국경제</source></item></channel></rss>"""
+        orig = news._get
+        news._get = lambda url, headers=None: rss
+        try:
+            n, items = news.google("가나제지", __import__("datetime").date(2026, 9, 1), __import__("datetime").date(2026, 9, 30))
+        finally:
+            news._get = orig
+        self.assertEqual(n, 1)
+        self.assertEqual(items[0], {"published": "2026-09-22", "title": "가나제지 증설", "link": "https://news.google.com/x", "press": "한국경제"})
+
 
 if __name__ == "__main__":
     unittest.main()

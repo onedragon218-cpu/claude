@@ -247,6 +247,7 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
         need["asof_price"] = True
     stats.notes.append("수집 필요 항목: " + json.dumps({k: v for k, v in need.items() if v}, ensure_ascii=False))
     if offline:
+        import_seed_news(conn, code)
         return need
     corp = None
     has_key = dart.has_key()
@@ -404,7 +405,86 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
         except wisereport.ConsensusUnavailable as e:
             db.log_fetch(conn, "consensus_hist", code, code, False, 0, str(e))
             stats.notes.append(f"컨센서스 추이 미확보(다음 실행 때 다시 시도): {e}")
+
+    # 8) 사업부 분석(화면 L): 주요제품 매출구성 → 공시 제목 → 뉴스 제목
+    collect_business(conn, code, stats, has_key, _corp)
     return need
+
+
+def import_seed_news(conn, code):
+    """analyzer/seed/<코드>/news_titles.tsv (날짜<TAB>제목) → news 표. 이미 있으면 건너뛴다(오프라인에서도 동작)."""
+    f = os.path.join(config.SEED_DIR, code, "news_titles.tsv")
+    if not os.path.exists(f):
+        return 0
+    items = []
+    with open(f, encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 2 and parts[0][:4].isdigit():
+                items.append({"published": parts[0], "title": parts[1]})
+    return db.add_news(conn, code, items, "KIS 뉴스 제목(Claude 연결로 수집, 2026-11-05)", "seed")
+
+
+def collect_business(conn, code, stats, has_key=False, corp_fn=None):
+    import datetime as _dt
+    from . import segments
+    from .collectors import news
+    import_seed_news(conn, code)
+    if not db.fetched_recently(conn, "segments", code, config.TTL_DAYS["segments"], ok_only=True):
+        try:
+            stats.req("WiseReport")
+            url, as_of, rows = wisereport.products(code)
+            n = db.add_segments(conn, code, as_of or db.today()[:7], [(nm, pct, None, "%", None) for nm, pct in rows],
+                                "WiseReport 주요제품 매출구성", url)
+            db.log_fetch(conn, "segments", code, code, True, n)
+        except wisereport.ConsensusUnavailable as e:
+            db.log_fetch(conn, "segments", code, code, False, 0, str(e))
+            stats.notes.append(f"사업부 구성 미확보: {e}")
+    today = _dt.date.today()
+    since = today - _dt.timedelta(days=365)
+    if has_key and corp_fn and not db.fetched_recently(conn, "dart_events", code, config.TTL_DAYS["dart_events"], ok_only=True):
+        try:
+            got = 0
+            for ty, kind in (("B", "주요사항"), ("I", "거래소공시")):
+                stats.req("OpenDART")
+                lst = dart.fetch_disclosures(corp_fn(), since.strftime("%Y%m%d"), pblntf_ty=ty, max_pages=3)
+                got += db.add_events(conn, code, [{"rcept_no": d["rcept_no"], "rcept_dt": d["rcept_dt"],
+                                                   "title": (d.get("report_nm") or "").strip(),
+                                                   "link": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=" + d["rcept_no"]}
+                                                  for d in lst], kind)
+            db.log_fetch(conn, "dart_events", code, code, True, got)
+        except Exception as e:      # 공시 제목은 보조 자료라 실패해도 분석을 멈추지 않는다
+            db.log_fetch(conn, "dart_events", code, code, False, 0, str(e)[:200])
+    if not db.fetched_recently(conn, "news", code, config.TTL_DAYS["news"], ok_only=True):
+        row = conn.execute("SELECT name FROM companies WHERE stock_code=?", (code,)).fetchone()
+        name = row["name"] if row else code
+        last = conn.execute("SELECT MAX(published) d FROM news WHERE stock_code=?", (code,)).fetchone()["d"]
+        start = max(since, _dt.date.fromisoformat(last) - _dt.timedelta(days=7)) if last else since
+        _, gs, _ = segments.groups(conn, code)
+        queries = [name] + [f"{name} {kw}" for g in gs for kw in g["keywords"][:2]][:8]
+        got, errs, src_used = 0, [], set()
+        for i, q in enumerate(queries):
+            try:
+                if i == 0:
+                    src, n, items = news.fetch(q, start)
+                elif news.naver_key():
+                    n, items = news.naver(q, start, max_pages=3)
+                    src = "네이버 뉴스 API"
+                else:                       # 키가 없으면 키워드 검색은 최근 100건만(요청 수를 줄이려고)
+                    n, items = news.google(q, max(start, today - _dt.timedelta(days=31)))
+                    src = "구글 뉴스 RSS"
+                for _ in range(n):
+                    stats.req(src)
+                got += db.add_news(conn, code, items, src, q)
+                src_used.add(src)
+            except news.NewsUnavailable as e:
+                errs.append(f"{q}: {e}")
+                if i == 0:
+                    break
+        ok = not errs or got > 0
+        db.log_fetch(conn, "news", code, code, ok, got, "; ".join(errs)[:300] or None)
+        stats.notes.append(f"뉴스 제목: 새로 저장 {got}건({', '.join(sorted(src_used)) or '출처 없음'})" +
+                           (f" · 실패 {len(errs)}건" if errs else ""))
 
 
 def record_cross_check(conn, code, actuals, url):

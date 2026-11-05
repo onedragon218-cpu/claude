@@ -104,6 +104,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "growth": growth_table(conn, P),
         "calibration": calibration_info(P),
         "ctrend": consensus_trend(conn, code, P),
+        "biz": __import__("analyzer.segments", fromlist=["payload"]).payload(conn, code, comp["name"] if comp else code, P),
         "screen": __import__("analyzer.screener", fromlist=["results"]).results(conn),
         "universe": [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()],
         "stability": stability(conn, code, P, vres["rows"], comp),

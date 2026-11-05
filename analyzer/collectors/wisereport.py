@@ -217,3 +217,29 @@ def history_rows(code, fiscal_years, metrics=("revenue", "op_income"), as_of=Non
                     rows.append((0, "close_price", day, at(c2, "close_price"), "원"))
             seen_px = True
     return urls, rows
+
+
+PRODUCT_URL = BASE + "c1020001.aspx?cmp_cd={code}"
+
+
+def parse_products(page):
+    """기업현황 화면의 '주요제품 매출구성(YYYY / MM)' → ('YYYY-MM', [(제품·부문명, 구성비 %)]).
+    WiseReport가 사업보고서의 주요제품 매출 비중을 옮긴 것이다(부문 기준이 아닌 회사도 있음: 예 '제품(수출)')."""
+    m = re.search(r"var chartData1 = (\[.*?\]);", page, re.S)
+    d = re.search(r"매출구성\((\d{4})\s*/\s*(\d{2})\)", page)
+    if not m:
+        return None, []
+    try:
+        rows = [(html.unescape(str(n)).strip(), _num(v)) for n, v in json.loads(m.group(1))]
+    except (ValueError, TypeError):
+        return None, []
+    return (f"{d.group(1)}-{d.group(2)}" if d else None), [r for r in rows if r[0]]
+
+
+def products(code):
+    """반환: (출처 URL, 기준 'YYYY-MM', [(이름, %)])"""
+    url = PRODUCT_URL.format(code=code)
+    as_of, rows = parse_products(_get(url))
+    if not rows:
+        raise ConsensusUnavailable("주요제품 매출구성 자료 없음")
+    return url, as_of, rows

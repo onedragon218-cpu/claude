@@ -78,6 +78,21 @@ if ($k) {
     Write-Host '      인증키 없이 설치합니다. 이 경우 주식 수·새 공시는 수집되지 않습니다. 나중에 install.bat을 다시 실행해 넣으세요.' -ForegroundColor Yellow
 }
 
+# 2-1) 네이버 뉴스 검색 API 키(선택). 없으면 구글 뉴스 RSS로 뉴스 제목을 받는다.
+#      저장 위치: %APPDATA%\corp-analyzer\naver_api_key.txt (1줄 Client ID, 2줄 Client Secret)
+$nvFile = Join-Path $keyDir 'naver_api_key.txt'
+if (Test-Path $nvFile) { Write-Host '      저장된 네이버 뉴스 API 키가 있습니다.' }
+$nid = Read-Host '[2/5] (선택) 네이버 뉴스 API Client ID (없으면 그냥 Enter)'
+$nid = "$nid".Trim()
+if ($nid) {
+    $nsec = "$(Read-Host '      네이버 뉴스 API Client Secret')".Trim()
+    if ($nsec) {
+        New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+        Set-Content -Path $nvFile -Value "$nid`r`n$nsec" -Encoding ASCII
+        Write-Host "      저장: $nvFile" -ForegroundColor Green
+    }
+}
+
 # 3) 작업 스케줄러: 평일 07:13 자동 수집(꺼져 있던 날은 켜진 뒤 바로 실행)
 $me = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited

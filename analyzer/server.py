@@ -100,6 +100,17 @@ class H(BaseHTTPRequestHandler):
             added = universe.add([(c, nm) for c, nm in items])
             return self._send(200, json.dumps({"added": added, "total": len(universe.load())}, ensure_ascii=False),
                               "application/json")
+        if u.path == "/api/segments/keywords":
+            from . import segments
+            n = int(self.headers.get("Content-Length") or 0)
+            d = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
+            code = str(d.get("code") or "")
+            if not (code.isdigit() and len(code) == 6):
+                return self._send(400, json.dumps({"error": "종목코드 오류"}, ensure_ascii=False), "application/json")
+            clean = lambda m: {str(k)[:60]: [str(x).strip()[:30] for x in (v or []) if str(x).strip()][:20]
+                               for k, v in (m or {}).items()}
+            segments.save_user_keywords(code, clean(d.get("segments")), clean(d.get("topics")))
+            return self._send(200, json.dumps({"saved": True}, ensure_ascii=False), "application/json")
         if u.path == "/api/update-all":
             with JOB_LOCK:
                 if JOB["running"]:

@@ -48,6 +48,22 @@ CREATE TABLE IF NOT EXISTS consensus_history (
   collected_at TEXT, source_ref TEXT,
   UNIQUE(stock_code, target_year, metric, as_of, provider)
 );
+-- 사업부(주요제품) 매출 구성. 시점별로 쌓는다.
+CREATE TABLE IF NOT EXISTS segments (
+  stock_code TEXT NOT NULL, as_of TEXT NOT NULL, name TEXT NOT NULL, pct REAL, value REAL, unit TEXT,
+  fiscal_year INTEGER, kind TEXT NOT NULL DEFAULT 'mix', source TEXT, source_ref TEXT, collected_at TEXT,
+  UNIQUE(stock_code, as_of, name, kind, source)
+);
+-- 뉴스 제목(본문은 저장하지 않음). 링크가 없으면 제목 검색 링크를 쓴다.
+CREATE TABLE IF NOT EXISTS news (
+  stock_code TEXT NOT NULL, published TEXT NOT NULL, title TEXT NOT NULL, link TEXT, press TEXT,
+  description TEXT, source TEXT, query TEXT, collected_at TEXT,
+  UNIQUE(stock_code, published, title)
+);
+-- DART 주요사항·거래소 공시(공급계약, 시설투자, 잠정실적 등) 제목
+CREATE TABLE IF NOT EXISTS events (
+  rcept_no TEXT PRIMARY KEY, stock_code TEXT, rcept_dt TEXT, title TEXT, kind TEXT, link TEXT, collected_at TEXT
+);
 CREATE TABLE IF NOT EXISTS fetch_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source TEXT, key TEXT, stock_code TEXT, fetched_at TEXT, ok INTEGER, n_items INTEGER, note TEXT
@@ -221,6 +237,41 @@ def add_consensus_history(conn, code, rows, source_ref=None):
 def consensus_history(conn, code):
     return [dict(r) for r in conn.execute("SELECT target_year, metric, as_of, value, unit FROM consensus_history "
                                           "WHERE stock_code=? ORDER BY target_year, metric, as_of", (code,))]
+
+
+def add_segments(conn, code, as_of, rows, source, source_ref=None, kind="mix"):
+    """rows: [(name, pct, value, unit, fiscal_year)]"""
+    n = 0
+    for name, pct, value, unit, fy in rows:
+        n += conn.execute("INSERT OR IGNORE INTO segments(stock_code, as_of, name, pct, value, unit, fiscal_year, kind, source, "
+                          "source_ref, collected_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                          (code, as_of, name, pct, value, unit, fy, kind, source, source_ref, now())).rowcount
+    conn.commit()
+    return n
+
+
+def add_news(conn, code, items, source, query=None):
+    """items: [{published 'YYYY-MM-DD', title, link, press, description}]"""
+    n = 0
+    for it in items:
+        if not it.get("title") or not it.get("published"):
+            continue
+        n += conn.execute("INSERT OR IGNORE INTO news(stock_code, published, title, link, press, description, source, query, "
+                          "collected_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                          (code, it["published"], it["title"], it.get("link"), it.get("press"), it.get("description"),
+                           source, query, now())).rowcount
+    conn.commit()
+    return n
+
+
+def add_events(conn, code, items, kind):
+    n = 0
+    for it in items:
+        n += conn.execute("INSERT OR IGNORE INTO events(rcept_no, stock_code, rcept_dt, title, kind, link, collected_at) "
+                          "VALUES (?,?,?,?,?,?,?)", (it["rcept_no"], code, it["rcept_dt"], it["title"], kind,
+                                                     it.get("link"), now())).rowcount
+    conn.commit()
+    return n
 
 
 def log_fetch(conn, source, key, code, ok, n_items=0, note=None):

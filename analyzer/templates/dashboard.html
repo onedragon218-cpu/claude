@@ -118,6 +118,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="I">I. 컨센서스 종목 찾기</button>
   <button data-s="J">J. 성장 조건 분류</button>
   <button data-s="K">K. 컨센서스 추이</button>
+  <button data-s="L">L. 사업부 분석</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -316,6 +317,36 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   </div>
   <div class="card"><h3>목표주가 평균과 주가 (원)</h3><div class="muted" id="k-psum"></div>
     <div class="chartbox"><canvas id="k-price"></canvas></div></div>
+</section>
+
+<section id="L">
+  <div class="card">
+    <h2 style="margin:0">사업부 분석</h2>
+    <div class="subtabs" id="l-tabs" role="tablist">
+      <button data-l="mix" class="on">① 사업부 구성</button><button data-l="news">② 뉴스 흐름(최근 1년)</button><button data-l="peer">③ 사업부별 경쟁사</button>
+    </div>
+    <div id="l-mix">
+      <p class="muted" id="l-mixnote"></p>
+      <div class="row" style="align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div class="chartbox" style="height:260px;flex:0 0 300px;max-width:100%"><canvas id="l-pie"></canvas></div>
+        <div style="flex:1 1 420px;min-width:0"><div class="tablewrap"><table id="l-mixtable"></table></div>
+          <div class="row" style="margin-top:8px;gap:8px;align-items:center"><button id="l-kwsave" class="primary">키워드 저장</button><span class="muted" id="l-kwmsg"></span></div></div>
+      </div>
+      <div id="l-mixhist"></div>
+    </div>
+    <div id="l-news" style="display:none">
+      <p class="muted" id="l-newsnote"></p>
+      <div id="l-chips" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div>
+      <div id="l-summary"></div>
+      <div class="chartbox" style="height:200px"><canvas id="l-bar"></canvas></div>
+      <div id="l-months"></div>
+      <h3 style="margin-top:16px">DART 주요사항·거래소 공시(최근 1년)</h3><div id="l-events"></div>
+    </div>
+    <div id="l-peer" style="display:none">
+      <p class="muted" id="l-peernote"></p>
+      <div id="l-peers"></div>
+    </div>
+  </div>
 </section>
 
 <section id="F">
@@ -1202,7 +1233,79 @@ function renderK(){
   $('#k-psum').innerHTML = lt && tp[lt] && cp[lt] ? `${lt} 기준 목표주가 평균 ${fmt(tp[lt],'원')}원, 주가 ${fmt(cp[lt],'원')}원 → 목표주가가 주가보다 ${((tp[lt]/cp[lt]-1)*100).toFixed(1)}% ${tp[lt]>=cp[lt]?'높음':'낮음'}. 목표주가도 증권사 의견의 평균이므로 실제 주가를 보장하지 않습니다.` : '';
 }
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+// ---- L. 사업부 분석 ----
+const BZ = D.biz || {groups:[], mix:[], news:{flow:{}, groups:[]}, peers:{by_segment:{}}};
+let LTAB = 'mix', LGROUP = null;
+const L_COLORS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
+document.querySelectorAll('#l-tabs button').forEach(b=>b.onclick=()=>{ LTAB = b.dataset.l;
+  document.querySelectorAll('#l-tabs button').forEach(x=>x.classList.toggle('on', x===b));
+  ['mix','news','peer'].forEach(k=>$('#l-'+k).style.display = k===LTAB ? '' : 'none'); renderL(); });
+function renderL(){
+  const N = BZ.news || {flow:{}};
+  // ① 구성
+  const mix = BZ.mix||[];
+  $('#l-mixnote').innerHTML = mix.length ? `주요제품 매출 구성 <b>${esc(BZ.as_of||'')}</b> 기준 (출처: ${esc((mix[0]||{}).source||'')} — 사업보고서의 '주요 제품 매출' 비중을 옮긴 값). 회사에 따라 사업부가 아니라 수출·내수, 제품·상품으로 나뉘어 있을 수 있습니다. 키워드는 뉴스를 사업부별로 나누고 경쟁사를 찾는 데 씁니다(쉼표로 구분해 고친 뒤 '키워드 저장').` + (BZ.keyword_note ? `<br><b>기본 키워드 근거</b>: ${esc(BZ.keyword_note)}` : '')
+    : '<div class="warnbox">사업부 구성 자료가 아직 없습니다. 「지금 갱신」을 실행하면 WiseReport 주요제품 매출구성을 받습니다.</div>';
+  const gs = BZ.groups||[];
+  $('#l-mixtable').innerHTML = '<tr><th class="l">구분</th><th class="l">이름</th><th>비중</th><th class="l">뉴스 키워드(쉼표로 구분)</th><th class="l">키워드 출처</th><th>기사 수(1년)</th></tr>' +
+    gs.map((g,i)=>`<tr><td class="l">${g.kind}</td><td class="l">${esc(g.name)}</td><td>${g.pct==null?'–':g.pct.toFixed(1)+'%'}</td>
+      <td class="l"><input class="l-kw" data-i="${i}" value="${esc((g.keywords||[]).join(', '))}" style="width:100%;min-width:180px" ${SERVED?'':'disabled'}></td>
+      <td class="l muted">${esc(g.origin)}</td><td>${((N.flow||{})[g.name]||{}).count||0}</td></tr>`).join('') +
+    `<tr><td class="l">주제 추가</td><td class="l"><input id="l-newtopic" placeholder="예: 신사업" style="width:110px" ${SERVED?'':'disabled'}></td><td></td><td class="l"><input id="l-newtopickw" placeholder="예: 셀룰로오스, 이차전지" style="width:100%" ${SERVED?'':'disabled'}></td><td class="l muted">비우면 추가 안 함</td><td></td></tr>`;
+  $('#l-kwsave').disabled = !SERVED;
+  $('#l-kwmsg').textContent = SERVED ? '저장 후 화면을 새로 고치면 뉴스 분류·경쟁사 후보가 다시 계산됩니다(수집은 하지 않음).' : '재무분석 열기.bat 으로 연 화면에서 저장할 수 있습니다.';
+  if (charts['l-pie']) charts['l-pie'].destroy();
+  if (mix.length) charts['l-pie'] = new Chart($('#l-pie'), {type:'doughnut', data:{labels:mix.map(m=>m.name), datasets:[{data:mix.map(m=>m.pct), backgroundColor:mix.map((m,i)=>css(L_COLORS[i%7])), borderColor:css('--surface-1'), borderWidth:2}]},
+    options:{responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{position:'bottom', labels:{color:css('--text-secondary'), boxWidth:12}}, tooltip:{callbacks:{label:c=>`${c.label}: ${c.parsed}%`}}}}});
+  const hist = BZ.mix_history||[]; const dates = [...new Set(hist.map(h=>h.as_of))];
+  $('#l-mixhist').innerHTML = dates.length > 1 ? `<h3>시점별 구성 변화</h3><div class="tablewrap"><table><tr><th class="l">이름</th>${dates.map(d=>`<th>${d}</th>`).join('')}</tr>${[...new Set(hist.map(h=>h.name))].map(n=>`<tr><td class="l">${esc(n)}</td>${dates.map(d=>{const h=hist.find(x=>x.as_of===d&&x.name===n); return `<td>${h&&h.pct!=null?h.pct.toFixed(1)+'%':'–'}</td>`;}).join('')}</tr>`).join('')}</table></div>`
+    : '<p class="muted">시점별 변화는 반기마다 자동으로 쌓입니다(현재 1개 시점).</p>';
+  // ② 뉴스
+  const names = gs.map(g=>g.name).concat(['회사 전반']).filter(n=>(N.flow||{})[n]);
+  if (!LGROUP || !names.includes(LGROUP)) LGROUP = names.find(n=>(N.flow[n]||{}).count) || names[0];
+  $('#l-newsnote').innerHTML = N.total ? `기사 제목 ${N.total}건(${esc(N.first)} ~ ${esc(N.last)}), 출처: ${(N.sources||[]).map(esc).join(', ')}. 제목에 키워드가 들어간 기사를 그 사업부·주제로 묶고(한 기사가 여러 묶음에 들어갈 수 있음), 달마다 비슷한 제목을 한 묶음으로 모아 <b>많이 보도된 순서로 대표 제목 3개</b>를 보여 줍니다. 제목을 누르면 기사(또는 네이버 뉴스 제목 검색)로 연결됩니다. ${BZ.naver_key?'네이버 뉴스 API 키 사용 중.':'네이버 뉴스 API 키가 없어 구글 뉴스 RSS로 받습니다(키를 넣으면 더 많이 받음 — 설치 안내 참고).'}`
+    : '<div class="warnbox">뉴스 제목이 아직 없습니다. 「지금 갱신」을 실행하면 최근 1년 기사 제목을 받습니다.</div>';
+  $('#l-chips').innerHTML = names.map(n=>`<button class="${n===LGROUP?'primary':''}" data-g="${esc(n)}" style="padding:4px 10px;border-radius:14px;border:1px solid var(--border);background:${n===LGROUP?'':'var(--surface-1)'};cursor:pointer">${esc(n)} <span class="muted" style="${n===LGROUP?'color:#fff':''}">${N.flow[n].count}</span></button>`).join('');
+  document.querySelectorAll('#l-chips button').forEach(b=>b.onclick=()=>{ LGROUP = b.dataset.g; renderL(); });
+  const sm = BZ.summary && (BZ.summary.groups||{})[LGROUP];
+  $('#l-summary').innerHTML = sm ? `<div class="warnbox" style="border-left-color:var(--accent)"><b>제목 기반 요약(Claude 정리 · ${esc(BZ.summary.period||'')})</b><ul style="margin:6px 0 4px 18px;padding:0">${sm.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><span class="muted">${esc(BZ.summary._설명||'')}</span></div>` : '';
+  const F = (N.flow||{})[LGROUP] || {months:[]};
+  const mons = []; { const end = new Date(); for (let i=12;i>=0;i--){ const d = new Date(end.getFullYear(), end.getMonth()-i, 1); mons.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); } }
+  const cnt = Object.fromEntries(F.months.map(m=>[m.month, m.count]));
+  if (charts['l-bar']) charts['l-bar'].destroy();
+  const bo = baseOpts(); bo.plugins.tooltip.callbacks = {label: c=>`기사 ${c.parsed.y}건`}; bo.scales.y.ticks.precision = 0;
+  charts['l-bar'] = new Chart($('#l-bar'), {type:'bar', data:{labels:mons, datasets:[{label:'기사 수', data:mons.map(m=>cnt[m]||0), backgroundColor:css('--s1')}]}, options:bo});
+  const link = (t) => `<a href="${esc(t.link)}" target="_blank" rel="noopener">${esc(t.title)}</a>`;
+  $('#l-months').innerHTML = F.months.length ? F.months.map(m=>`<div style="margin-top:12px"><b>${m.month}</b> <span class="muted">기사 ${m.count}건</span><ul style="margin:4px 0 0 18px;padding:0">` +
+      m.top.map(t=>`<li>${link(t)} <span class="muted">${esc(t.published)}${t.press?' · '+esc(t.press):''}${t.n>1?` · 비슷한 기사 ${t.n}건`:''}</span></li>`).join('') + '</ul>' +
+      (m.more.length ? `<details style="margin-left:18px"><summary class="muted">나머지 ${m.more.length}묶음 보기</summary><ul style="margin:4px 0 0 18px;padding:0">${m.more.map(t=>`<li>${link(t)} <span class="muted">${esc(t.published)}${t.n>1?` · ${t.n}건`:''}</span></li>`).join('')}</ul></details>` : '') + '</div>').join('')
+    : '<p class="muted">이 묶음에 해당하는 기사가 없습니다. 키워드를 고쳐 보세요(① 사업부 구성).</p>';
+  const ev = BZ.events||[];
+  $('#l-events').innerHTML = ev.length ? `<div class="tablewrap" style="max-height:300px;overflow:auto"><table><tr><th class="l">접수일</th><th class="l">구분</th><th class="l">공시 제목</th></tr>${ev.map(e=>`<tr><td class="l">${esc(e.rcept_dt)}</td><td class="l">${esc(e.kind)}</td><td class="l"><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.title)}</a></td></tr>`).join('')}</table></div>`
+    : '<p class="muted">아직 없음 — DART 키가 있는 PC에서 「지금 갱신」을 실행하면 주요사항·거래소 공시 제목을 받습니다.</p>';
+  // ③ 경쟁사
+  const PR = BZ.peers || {by_segment:{}}; const me = PR.self || {};
+  $('#l-peernote').innerHTML = `경쟁사 후보는 <b>DB에 자료가 있는 기업(지금 ${PR.pool||0}곳)</b> 가운데서 자동으로 찾습니다. ① 상대 회사의 사업부 이름·키워드가 이 사업부 키워드와 겹치면 '사업부 일치', ② 아니면 DART 업종코드(앞 3자리)가 같으면 '같은 업종(회사 전체 기준)'. 기본 목록(281종목)의 기업을 수집해 DB가 커질수록 후보가 정확해집니다. 지표는 ${PR.year}년 실적(회사 전체) 기준이며, 사업부별 이익은 공시되지 않는 경우가 많아 비교하지 않습니다.`;
+  const f1 = (v, d=1) => v==null ? '–' : v.toLocaleString('ko-KR', {maximumFractionDigits:d});
+  const row = (c, self) => `<tr style="${self?'background:var(--info-bg);font-weight:600':''}"><td class="l">${self?esc(D.company.name)+' (이 회사)':`<a href="${companyUrl(c.code)}">${esc(c.name)}</a>`}</td><td class="l">${self?'–':esc(c.match)}</td><td class="l muted" style="white-space:normal">${self?'':esc(c.why)}</td>
+    <td>${f1(c.revenue,0)}</td><td>${c.rev_growth==null?'–':(c.rev_growth>=0?'+':'')+c.rev_growth.toFixed(1)+'%'}</td><td>${c.op_margin==null?'–':c.op_margin.toFixed(1)+'%'}</td><td>${c.roe==null?'–':c.roe.toFixed(1)+'%'}</td><td>${c.debt_ratio==null?'–':c.debt_ratio.toFixed(0)+'%'}</td><td>${f1(c.per)}</td><td>${f1(c.pbr,2)}</td><td>${f1(c.market_cap,0)}</td></tr>`;
+  const segs = Object.keys(PR.by_segment||{});
+  $('#l-peers').innerHTML = segs.length ? segs.map(sn=>{ const L = PR.by_segment[sn]; const g = gs.find(x=>x.name===sn)||{};
+    return `<h3 style="margin-top:14px">${esc(sn)} ${g.pct!=null?`<span class="muted">(매출 비중 ${g.pct.toFixed(1)}%)</span>`:''}</h3><div class="tablewrap"><table><tr><th class="l">기업</th><th class="l">근거</th><th class="l">설명</th><th>매출(억원)</th><th>매출성장</th><th>영업이익률</th><th>ROE</th><th>부채비율</th><th>PER</th><th>PBR</th><th>시가총액(억원)</th></tr>` +
+      row(me, true) + (L.length ? L.map(c=>row(c,false)).join('') : `<tr><td colspan="11" class="l muted">후보 없음 — ${(g.keywords||[]).length?'DB에 겹치는 사업부를 가진 기업이 아직 없습니다. 기본 목록 기업을 수집하면 자동으로 채워집니다.':'이 사업부에 키워드가 없습니다(① 사업부 구성에서 입력).'}</td></tr>`) + '</table></div>'; }).join('')
+    : '<p class="muted">사업부 구성 자료가 없어 비교할 수 없습니다.</p>';
+}
+$('#l-kwsave').onclick = async () => {
+  const gs = BZ.groups||[]; const seg = {}, top = {};
+  document.querySelectorAll('.l-kw').forEach(inp=>{ const g = gs[+inp.dataset.i]; const kws = inp.value.split(/[,，]/).map(x=>x.trim()).filter(Boolean);
+    (g.kind==='주제' ? top : seg)[g.name] = kws; });
+  const nt = $('#l-newtopic').value.trim(); if (nt) top[nt] = $('#l-newtopickw').value.split(/[,，]/).map(x=>x.trim()).filter(Boolean);
+  try { const r = await fetch('/api/segments/keywords', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code: D.company.code, segments: seg, topics: top})});
+    if (!r.ok) throw new Error(r.status); $('#l-kwmsg').textContent = '저장했습니다. 새로 고치는 중…'; setTimeout(()=>location.reload(), 600);
+  } catch(e){ $('#l-kwmsg').textContent = '저장 실패: ' + e.message; }
+};
+
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
