@@ -115,6 +115,7 @@ def main(argv=None):
     v = sub.add_parser("reverify"); v.add_argument("code"); v.add_argument("--year", type=int)
     sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=8765)
     dc = sub.add_parser("doctor"); dc.add_argument("--port", type=int, default=8765)
+    sub.add_parser("calibrate")
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
@@ -164,6 +165,10 @@ def main(argv=None):
                      "('dart_report','dart_shares','dart_disclosures')", (pat, pat + ":%"))
         conn.commit()
         print(f"{len(ids)}개 값을 STALE로 표시했습니다. 다음 analyze 실행 때 해당 자료를 다시 받아 비교합니다.")
+    elif args.cmd == "calibrate":
+        from . import calibration
+        r = calibration.build(progress=lambda i, n: print(f"{i}/{n}", flush=True) if i % 20 == 0 else None)
+        print(f"완료: 기업 {r['companies']}곳, 실패 {len(r['failed'])}곳 → {calibration.CACHE()}")
     elif args.cmd == "doctor":
         doctor(args.port)
     elif args.cmd == "serve":

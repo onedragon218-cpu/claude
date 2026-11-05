@@ -8,6 +8,25 @@ FLOW = {"revenue", "eps", "roe"}           # 현재 연도 부분 실적을 연�
 STOCK = {"bps", "debt_ratio", "market_cap"}  # 시점 값(현재 연도에 최신 실제치를 쓸 수 있음)
 
 
+def _corr(metric, year, raw):
+    """컨센서스 원래 값과 보정 값. 매출·EPS는 각 계수, 영업이익률은 영업이익 계수 ÷ 매출 계수, ROE는 EPS 계수,
+    BPS는 이미 쌓인 자본이라 보정하지 않음."""
+    from . import calibration
+    if raw is None:
+        return {"value": None, "raw": None, "factor": 1.0, "why": None}
+    if metric in ("revenue", "eps"):
+        f, why = calibration.factor(metric, year)
+    elif metric == "op_margin":
+        fo, w1 = calibration.factor("op_income", year)
+        fr, _ = calibration.factor("revenue", year)
+        f, why = (fo / fr if fr else 1.0), f"영업이익 계수 ÷ 매출 계수 ({w1})"
+    elif metric == "roe":
+        f, why = calibration.factor("eps", year)
+    else:
+        f, why = 1.0, "보정 대상 아님"
+    return {"value": raw * f, "raw": raw, "factor": f, "why": why}
+
+
 def payload(conn, code, base_year=None, last_run=None):
     P = config.periods(base_year)
     from . import valuation
@@ -37,9 +56,9 @@ def payload(conn, code, base_year=None, last_run=None):
             est = latest.get((y, m))
             pts[y] = {
                 "fy": _pt(fy), "partial": _pt(part),
-                "est": None if est is None else {"value": est["value"], "provider": est["provider"],
-                                                 "as_of": est["as_of"], "n": est["n_estimates"],
-                                                 "source_ref": est["source_ref"]},
+                "est": None if est is None else dict(_corr(m, y, est["value"]), provider=est["provider"],
+                                                     as_of=est["as_of"], n=est["n_estimates"],
+                                                     source_ref=est["source_ref"]),
             }
         series[m] = pts
     status = {}
@@ -82,6 +101,8 @@ def payload(conn, code, base_year=None, last_run=None):
         "last_collect": last_collect, "last_verify": last_verify,
         "companies": companies,
         "last_run": last_run,
+        "growth": growth_table(conn, P),
+        "calibration": calibration_info(P),
         "screen": __import__("analyzer.screener", fromlist=["results"]).results(conn),
         "universe": [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()],
         "stability": stability(conn, code, P, vres["rows"], comp),
@@ -292,3 +313,56 @@ def grade_leverage(conn, code, rows, bk, vr):
         else:
             r["lev_trend"] = False
         r["lev_notes"] = notes
+
+
+def calibration_info(P):
+    """화면 표시용 보정계수(연도·지표별)와 근거"""
+    from . import calibration
+    cal = calibration.load()
+    out = {"available": bool(cal), "fiscal_year": cal.get("fiscal_year") if cal else None,
+           "companies": cal.get("companies") if cal else None, "factors": {}}
+    for y in [P["current"]] + P["future"]:
+        for m in ("revenue", "op_income", "eps"):
+            f, why = calibration.factor(m, y)
+            out["factors"][f"{y}:{m}"] = {"factor": f, "why": why}
+    return out
+
+
+def growth_table(conn, P):
+    """DB에 자료가 있는 기업의 작년 실적·올해~내후년 컨센서스(원래 값과 보정 값)"""
+    from . import calibration, db as _db
+    cy = P["current"]
+    years = [cy - 1, cy, cy + 1, cy + 2]
+    cal = calibration.load()
+    out = []
+    for c in conn.execute("SELECT c.stock_code, c.name FROM companies c WHERE EXISTS "
+                          "(SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code) ORDER BY c.name"):
+        code = c["stock_code"]
+        fv = lambda y, k: (lambda r: None if r is None else r["value"])(_db.current_fact(conn, code, y, k))
+        cons = {(r["target_year"], r["metric"]): dict(r) for r in _db.latest_consensus(conn, code)}
+        row = {"code": code, "name": c["name"], "years": {}}
+        for y in years:
+            if y < cy:   # 작년: 실적
+                rev = fv(y, "acc_revenue")
+                op = fv(y, "acc_op")
+                eps = fv(y, "acc_eps_basic")
+                rev = rev / 1e8 if rev is not None else None
+                op = op / 1e8 if op is not None else None
+                row["years"][y] = {"kind": "실적", "raw": {"revenue": rev, "op_income": op, "eps": eps},
+                                   "adj": {"revenue": rev, "op_income": op, "eps": eps}}
+                continue
+            raw = {m: (cons.get((y, m)) or {}).get("value") for m in ("revenue", "op_income", "eps")}
+            if all(v is None for v in raw.values()):
+                continue
+            adj = {}
+            for m, v in raw.items():
+                f, _ = calibration.factor(m, y, cal=cal)
+                adj[m] = None if v is None else v * f
+            asof = max(((cons.get((y, m)) or {}).get("as_of") or "") for m in raw)
+            row["years"][y] = {"kind": "컨센서스", "raw": raw, "adj": adj, "as_of": asof}
+        for y, d in row["years"].items():
+            for k in ("raw", "adj"):
+                r = d[k]
+                r["op_margin"] = r["op_income"] / r["revenue"] * 100 if r.get("revenue") and r.get("op_income") is not None else None
+        out.append(row)
+    return {"base_year": cy, "years": years, "rows": out}

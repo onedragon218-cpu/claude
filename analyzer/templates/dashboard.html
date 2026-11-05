@@ -98,6 +98,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <div class="row" style="justify-content:space-between;align-items:center">
     <h1 id="title" style="margin:0"></h1>
     <div class="row" style="align-items:center">
+      <label style="flex-direction:row;align-items:center;gap:6px" title="컨센서스에 보정계수(과거 컨센서스 대비 실제 실현 비율)를 곱해 그래프에 씁니다. 원래 값은 그대로 보관합니다."><input type="checkbox" id="corrtog"> 컨센서스 보정 적용</label>
       <label style="flex-direction:row;align-items:center;gap:6px" title="값이 없는 연도를 건너뛰어 앞뒤 값을 가는 회색 점선으로 잇습니다. 빈 연도에 값을 만들어 넣지는 않습니다."><input type="checkbox" id="joingaps"> 빈 연도 점선으로 잇기</label>
       <label style="flex-direction:row;align-items:center;gap:6px">기업 선택 <select id="compsel"></select></label>
     </div>
@@ -115,6 +116,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="G">G. 가치평가</button>
   <button data-s="H">H. 재무 안정성</button>
   <button data-s="I">I. 컨센서스 종목 찾기</button>
+  <button data-s="J">J. 성장 조건 분류</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -271,6 +273,31 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   </div>
 </section>
 
+<section id="J">
+  <div class="card">
+    <h2>성장 조건 분류</h2>
+    <p class="muted" style="margin:6px 0">DB에 자료가 있는 기업을 컨센서스 기준으로 분류합니다. <b>작년→올해</b>는 작년 실적과 올해 컨센서스, <b>올해→내년</b>·<b>내년→내후년</b>은 컨센서스끼리 비교합니다. 칸을 비우면 그 조건은 쓰지 않습니다.</p>
+    <div class="row" style="align-items:flex-end;gap:16px">
+      <label>매출성장률 ≥ (%)<input id="j-rev" type="number" step="0.5" placeholder="예: 5" style="width:110px"></label>
+      <label>영업이익률<span class="row" style="gap:4px"><select id="j-opm-mode"><option value="pp">증가폭 ≥ (%p)</option><option value="rel">증가율 ≥ (%)</option><option value="lvl">수준 ≥ (%)</option></select><input id="j-opm" type="number" step="0.5" placeholder="예: 1" style="width:90px"></span></label>
+      <label>EPS 성장률 ≥ (%)<input id="j-eps" type="number" step="0.5" placeholder="예: 10" style="width:110px"></label>
+      <label>지표 결합<select id="j-logic"><option value="and">모두 충족(그리고)</option><option value="or">하나라도(또는)</option></select></label>
+    </div>
+    <div class="row" style="align-items:center;gap:16px;margin-top:10px">
+      <span class="muted">구간</span>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="j-per" value="0" checked> 작년→올해</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="j-per" value="1" checked> 올해→내년</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="j-per" value="2" checked> 내년→내후년</label>
+      <label>구간 결합<select id="j-plogic"><option value="all">고른 구간 모두</option><option value="any">어느 구간이든</option></select></label>
+      <label style="flex-direction:row;align-items:center;gap:6px" title="컨센서스에 보정계수를 곱한 값으로 비교(원래 값은 그대로 보관)"><input type="checkbox" id="j-adj"> 보정계수 적용</label>
+      <label>표시<select id="j-show"><option value="pass">조건 충족 기업만</option><option value="all">전체</option></select></label>
+    </div>
+    <p class="muted" id="j-count" style="margin:10px 0"></p>
+    <div class="tablewrap"><table id="j-table"></table></div>
+    <p class="muted" style="margin-top:8px">EPS가 기준 연도에 0 이하이면 성장률을 계산하지 않고 '흑자전환'(다음 해 0 초과) 또는 '적자 지속'으로 표시하며, 흑자전환은 EPS 조건을 충족한 것으로 봅니다. 컨센서스 기준일은 표의 칸에 마우스를 올리면 보입니다.</p>
+  </div>
+</section>
+
 <section id="F">
   <div class="tiles" id="vtiles"></div>
   <div class="card" style="margin-top:16px"><h2>검증 결과(10개 항목)</h2><div class="tablewrap"><table id="vtable"></table></div></div>
@@ -308,6 +335,8 @@ const ACC = D.accounts;
 let BY = D.periods.base_year;
 const visible = new Set(MET.map(m=>m.key).concat(['v_srim','v_dcf','v_dcf_e','v_roic','v_wacc']));
 const charts = {};
+let CORR = (()=>{ try{ return (localStorage.getItem('corr') ?? '1') === '1'; }catch(e){ return true; } })();
+const estV = e => e ? (CORR ? e.value : (e.raw ?? e.value)) : null;
 let JOIN_GAPS = (()=>{ try{ return (localStorage.getItem('joingaps') ?? '1') === '1'; }catch(e){ return true; } })();
 const SERVED = location.protocol.startsWith('http') && !location.hostname.endsWith('claude.ai');
 const companyUrl = code => SERVED ? `/company/${code}?base_year=${BY}` : `${code}.html`;
@@ -336,11 +365,11 @@ function pick(m, y, by){
   if (y < by) return s.fy && s.fy.value!=null ? {v:s.fy.value, kind:'실적', p:s.fy} : null;
   if (y === by){
     if (m.stock && s.partial && s.partial.value!=null) return {v:s.partial.value, kind:'현재(부분 실적)', p:s.partial};
-    if (s.est) return {v:s.est.value, kind:'전망', p:s.est};
+    if (s.est) return {v:estV(s.est), kind:'전망', p:s.est};
     if (m.key==='op_margin' && s.partial && s.partial.value!=null) return {v:s.partial.value, kind:'현재(부분 실적)', p:s.partial};
     return null;
   }
-  if (s.est) return {v:s.est.value, kind:'전망', p:s.est};
+  if (s.est) return {v:estV(s.est), kind:'전망', p:s.est};
   return null;
 }
 const isEst = pt => pt && pt.kind !== '실적';
@@ -566,7 +595,8 @@ function renderSingles(){
     const o = baseOpts();
     o.plugins.tooltip.callbacks = {label: ctx => { const p = pts[ctx.dataIndex]; if(!p) return '자료 없음';
       const r = yoy(m, ys[ctx.dataIndex], BY);
-      return [`${fmt(p.v,m.unit)} ${m.unit} (${p.kind})`, r?`전년 대비 ${yoyText(r)}`:'', p.p.status?`상태: ${p.p.status}`:'', p.p.note?String(p.p.note).slice(0,70):''].filter(Boolean); }};
+      const corr = p.kind==='전망' && p.p.raw!=null && Math.abs((p.p.factor??1)-1)>1e-9 ? (CORR ? `원래 컨센서스 ${fmt(p.p.raw,m.unit)} × 보정계수 ${p.p.factor.toFixed(2)}` : `보정 꺼짐(보정 시 ×${p.p.factor.toFixed(2)})`) : '';
+      return [`${fmt(p.v,m.unit)} ${m.unit} (${p.kind})`, corr, r?`전년 대비 ${yoyText(r)}`:'', p.p.status?`상태: ${p.p.status}`:'', p.p.note?String(p.p.note).slice(0,70):''].filter(Boolean); }};
     if (charts[m.key]) charts[m.key].destroy();
     charts[m.key] = mkChart($('#c-'+m.key), {type:'line', data:{labels:ys.map(y=> y>BY? y+'E' : y===BY? y+'(현재)': String(y)),
       datasets:[{data:pts.map(p=>p?p.v:null), borderColor:c, backgroundColor:c, borderWidth:2, pointRadius:4, pointHoverRadius:6,
@@ -588,7 +618,7 @@ function renderPivot(){
   MET.forEach(m=>{
     h += `<tr><td class="l">${m.name}</td><td class="l">${m.unit}</td>` + ys.map(y=>{
       const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};
-      let txt = p? fmt(p.v,m.unit) : '–', cls = p&&isEst(p)?'est':'', tip = p? `${p.kind} · ${p.p.status||''} · ${p.p.source||p.p.provider||''} ${p.p.source_ref||''} ${p.p.note||''}` : '자료 없음';
+      let txt = p? fmt(p.v,m.unit) : '–', cls = p&&isEst(p)?'est':'', tip = p? `${p.kind} · ${p.p.status||''} · ${p.p.source||p.p.provider||''} ${p.p.source_ref||''} ${p.p.note||''}${p.p.raw!=null&&p.kind==='전망'?` · 원래 컨센서스 ${fmt(p.p.raw,m.unit)}, 보정계수 ${(p.p.factor??1).toFixed(2)}${CORR?'(적용)':'(꺼짐)'} — ${p.p.why||''}`:''}` : '자료 없음';
       if(!p && y===BY && s.partial){ txt = fmt(s.partial.value,m.unit)+'<sub>'+s.partial.period+'</sub>'; cls='est'; tip=`부분 실적 ${s.partial.period} (연간 아님) · ${s.partial.note||''}`; }
       const warn = p && p.p.status && p.p.status!=='VERIFIED' && p.kind==='실적' ? ' ⚠' : '';
       return `<td class="${cls}" title="${esc(tip)}">${txt}${warn}</td>`;
@@ -608,6 +638,8 @@ function renderStatic(){
   $('#title').textContent = `${D.company.name} (${D.company.code})`;
   $('#compsel').innerHTML = D.companies.map(c=>`<option value="${esc(c.stock_code)}" ${c.stock_code===D.company.code?'selected':''}>${esc(c.name||'')} (${esc(c.stock_code)})</option>`).join('');
   $('#compsel').onchange = e => { location.href = companyUrl(e.target.value); };
+  $('#corrtog').checked = CORR;
+  $('#corrtog').onchange = e => { CORR = e.target.checked; try{ localStorage.setItem('corr', CORR?'1':'0'); }catch(_){} renderC(); renderSingles(); renderPivot(); };
   $('#joingaps').checked = JOIN_GAPS;
   $('#joingaps').onchange = e => { JOIN_GAPS = e.target.checked; try{ localStorage.setItem('joingaps', JOIN_GAPS?'1':'0'); }catch(_){} renderC(); renderSingles(); renderG(); };
   $('#subtitle').textContent = `프로그램 버전 ${D.app_version||'?'} · 기준 연도 ${BY} · 화면 생성 ${D.generated_at} · 마지막 수집 ${D.last_collect||'–'} · 마지막 검증 ${D.last_verify||'–'}`;
@@ -690,8 +722,9 @@ function renderGValue(byNote){
   $('#gtitle').textContent='주가와 주당가치 겹쳐 보기(원/주)';
   $('#gnote').textContent='주가(검은 선) 위에 각 방법의 주당 적정가치를 겹쳤습니다. 종합 = 계산된 방법이 3개 이상일 때의 중앙값. 점선·빈 점 = 현재 연도·전망.'+byNote;
   $('#gtoggles').style.display=''; $('#glogrow').style.display='';
-  $('#gtoggles').innerHTML = VMETH.map(([k,n,c])=>`<span class="tg ${gVisible.has(k)?'':'off'}" data-k="${k}" role="button" aria-pressed="${gVisible.has(k)}"><span class="sw" style="background:var(${c})"></span>${n}</span>`).join('');
-  $('#gtoggles').querySelectorAll('.tg').forEach(el=>el.onclick=()=>{ const k=el.dataset.k; gVisible.has(k)?gVisible.delete(k):gVisible.add(k); renderGValue(byNote); });
+  $('#gtoggles').innerHTML = VMETH.map(([k,n,c])=>`<span class="tg ${gVisible.has(k)?'':'off'}" data-k="${k}" role="button" aria-pressed="${gVisible.has(k)}"><span class="sw" style="background:var(${c})"></span>${n}</span>`).join('') + '<span class="tg" data-k="__all">모두 보기</span><span class="tg" data-k="__none">모두 끄기</span>';
+  $('#gtoggles').querySelectorAll('.tg').forEach(el=>el.onclick=()=>{ const k=el.dataset.k;
+    if (k==='__all') VMETH.forEach(m=>gVisible.add(m[0])); else if (k==='__none') gVisible.clear(); else gVisible.has(k)?gVisible.delete(k):gVisible.add(k); renderGValue(byNote); });
   const labels = VROWS.map(r=> vIsEst(r)? (String(r.kind).startsWith('현재')? r.year+'(현재)' : r.year+'E') : String(r.year));
   const ds = VMETH.map(([k,n,c])=>{ const col=css(c); const data=VROWS.map(r=>{ const v=vget(r,k); return v!=null && v>0 ? v : null; });
     return {label:n, key:k, data, borderColor:col, backgroundColor:col, borderWidth:k==='price'?3:(k==='median'?2.5:1.75),
@@ -725,9 +758,9 @@ function renderGAll(byNote){
   const items = VMETH.map(([k,n,c])=>({k,n,c,axis:'y'})).concat([
     {k:'roic',n:'ROIC(%)',c:'--s1',axis:'y_pct'},{k:'wacc',n:'WACC(%)',c:'--s2',axis:'y_pct'},{k:'ke',n:'Ke(%)',c:'--text-muted',axis:'y_pct'}]);
   $('#gtoggles').innerHTML = items.map(it=>`<span class="tg ${allVisible.has(it.k)?'':'off'}" data-k="${it.k}" role="button" aria-pressed="${allVisible.has(it.k)}"><span class="sw" style="background:var(${it.c})${it.axis==='y_pct'?';height:0;border-top:2px dashed var('+it.c+')':''}"></span>${it.n}</span>`).join('') +
-    '<span class="tg" data-k="__all">모두 보기</span>';
+    '<span class="tg" data-k="__all">모두 보기</span><span class="tg" data-k="__none">모두 끄기</span>';
   $('#gtoggles').querySelectorAll('.tg').forEach(el=>el.onclick=()=>{ const k=el.dataset.k;
-    if (k==='__all') items.forEach(it=>allVisible.add(it.k)); else allVisible.has(k)?allVisible.delete(k):allVisible.add(k); renderGAll(byNote); });
+    if (k==='__all') items.forEach(it=>allVisible.add(it.k)); else if (k==='__none') allVisible.clear(); else allVisible.has(k)?allVisible.delete(k):allVisible.add(k); renderGAll(byNote); });
   const rows = VROWS;
   const labels = rows.map(r=> vIsEst(r)? (String(r.kind).startsWith('현재')? r.year+'(현재)' : r.year+'E') : String(r.year));
   const dash = vSeg(rows);
@@ -1019,7 +1052,55 @@ $('#sstart').onclick = async () => {
 };
 if (SERVED) pollScan(false);
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+
+// ---- J. 성장 조건 분류 ----
+const G = D.growth || {rows:[], years:[]};
+function jPairs(){ const y = G.years||[]; return [[y[0],y[1],'작년→올해'],[y[1],y[2],'올해→내년'],[y[2],y[3],'내년→내후년']]; }
+function jEval(row, a, b, adj){
+  const A = (row.years[a]||{})[adj?'adj':'raw'], B = (row.years[b]||{})[adj?'adj':'raw'];
+  const res = {};
+  if (!A || !B) return null;
+  res.rev = (A.revenue>0 && B.revenue!=null) ? (B.revenue/A.revenue-1)*100 : null;
+  const mode = $('#j-opm-mode').value;
+  res.opm = (A.op_margin==null || B.op_margin==null) ? null : mode==='pp' ? B.op_margin - A.op_margin : mode==='lvl' ? B.op_margin : (A.op_margin>0 ? (B.op_margin/A.op_margin-1)*100 : null);
+  res.eps = null; res.epsTag = null;
+  if (A.eps!=null && B.eps!=null){ if (A.eps>0) res.eps = (B.eps/A.eps-1)*100; else res.epsTag = B.eps>0 ? '흑자전환' : '적자 지속'; }
+  res.asof = (row.years[b]||{}).as_of || '';
+  return res;
+}
+function renderJ(){
+  const th = {rev: $('#j-rev').value, opm: $('#j-opm').value, eps: $('#j-eps').value};
+  const use = Object.fromEntries(Object.entries(th).filter(([k,v])=>v!=='' && !isNaN(+v)).map(([k,v])=>[k,+v]));
+  const pers = [...document.querySelectorAll('.j-per')].filter(c=>c.checked).map(c=>+c.value);
+  const adj = $('#j-adj').checked, logic = $('#j-logic').value, plogic = $('#j-plogic').value, show = $('#j-show').value;
+  const pairs = jPairs();
+  const out = (G.rows||[]).map(row => {
+    const per = pairs.map((p,i)=>{ const e = jEval(row, p[0], p[1], adj); if (!e) return {i, e:null, ok:null};
+      const checks = Object.entries(use).map(([k,v]) => k==='eps' && e.eps==null ? (e.epsTag==='흑자전환') : (e[k]!=null && e[k] >= v));
+      const ok = checks.length===0 ? null : (logic==='and' ? checks.every(Boolean) : checks.some(Boolean));
+      return {i, e, ok}; });
+    const sel = per.filter(p=>pers.includes(p.i) && p.ok!==null);
+    const pass = sel.length===0 ? null : (plogic==='all' ? sel.length===pers.length && sel.every(p=>p.ok) : sel.some(p=>p.ok));
+    return {row, per, pass};
+  });
+  const shown = out.filter(o => show==='all' || o.pass);
+  const nCond = Object.keys(use).length;
+  $('#j-count').textContent = nCond ? `조건 충족 ${out.filter(o=>o.pass).length} / ${out.length}개 기업 (${adj?'보정계수 적용':'원래 컨센서스'} 기준)` : '조건을 하나 이상 입력하세요. 지금은 전체 값만 보여 줍니다.';
+  const cell = (p, k) => { if (!p.e) return '<td>–</td>'; const v = p.e[k]; const tag = k==='eps' && v==null ? p.e.epsTag : null;
+    const want = use[k]; const hit = want==null ? null : (k==='eps' && v==null ? tag==='흑자전환' : (v!=null && v >= want));
+    const txt = tag || (v==null ? '–' : (v>=0?'+':'') + v.toFixed(1) + (k==='opm' && $('#j-opm-mode').value!=='rel' ? ($('#j-opm-mode').value==='pp'?'%p':'%') : '%'));
+    return `<td title="${esc('컨센서스 기준일 ' + (p.e.asof||'–'))}" style="${hit===true?'color:var(--good);font-weight:600':hit===false?'color:var(--text-muted)':''}">${txt}</td>`; };
+  const head = '<tr><th class="l" rowspan="2">기업</th>' + pairs.map(p=>`<th colspan="3">${p[2]} (${p[0]}${p[0]<G.base_year?'A':'E'}→${p[1]}E)</th>`).join('') + '<th class="l" rowspan="2">결과</th></tr><tr>' +
+    pairs.map(()=>'<th>매출</th><th>영업이익률</th><th>EPS</th>').join('') + '</tr>';
+  $('#j-table').innerHTML = head + (shown.length ? shown.map(o=>`<tr><td class="l"><a href="${companyUrl(o.row.code)}">${esc(o.row.name)}</a> <span class="muted">${esc(o.row.code)}</span></td>` +
+      o.per.map(p=>cell(p,'rev')+cell(p,'opm')+cell(p,'eps')).join('') +
+      `<td class="l">${o.pass===true?'<span class="badge b-OK">충족</span>':o.pass===false?'<span class="muted">미충족</span>':'–'}</td></tr>`).join('')
+    : `<tr><td colspan="11" class="l">조건을 충족하는 기업이 없습니다.</td></tr>`);
+}
+['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show'].forEach(id=>$(id).addEventListener('input', renderJ));
+document.querySelectorAll('.j-per').forEach(c=>c.addEventListener('change', renderJ));
+
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));

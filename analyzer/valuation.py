@@ -334,6 +334,13 @@ def run(conn, code, P):
     last_sh = next((r["shares"] for r in reversed(rows) if r.get("shares")), None)
     for fy in P["future"]:
         eps, bps, rev, roe_e = cons.get((fy, "eps")), cons.get((fy, "bps")), cons.get((fy, "revenue")), cons.get((fy, "roe"))
+        # 컨센서스 보정계수(원래 값은 DB에 그대로): EPS·ROE는 EPS 계수, 매출은 매출 계수, BPS는 보정 안 함
+        from . import calibration
+        fe, why_e = calibration.factor("eps", fy)
+        fr, _ = calibration.factor("revenue", fy)
+        eps = eps * fe if eps is not None else None
+        roe_e = roe_e * fe if roe_e is not None else None
+        rev = rev * fr if rev is not None else None
         if not any((eps, bps, rev)):
             continue
         fair = {m: (statistics.median(v) if len(v) >= min_obs else None) for m, v in hist_mult.items()}
@@ -351,7 +358,8 @@ def run(conn, code, P):
             vals["psr"] = fair["psr"] * rev * 1e8 / last_sh
         rows.append({"year": fy, "kind": "전망(컨센서스)", "price": None, "values": vals,
                      "median": _median(vals.values()) if len(vals) >= 3 else None,
-                     "gap": None, "ke": ke, "fair": fair, "mult": {}, "notes": ["컨센서스 EPS·BPS·ROE·매출로 계산, DCF 제외"],
+                     "gap": None, "ke": ke, "fair": fair, "mult": {}, "notes": ["컨센서스 EPS·BPS·ROE·매출로 계산, DCF 제외",
+                               f"보정계수 적용: EPS·ROE ×{fe:.2f}, 매출 ×{fr:.2f} ({why_e})"],
                      "caution": True})
 
     # 검증 항목 11~12

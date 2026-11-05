@@ -165,3 +165,20 @@ def fetch(code, as_of=None):
             est.append({"target_year": first, "metric": "target_price", "value": op["target_price"], "unit": "원",
                         "kind": "추정", "basis": basis, "n_estimates": op["n"]})
     return url, est, act
+
+
+HIST_URL = BASE + "ajax/cF5001.aspx?cmp_cd={code}&dt={d}&yymm={yymm}&frq=Y&acc_cd={acc}&fingubun=MAIN&chartType=svg"
+ACC_CD = {"revenue": "121000", "op_income": "121500", "net_income": "122700"}
+
+
+def history(code, fiscal_year, metric="revenue", as_of=None):
+    """그 회계연도 컨센서스가 월별로 어떻게 바뀌었는지(공개 '컨센서스 추이' 자료).
+    반환: {'dates': [...], metric: [...], 'eps': [...]} — 최근에 끝난 회계연도까지만 제공되는 것으로 확인(2026-11)."""
+    d = (as_of or dt.date.today()).strftime("%Y%m%d")
+    txt = _get(HIST_URL.format(code=code, d=d, yymm=f"{fiscal_year}12", acc=ACC_CD[metric]))
+    try:
+        raw = json.loads(txt)
+        c1, c2 = json.loads(raw["chart1"]), json.loads(raw["chart2"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise ConsensusUnavailable(f"컨센서스 추이 응답을 읽지 못함: {txt[:80]!r}") from e
+    return {"dates": c2.get("categories") or [], metric: c2.get("select_item") or [], "eps": c1.get("select_item") or []}

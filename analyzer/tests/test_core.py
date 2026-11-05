@@ -305,6 +305,39 @@ class T(unittest.TestCase):
         self.assertEqual(g["lev_grade"], "위험"); self.assertIsNone(g["nd_ebitda"])   # EBITDA 적자, 계산 불가
         self.assertTrue(grade(100, 50, 10, kind="현재(H1말)")["lev_halfyear"])         # TTM 불가 → 반기 기준 표시
 
+    def test_calibration_factor_and_raw_kept(self):
+        import datetime as dt, unittest.mock as um
+        from analyzer import calibration
+        cal = {"fiscal_year": 2025, "companies": 3, "factors": {
+            "revenue": {"0": {"median": 0.98, "n": 3}, "11": {"median": 0.95, "n": 3}},
+            "op_income": {"0": {"median": 0.90, "n": 3}, "11": {"median": 0.70, "n": 3}},
+            "eps": {"0": {"median": 0.85, "n": 3}, "11": {"median": 0.60, "n": 3}}}}
+        today = dt.date(2026, 11, 5)
+        f, why = calibration.factor("eps", 2026, today=today, cal=cal)      # 올해: 약 2개월 전 → 가장 가까운 0개월
+        self.assertEqual(f, 0.85)
+        f, why = calibration.factor("eps", 2027, today=today, cal=cal)      # 내년: 14개월 → 측정 범위 밖, 11개월 근사
+        self.assertEqual(f, 0.60); self.assertIn("근사", why)
+        # 그래프용 값은 보정, DB 컨센서스 원래 값은 그대로
+        pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
+        db.add_consensus(self.conn, "213500", 2027, "eps", 1000.0, "WiseReport", "2026-11-04")
+        with um.patch.object(calibration, "load", return_value=cal):
+            pl = report.payload(self.conn, "213500", 2026)
+        est = pl["series"]["eps"][2027]["est"]
+        self.assertEqual(est["raw"], 1000.0); self.assertAlmostEqual(est["value"], 1000.0 * est["factor"])
+        self.assertEqual(self.conn.execute("SELECT value FROM consensus WHERE stock_code='213500' AND target_year=2027 "
+                                           "AND metric='eps'").fetchone()[0], 1000.0)
+
+    def test_growth_table(self):
+        pipeline.analyze("213500", 2026, offline=True, conn=self.conn)
+        for y, rev, op, eps in ((2026, 23488, 686, 1073), (2027, 24465.5, 742.5, 851)):
+            for m, v in (("revenue", rev), ("op_income", op), ("eps", eps)):
+                db.add_consensus(self.conn, "213500", y, m, v, "WiseReport", "2026-11-04")
+        g = report.growth_table(self.conn, config.periods(2026))
+        r = next(x for x in g["rows"] if x["code"] == "213500")
+        self.assertEqual(r["years"][2025]["kind"], "실적")
+        self.assertAlmostEqual(r["years"][2025]["raw"]["revenue"], 22900.40442405)
+        self.assertAlmostEqual(r["years"][2026]["raw"]["op_margin"], 686 / 23488 * 100)
+
     def test_fnguide_parser(self):
         page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
         <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>
