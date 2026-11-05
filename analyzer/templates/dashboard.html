@@ -117,6 +117,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="H">H. 재무 안정성</button>
   <button data-s="I">I. 컨센서스 종목 찾기</button>
   <button data-s="J">J. 성장 조건 분류</button>
+  <button data-s="K">K. 컨센서스 추이</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -296,6 +297,25 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div class="tablewrap"><table id="j-table"></table></div>
     <p class="muted" style="margin-top:8px">EPS가 기준 연도에 0 이하이면 성장률을 계산하지 않고 '흑자전환'(다음 해 0 초과) 또는 '적자 지속'으로 표시하며, 흑자전환은 EPS 조건을 충족한 것으로 봅니다. 컨센서스 기준일은 표의 칸에 마우스를 올리면 보입니다.</p>
   </div>
+</section>
+
+<section id="K">
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">컨센서스 추이 · 상향/하향 확인</h2>
+      <div id="k-badge"></div>
+    </div>
+    <p class="muted" id="k-note" style="margin:6px 0"></p>
+    <div id="k-empty"></div>
+    <div class="tablewrap"><table id="k-table"></table></div>
+  </div>
+  <div class="card">
+    <div class="subtabs" id="k-tabs" role="tablist"></div>
+    <div class="muted" id="k-sum"></div>
+    <div class="chartbox" style="height:340px"><canvas id="k-chart"></canvas></div>
+  </div>
+  <div class="card"><h3>목표주가 평균과 주가 (원)</h3><div class="muted" id="k-psum"></div>
+    <div class="chartbox"><canvas id="k-price"></canvas></div></div>
 </section>
 
 <section id="F">
@@ -1122,17 +1142,67 @@ function renderJ(){
     const want = use[k]; const hit = want==null ? null : (k==='eps' && v==null ? tag==='흑자전환' : (v!=null && v >= want));
     const txt = tag || (v==null ? '–' : (v>=0?'+':'') + v.toFixed(1) + (k==='opm' && $('#j-opm-mode').value!=='rel' ? ($('#j-opm-mode').value==='pp'?'%p':'%') : '%'));
     return `<td title="${esc('컨센서스 기준일 ' + (p.e.asof||'–'))}" style="${hit===true?'color:var(--good);font-weight:600':hit===false?'color:var(--text-muted)':''}">${txt}</td>`; };
-  const head = '<tr><th class="l" rowspan="2">기업</th>' + pairs.map(p=>`<th colspan="3">${p[2]} (${p[0]}${p[0]<G.base_year?'A':'E'}→${p[1]}E)</th>`).join('') + '<th class="l" rowspan="2">결과</th></tr><tr>' +
-    pairs.map(()=>'<th>매출</th><th>영업이익률</th><th>EPS</th>').join('') + '</tr>';
+  const ry = [G.base_year, G.base_year+1];
+  const revCell = r => { const x = (r.rev3m||{}); return ry.map(y=>{ const v = x[y]; return v ? `<td style="${kColor(v.pct, v.tag)}" title="영업이익 컨센서스 3개월 수정률(K탭)">${kPct(v.pct, v.tag)}</td>` : '<td>–</td>'; }).join(''); };
+  const head = '<tr><th class="l" rowspan="2">기업</th>' + pairs.map(p=>`<th colspan="3">${p[2]} (${p[0]}${p[0]<G.base_year?'A':'E'}→${p[1]}E)</th>`).join('') + '<th colspan="2" title="영업이익 컨센서스가 3개월 동안 얼마나 올랐는지(+) 내렸는지(−)">영업이익 컨센서스 3개월 수정</th><th class="l" rowspan="2">결과</th></tr><tr>' +
+    pairs.map(()=>'<th>매출</th><th>영업이익률</th><th>EPS</th>').join('') + ry.map(y=>`<th>${y}E</th>`).join('') + '</tr>';
   $('#j-table').innerHTML = head + (shown.length ? shown.map(o=>`<tr><td class="l"><a href="${companyUrl(o.row.code)}">${esc(o.row.name)}</a> <span class="muted">${esc(o.row.code)}</span></td>` +
-      o.per.map(p=>cell(p,'rev')+cell(p,'opm')+cell(p,'eps')).join('') +
+      o.per.map(p=>cell(p,'rev')+cell(p,'opm')+cell(p,'eps')).join('') + revCell(o.row) +
       `<td class="l">${o.pass===true?'<span class="badge b-OK">충족</span>':o.pass===false?'<span class="muted">미충족</span>':'–'}</td></tr>`).join('')
-    : `<tr><td colspan="11" class="l">조건을 충족하는 기업이 없습니다.</td></tr>`);
+    : `<tr><td colspan="13" class="l">조건을 충족하는 기업이 없습니다.</td></tr>`);
 }
 ['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show'].forEach(id=>$(id).addEventListener('input', renderJ));
 document.querySelectorAll('.j-per').forEach(c=>c.addEventListener('change', renderJ));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+// ---- K. 컨센서스 추이 ----
+const KT = D.ctrend || {available:false};
+const K_MET = [['op_income','영업이익','억원'],['eps','EPS','원'],['revenue','매출','억원']];
+let KTAB = 'op_income';
+const kPct = (v, tag) => tag ? tag : (v==null ? '–' : (v>=0?'+':'') + v.toFixed(1) + '%');
+const kColor = (v, tag) => { const up = tag ? ['흑자전환','적자축소'].includes(tag) : v!=null && v >= (KT.flat||1);
+  const dn = tag ? ['적자전환','적자확대'].includes(tag) : v!=null && v <= -(KT.flat||1);
+  return up ? 'color:var(--good);font-weight:600' : dn ? 'color:var(--bad);font-weight:600' : 'color:var(--text-secondary)'; };
+const kDir = d => d==='상향' ? '<span class="badge" style="background:var(--good-bg);color:var(--good)">▲ 상향</span>' :
+  d==='하향' ? '<span class="badge" style="background:var(--bad-bg);color:var(--bad)">▼ 하향</span>' : d==='유지' ? '<span class="muted">유지</span>' : '–';
+function renderK(){
+  if (!KT.available){
+    $('#k-empty').innerHTML = '<div class="warnbox">이 기업은 아직 컨센서스 추이 자료가 없습니다. 「지금 갱신」 또는 기업 다시 분석을 실행하면 WiseReport에서 최근 12개월 월별 값을 받아 DB에 쌓습니다(컨센서스가 없는 기업은 비어 있음).</div>';
+    $('#k-table').innerHTML = ''; $('#k-note').textContent = ''; return; }
+  $('#k-empty').innerHTML = '';
+  $('#k-note').innerHTML = `증권사 추정치 평균(<b>원래 값, 보정계수 미적용</b>)이 달마다 어떻게 바뀌었는지 보여 줍니다. 수정률 = (지금 값 ÷ N개월 전 달 말 값 − 1) × 100. |수정률| < ${KT.flat}%는 '유지', 3개월 수정률로 판단합니다. 기준값이 0 이하이면 %를 계산하지 않고 흑자전환·적자축소·적자확대로 표시합니다. 자료: ${esc(KT.source)}, ${esc(KT.first)} ~ ${esc(KT.last)}. WiseReport는 최근 12개월만 보여 주므로 그보다 오래된 값은 이 프로그램이 매주 받아 DB에 쌓은 것입니다.`;
+  const S = KT.summary||[];
+  const op = S.filter(x=>x.metric==='op_income' && x.dir); const ups = op.filter(x=>x.dir==='상향').length, dns = op.filter(x=>x.dir==='하향').length;
+  $('#k-badge').innerHTML = op.length ? `영업이익 3개월: ${ups?`<span style="color:var(--good)">상향 ${ups}개 연도</span>`:''} ${dns?`<span style="color:var(--bad)">하향 ${dns}개 연도</span>`:''} ${!ups&&!dns?'변화 작음':''}` : '';
+  const name = Object.fromEntries(K_MET.map(m=>[m[0], m]));
+  $('#k-table').innerHTML = '<tr><th class="l">대상 연도</th><th class="l">지표</th><th>지금 값</th><th>1개월</th><th>3개월</th><th>6개월</th><th>12개월</th><th title="최근 6번의 월간 변화 중 1% 이상 오른 횟수 / 내린 횟수">최근 6개월 상향·하향 횟수</th><th class="l">3개월 판단</th></tr>' +
+    S.map(x=>{ const m = name[x.metric]; return `<tr><td class="l">${x.year}E</td><td class="l">${m[1]}</td><td title="기준일 ${esc(x.as_of)}">${fmt(x.value, m[2])} <span class="muted">${m[2]}</span></td>` +
+      [1,3,6,12].map(k=>`<td style="${kColor(x.ch[k], x.tag[k])}">${kPct(x.ch[k], x.tag[k])}</td>`).join('') +
+      `<td><span style="color:var(--good)">▲${x.ups}</span> / <span style="color:var(--bad)">▼${x.downs}</span></td><td class="l">${kDir(x.dir)}</td></tr>`; }).join('');
+  $('#k-tabs').innerHTML = K_MET.map(m=>`<button data-k="${m[0]}" class="${m[0]===KTAB?'on':''}">${m[1]}</button>`).join('');
+  document.querySelectorAll('#k-tabs button').forEach(b=>b.onclick=()=>{ KTAB = b.dataset.k; renderK(); });
+  const months = [...new Set(Object.entries(KT.series).flatMap(([k,v])=>v.map(p=>p[0])))].sort();
+  const m = name[KTAB], cols = ['--s1','--s2','--s3'];
+  const ds = (KT.years||[]).map((y,i)=>{ const map = Object.fromEntries((KT.series[`${y}:${KTAB}`]||[]).map(p=>[p[0], p]));
+    return {label:`${y}E ${m[1]}`, data: months.map(mm=> map[mm] ? map[mm][2] : null), _d: months.map(mm=> map[mm] ? map[mm][1] : null),
+      borderColor:css(cols[i]), backgroundColor:css(cols[i]), borderWidth:2.25, pointRadius:3.5, tension:0}; });
+  const o = baseOpts(); o.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}};
+  o.scales.y.ticks.callback = v => fmt(v, m[2]);
+  o.plugins.tooltip.callbacks = {label: ctx => ctx.parsed.y==null ? null : `${ctx.dataset.label}: ${fmt(ctx.parsed.y, m[2])}${m[2]} (${ctx.dataset._d[ctx.dataIndex]})`};
+  if (charts['k-chart']) charts['k-chart'].destroy(); charts['k-chart'] = mkChart($('#k-chart'), {type:'line', data:{labels:months, datasets:ds}, options:o});
+  const cur = S.find(x=>x.metric===KTAB && x.year===(KT.years||[])[0]);
+  $('#k-sum').innerHTML = cur ? `${cur.year}E ${m[1]} 컨센서스: 지금 ${fmt(cur.value,m[2])}${m[2]}, 3개월 ${kPct(cur.ch[3],cur.tag[3])}, 12개월 ${kPct(cur.ch[12],cur.tag[12])}. 선이 오르면 증권사들이 추정치를 올린 것(상향), 내리면 내린 것(하향)입니다.` : '';
+  const tp = Object.fromEntries((KT.series.target_price||[]).map(p=>[p[0],p[2]])), cp = Object.fromEntries((KT.series.close_price||[]).map(p=>[p[0],p[2]]));
+  const pm = months.filter(x=>tp[x]!=null || cp[x]!=null);
+  const po = baseOpts(); po.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}}; po.scales.y.ticks.callback = v => fmt(v,'원');
+  if (charts['k-price']) charts['k-price'].destroy();
+  charts['k-price'] = mkChart($('#k-price'), {type:'line', data:{labels:pm, datasets:[
+    {label:'목표주가 평균', data:pm.map(x=>tp[x]??null), borderColor:css('--s4'), backgroundColor:css('--s4'), borderWidth:2.25, pointRadius:3.5, tension:0},
+    {label:'주가(그 달 마지막 거래일 종가)', data:pm.map(x=>cp[x]??null), borderColor:css('--text-secondary'), backgroundColor:css('--text-secondary'), borderWidth:1.5, borderDash:[5,3], pointRadius:2, tension:0}]}, options:po});
+  const lt = pm.length ? pm[pm.length-1] : null;
+  $('#k-psum').innerHTML = lt && tp[lt] && cp[lt] ? `${lt} 기준 목표주가 평균 ${fmt(tp[lt],'원')}원, 주가 ${fmt(cp[lt],'원')}원 → 목표주가가 주가보다 ${((tp[lt]/cp[lt]-1)*100).toFixed(1)}% ${tp[lt]>=cp[lt]?'높음':'낮음'}. 목표주가도 증권사 의견의 평균이므로 실제 주가를 보장하지 않습니다.` : '';
+}
+
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));

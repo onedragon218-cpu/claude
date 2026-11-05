@@ -182,3 +182,38 @@ def history(code, fiscal_year, metric="revenue", as_of=None):
     except (ValueError, KeyError, TypeError) as e:
         raise ConsensusUnavailable(f"컨센서스 추이 응답을 읽지 못함: {txt[:80]!r}") from e
     return {"dates": c2.get("categories") or [], metric: c2.get("select_item") or [], "eps": c1.get("select_item") or []}
+
+
+def _iso(d):
+    return str(d).replace("/", "-")
+
+
+def history_rows(code, fiscal_years, metrics=("revenue", "op_income"), as_of=None):
+    """여러 회계연도의 컨센서스 월별 추이 → (출처 URL 목록, [(target_year, metric, as_of, value, unit)]).
+    요청 1번에 지정 지표·EPS·목표주가·종가가 함께 온다. 목표주가·종가는 회계연도와 무관하므로 target_year=0으로 저장.
+    WiseReport는 날짜 인자와 상관없이 최근 12개월만 준다(2026-11-05 확인) → 더 긴 추이는 DB에 쌓아서 만든다."""
+    d = (as_of or dt.date.today()).strftime("%Y%m%d")
+    rows, urls, seen_px = [], [], False
+    for fy in fiscal_years:
+        for m in metrics:
+            url = HIST_URL.format(code=code, d=d, yymm=f"{fy}12", acc=ACC_CD[m])
+            txt = _get(url)
+            try:
+                raw = json.loads(txt)
+                c1, c2 = json.loads(raw["chart1"]), json.loads(raw["chart2"])
+            except (ValueError, KeyError, TypeError) as e:
+                raise ConsensusUnavailable(f"컨센서스 추이 응답을 읽지 못함: {txt[:80]!r}") from e
+            urls.append(url)
+            dates = [_iso(x) for x in (c2.get("categories") or [])]
+            for i, day in enumerate(dates):
+                def at(c, k):
+                    a = c.get(k) or []
+                    return _num(a[i]) if i < len(a) else None
+                rows.append((fy, m, day, at(c2, "select_item"), "억원"))
+                if m == metrics[0]:
+                    rows.append((fy, "eps", day, at(c1, "select_item"), "원"))
+                if not seen_px:
+                    rows.append((0, "target_price", day, at(c2, "target_price"), "원"))
+                    rows.append((0, "close_price", day, at(c2, "close_price"), "원"))
+            seen_px = True
+    return urls, rows

@@ -38,6 +38,7 @@ TTL_DAYS = {
     "price_yearend": 36500,    # 지난 연도 말 종가는 바뀌지 않음
     "price_asof": 1,           # 분석 기준일 주가
     "consensus": 7,            # 컨센서스 스냅숏
+    "consensus_hist": 7,       # 컨센서스 월별 추이(WiseReport는 월말 기준으로 갱신)
 }
 
 

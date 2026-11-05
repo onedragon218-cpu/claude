@@ -103,6 +103,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "last_run": last_run,
         "growth": growth_table(conn, P),
         "calibration": calibration_info(P),
+        "ctrend": consensus_trend(conn, code, P),
         "screen": __import__("analyzer.screener", fromlist=["results"]).results(conn),
         "universe": [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()],
         "stability": stability(conn, code, P, vres["rows"], comp),
@@ -339,6 +340,71 @@ def calibration_info(P):
     return out
 
 
+def _monthly(points):
+    """[(as_of, value)] → 달마다 마지막 관측값 [(YYYY-MM, as_of, value)] (값 없는 달은 뺀다)"""
+    by = {}
+    for d, v in points:
+        if v is not None:
+            by[d[:7]] = (d, v)
+    return [(m, *by[m]) for m in sorted(by)]
+
+
+def _revision(base, new):
+    """컨센서스 수정률(%)과 부호 바뀜 표시. base가 0 이하면 %를 계산하지 않는다."""
+    if base is None or new is None:
+        return None, None
+    if base > 0:
+        return (new / base - 1) * 100, ("적자전환" if new <= 0 else None)
+    if new > 0:
+        return None, "흑자전환"
+    if base == 0:
+        return None, None
+    return None, ("적자축소" if new > base else "적자확대" if new < base else "유지")
+
+
+REV_FLAT = 1.0   # |수정률| < 1% 이면 '유지'
+
+
+def consensus_trend(conn, code, P):
+    """컨센서스 월별 추이와 1·3·6·12개월 수정률(상향·하향). 값은 증권사 원래 값(보정계수 미적용)."""
+    rows = db.consensus_history(conn, code)
+    if not rows:
+        return {"available": False}
+    years = [P["current"]] + list(P["future"])
+    ser = {}
+    for r in rows:
+        ser.setdefault((r["target_year"], r["metric"]), []).append((r["as_of"], r["value"]))
+    out = {"available": True, "years": years, "series": {}, "summary": [], "flat": REV_FLAT,
+           "first": min(r["as_of"] for r in rows), "last": max(r["as_of"] for r in rows),
+           "source": "WiseReport 컨센서스 추이(navercomp.wisereport.co.kr, 월말 기준)"}
+    for k in ("target_price", "close_price"):
+        out["series"][k] = [[m, d, v] for m, d, v in _monthly(ser.get((0, k), []))]
+    for y in years:
+        for metric in ("revenue", "op_income", "eps"):
+            mon = _monthly(ser.get((y, metric), []))
+            out["series"][f"{y}:{metric}"] = [[m, d, v] for m, d, v in mon]
+            if not mon:
+                continue
+            last_m, last_d, last_v = mon[-1]
+            item = {"year": y, "metric": metric, "value": last_v, "as_of": last_d, "ch": {}, "tag": {}}
+            idx = {m: v for m, _, v in mon}
+            ly, lm = int(last_m[:4]), int(last_m[5:])
+            for k in (1, 3, 6, 12):
+                t = (ly * 12 + lm - 1) - k
+                key = f"{t // 12:04d}-{t % 12 + 1:02d}"
+                pct, tag = _revision(idx.get(key), last_v)
+                item["ch"][k], item["tag"][k] = pct, tag
+            moves = [b[2] - a[2] for a, b in zip(mon[-7:], mon[-6:])]     # 최근 6번의 월간 변화
+            base = [a[2] for a in mon[-7:-1]]
+            item["ups"] = sum(1 for d, b in zip(moves, base) if b and d / abs(b) * 100 >= REV_FLAT)
+            item["downs"] = sum(1 for d, b in zip(moves, base) if b and d / abs(b) * 100 <= -REV_FLAT)
+            c3, t3 = item["ch"][3], item["tag"][3]
+            item["dir"] = ("상향" if t3 in ("흑자전환", "적자축소") else "하향" if t3 in ("적자전환", "적자확대") else
+                           None if c3 is None else "상향" if c3 >= REV_FLAT else "하향" if c3 <= -REV_FLAT else "유지")
+            out["summary"].append(item)
+    return out
+
+
 def growth_table(conn, P):
     """DB에 자료가 있는 기업의 작년 실적·올해~내후년 컨센서스(원래 값과 보정 값)"""
     from . import calibration, db as _db
@@ -351,7 +417,10 @@ def growth_table(conn, P):
         code = c["stock_code"]
         fv = lambda y, k: (lambda r: None if r is None else r["value"])(_db.current_fact(conn, code, y, k))
         cons = {(r["target_year"], r["metric"]): dict(r) for r in _db.latest_consensus(conn, code)}
-        row = {"code": code, "name": c["name"], "years": {}}
+        row = {"code": code, "name": c["name"], "years": {}, "rev3m": {}}
+        for it in consensus_trend(conn, code, P).get("summary", []):    # 영업이익 컨센서스 3개월 수정률
+            if it["metric"] == "op_income" and it["year"] in (cy, cy + 1):
+                row["rev3m"][it["year"]] = {"pct": it["ch"][3], "tag": it["tag"][3], "dir": it["dir"]}
         for y in years:
             if y < cy:   # 작년: 실적
                 rev = fv(y, "acc_revenue")

@@ -389,6 +389,21 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
         db.log_fetch(conn, "consensus", code, code, got > 0, got, "; ".join(errs) or None)
         if not got:
             stats.notes.append("컨센서스 미확보(다음 실행 때 다시 시도): " + " / ".join(errs))
+
+    # 7) 컨센서스 추이(상향·하향 확인용): 올해~내후년 매출·영업이익(+EPS·목표주가) 월별 값. 7일에 한 번.
+    if not db.fetched_recently(conn, "consensus_hist", code, config.TTL_DAYS["consensus_hist"], ok_only=True):
+        try:
+            years = [P["current"]] + list(P["future"])
+            for _ in range(len(years) * 2):
+                stats.req("WiseReport")
+            urls, rows = wisereport.history_rows(code, years)
+            n = db.add_consensus_history(conn, code, rows, urls[0] if urls else None)
+            ok = any(r[3] is not None and r[0] for r in rows)
+            db.log_fetch(conn, "consensus_hist", code, code, ok, n, None if ok else "추이 자료 없음")
+            stats.notes.append(f"컨센서스 추이: 새로 저장 {n}건(대상 {years})")
+        except wisereport.ConsensusUnavailable as e:
+            db.log_fetch(conn, "consensus_hist", code, code, False, 0, str(e))
+            stats.notes.append(f"컨센서스 추이 미확보(다음 실행 때 다시 시도): {e}")
     return need
 
 

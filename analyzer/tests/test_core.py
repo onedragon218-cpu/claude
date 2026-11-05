@@ -371,6 +371,30 @@ class T(unittest.TestCase):
         self.assertEqual({(o["target_year"], o["metric"], o["value"]) for o in out},
                          {(2026, "revenue", 23500.0), (2027, "revenue", 24100.0), (2026, "eps", 900.0), (2027, "eps", 1100.0)})
 
+    def test_consensus_trend_revisions(self):
+        P = config.periods(2026)
+        rows = [(2026, "op_income", "2026-05-29", 100.0, "억원"), (2026, "op_income", "2026-08-31", 120.0, "억원"),
+                (2026, "op_income", "2026-09-30", 118.0, "억원"), (2026, "op_income", "2026-10-30", 110.0, "억원"),
+                (2026, "op_income", "2026-11-04", 90.0, "억원"),          # 같은 달 안에서는 마지막 값만 쓴다
+                (2026, "op_income", "2026-11-03", 95.0, "억원"),
+                (2027, "eps", "2026-08-31", -50.0, "원"), (2027, "eps", "2026-11-04", 30.0, "원"),
+                (0, "target_price", "2026-11-04", 5000.0, "원")]
+        db.add_consensus_history(self.conn, "000001", rows)
+        self.assertEqual(db.add_consensus_history(self.conn, "000001", rows), 0)   # 다시 넣어도 쌓이지 않음
+        t = report.consensus_trend(self.conn, "000001", P)
+        op = next(x for x in t["summary"] if x["year"] == 2026 and x["metric"] == "op_income")
+        self.assertEqual(op["value"], 90.0)
+        self.assertAlmostEqual(op["ch"][1], (90 / 110 - 1) * 100)
+        self.assertAlmostEqual(op["ch"][3], (90 / 120 - 1) * 100)
+        self.assertAlmostEqual(op["ch"][6], (90 / 100 - 1) * 100)
+        self.assertIsNone(op["ch"][12])
+        self.assertEqual(op["dir"], "하향")
+        eps = next(x for x in t["summary"] if x["year"] == 2027 and x["metric"] == "eps")
+        self.assertIsNone(eps["ch"][3])
+        self.assertEqual((eps["tag"][3], eps["dir"]), ("흑자전환", "상향"))
+        self.assertEqual(report._revision(-50, -80), (None, "적자확대"))
+        self.assertFalse(report.consensus_trend(self.conn, "999999", P)["available"])
+
 
 if __name__ == "__main__":
     unittest.main()

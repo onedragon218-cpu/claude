@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS consensus (
   provider TEXT NOT NULL, basis TEXT, as_of TEXT NOT NULL, collected_at TEXT, source_ref TEXT,
   UNIQUE(stock_code, target_year, metric, broker, provider, as_of)
 );
+-- 컨센서스 월별 추이(WiseReport '컨센서스 추이'). 시점별 값을 쌓기만 한다(INSERT OR IGNORE).
+CREATE TABLE IF NOT EXISTS consensus_history (
+  stock_code TEXT NOT NULL, target_year INTEGER NOT NULL, metric TEXT NOT NULL,
+  as_of TEXT NOT NULL, value REAL, unit TEXT, provider TEXT NOT NULL DEFAULT 'WiseReport',
+  collected_at TEXT, source_ref TEXT,
+  UNIQUE(stock_code, target_year, metric, as_of, provider)
+);
 CREATE TABLE IF NOT EXISTS fetch_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source TEXT, key TEXT, stock_code TEXT, fetched_at TEXT, ok INTEGER, n_items INTEGER, note TEXT
@@ -196,6 +203,24 @@ def latest_consensus(conn, code):
         if k not in best or key > best[k][0]:
             best[k] = (key, r)
     return [v[1] for v in best.values()]
+
+
+def add_consensus_history(conn, code, rows, source_ref=None):
+    """rows: [(target_year, metric, as_of 'YYYY-MM-DD', value, unit)] → 새로 저장한 건수"""
+    n = 0
+    for y, m, d, v, u in rows:
+        if v is None:
+            continue
+        cur = conn.execute("INSERT OR IGNORE INTO consensus_history(stock_code, target_year, metric, as_of, value, unit, "
+                           "collected_at, source_ref) VALUES (?,?,?,?,?,?,?,?)", (code, y, m, d, v, u, now(), source_ref))
+        n += cur.rowcount
+    conn.commit()
+    return n
+
+
+def consensus_history(conn, code):
+    return [dict(r) for r in conn.execute("SELECT target_year, metric, as_of, value, unit FROM consensus_history "
+                                          "WHERE stock_code=? ORDER BY target_year, metric, as_of", (code,))]
 
 
 def log_fetch(conn, source, key, code, ok, n_items=0, note=None):
