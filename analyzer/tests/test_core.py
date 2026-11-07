@@ -449,6 +449,30 @@ class T(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertEqual(items[0], {"published": "2026-09-22", "title": "가나제지 증설", "link": "https://news.google.com/x", "press": "한국경제"})
 
+    def test_good6_keys_and_marks(self):
+        from analyzer import goodco
+        pipeline.import_seed(self.conn, "213500", 2026)
+        g = goodco.good6(self.conn, "213500", config.periods(2026))
+        self.assertEqual(set(g["rows"]), {"one", "two", "three", "four", "five", "six"})
+        for r in g["rows"].values():
+            m = r["mark"]
+            self.assertTrue(m in ("✓", "△", "✗", "조사") or m.startswith("판정 못 함") or m == "✓(컨센 기준)", m)
+        self.assertEqual(g["rows"]["five"]["mark"], "조사")        # ⑤는 코드가 채우지 않음
+
+    def test_good6_rule_three(self):
+        from analyzer import goodco
+        self.assertEqual(goodco.rule_three([5, 8, 7], [], 20), "△")
+        self.assertEqual(goodco.rule_three([5, 7, 8], [], 20), "✓")
+        self.assertEqual(goodco.rule_three([8, 7, 5], [], 20), "✗")
+        self.assertEqual(goodco.rule_three([8, 7, 5], [25], 20), "✓")   # 컨센 추정이 정점을 넘으면 ✓
+
+    def test_good6_rule_six_single_source(self):
+        from analyzer import goodco
+        self.assertEqual(goodco.rule_six(1000, 0, 500, 600, 1)[0], "판정 못 함(원천 대기)")
+        self.assertEqual(goodco.rule_six(1000, 0, 500, 600, 5)[0], "✓(컨센 기준)")    # 1000/7.8=128 < 415
+        self.assertEqual(goodco.rule_six(10000, 0, 500, 600, 5)[0], "✗")
+        self.assertTrue(goodco.rule_six(1000, 0, 500, 600, None)[1].endswith("원천 수 미확인"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -119,6 +119,8 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="J">J. 성장 조건 분류</button>
   <button data-s="K">K. 컨센서스 추이</button>
   <button data-s="L">L. 사업부 분석</button>
+  <button data-s="M">M. 좋은 기업 6조건</button>
+  <button data-s="N">N. 숫자 모양</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -346,6 +348,48 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <p class="muted" id="l-peernote"></p>
       <div id="l-peers"></div>
     </div>
+  </div>
+</section>
+
+<section id="M">
+  <div class="card">
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
+    <div class="row" style="justify-content:space-between;align-items:flex-end">
+      <h2 style="margin:0">좋은 기업 6조건 <span class="muted" style="font-size:14px;font-weight:400">사용자 기준 — 좋은 기업이면서 투자하기 좋은 기업(엔진 p236)</span></h2>
+      <div style="font-size:32px;font-weight:700" id="m-score"></div>
+    </div>
+    <p class="muted" id="m-note" style="margin:6px 0"></p>
+    <div class="tablewrap"><table id="m-table"></table></div>
+    <p style="margin:12px 0 4px;font-weight:700">좋은 기업이어도 주가가 많이 오르면 '투자하기 좋은 기업'이 아니다.</p>
+    <p style="margin:0;font-weight:700">표시 칸 □ — 매수 조건 아님(생존 게이트·판 규칙이 먼저)</p>
+  </div>
+  <div class="card">
+    <h3>⑤ 사람이 적는 칸 · ④ 예외 메모</h3>
+    <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <label>⑤ 판정<select id="m-five"><option>조사</option><option>✓</option><option>△</option><option>✗</option></select></label>
+      <label style="flex:1 1 320px">⑤ 근거(한두 줄)<input id="m-fivetext" style="width:100%"></label>
+      <label style="flex:1 1 320px">④ 메모(성장을 위한 통제 가능한 증가 등 — 판정은 바꾸지 않음)<input id="m-fournote" style="width:100%"></label>
+      <button id="m-save" class="primary">저장</button>
+    </div>
+    <p class="muted" id="m-msg"></p>
+  </div>
+</section>
+
+<section id="N">
+  <div class="card">
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
+    <h2 style="margin:0">숫자 모양 <span class="muted" style="font-size:14px;font-weight:400">질문 2 · 숫자는 어떤 모양인가 (억 원)</span></h2>
+    <p class="muted" id="n-note" style="margin:6px 0"></p>
+    <h3>매출(막대, 억 원)과 영업이익률(선, %, 오른쪽 축)</h3>
+    <div class="chartbox" style="height:300px"><canvas id="n-rev"></canvas></div>
+    <h3>영업이익(막대, 억 원) — 연한 막대 = 컨센서스 그대로, 점선 = ×0.83 보정</h3>
+    <div class="chartbox" style="height:260px"><canvas id="n-op"></canvas></div>
+    <h3>분기 매출·영업이익(억 원, 최근 12분기)</h3>
+    <div id="n-qnote"></div>
+    <div class="chartbox" id="n-qbox" style="height:240px"><canvas id="n-q"></canvas></div>
+    <h3>해마다 한 줄</h3>
+    <div class="tablewrap"><table id="n-table"></table></div>
+    <p class="muted" id="n-memo"></p>
   </div>
 </section>
 
@@ -1305,7 +1349,82 @@ $('#l-kwsave').onclick = async () => {
   } catch(e){ $('#l-kwmsg').textContent = '저장 실패: ' + e.message; }
 };
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+// ---- M. 좋은 기업 6조건 ----
+const G6 = D.good6 || {error:'자료 없음'};
+const markHtml = m => { const c = String(m||''); const col = c.startsWith('✓') ? 'var(--good)' : c.startsWith('✗') ? 'var(--text-primary)' : 'var(--text-secondary)';
+  return `<span style="color:${col};font-weight:600;white-space:nowrap">${esc(c)}</span>`; };
+function renderM(){
+  if (G6.error){ $('#m-table').innerHTML = `<tr><td class="l">계산하지 못했습니다: ${esc(G6.error)}</td></tr>`; return; }
+  $('#m-score').textContent = `${G6.score}/6`;
+  $('#m-note').innerHTML = `✓로 시작하는 판정만 셉니다(✓(컨센 기준) 포함). 컨센서스 기준일 ${esc(G6.cons_asof||'–')} · ${esc(G6.factor_note)}. 판정 기호: ✓ · △ · ✗ · 조사 · 판정 못 함(이유).${G6.engine?'':' '+esc(G6.engine_why||'')}`;
+  const keys = ['one','two','three','four','five','six'];
+  $('#m-table').innerHTML = '<tr><th class="l">조건</th><th class="l">판정</th><th class="l">숫자</th></tr>' +
+    keys.map(k=>{ const r = G6.rows[k]||{}; return `<tr><td class="l" style="white-space:normal;min-width:220px">${esc(G6.names[k])}</td><td class="l">${markHtml(r.mark)}</td><td class="l" style="white-space:normal">${esc(r.text)}</td></tr>`; }).join('');
+  const man = G6.manual||{}; const five = man.five||['조사',''];
+  $('#m-five').value = five[0]; $('#m-fivetext').value = five[1]||''; $('#m-fournote').value = man.four_note||'';
+  ['#m-five','#m-fivetext','#m-fournote','#m-save'].forEach(id=>$(id).disabled = !SERVED);
+  $('#m-msg').textContent = SERVED ? (man.updated ? `마지막 저장 ${man.updated}` : '⑤는 코드가 채우지 않습니다. 사람이 판정하고 근거를 적어 저장하세요.') : '재무분석 열기.bat 으로 연 화면에서 저장할 수 있습니다.';
+}
+$('#m-save').onclick = async () => {
+  try { const r = await fetch('/api/good6/manual', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({code: D.company.code, mark: $('#m-five').value, text: $('#m-fivetext').value, four_note: $('#m-fournote').value})});
+    if (!r.ok) throw new Error((await r.json()).error || r.status); $('#m-msg').textContent = '저장했습니다. 새로 고치는 중…'; setTimeout(()=>location.reload(), 600);
+  } catch(e){ $('#m-msg').textContent = '저장 실패: ' + e.message; }
+};
+
+// ---- N. 숫자 모양 ----
+const SH = D.shape || {error:'자료 없음'};
+const valLabelPlugin = {id:'valLabels', afterDatasetsDraw(chart){ const {ctx} = chart;
+  chart.data.datasets.forEach((ds, di)=>{ if (!ds._labels) return; const meta = chart.getDatasetMeta(di); if (meta.hidden) return;
+    meta.data.forEach((pt, i)=>{ if (!ds._labels[i]) return; ctx.save(); ctx.fillStyle = css('--text-secondary'); ctx.font = '600 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(ds._labels[i], pt.x, pt.y - 8); ctx.restore(); }); }); }};
+function renderN(){
+  if (SH.error){ $('#n-note').textContent = '계산하지 못했습니다: ' + SH.error; return; }
+  const rows = SH.rows||[], cons = (SH.cons||[]).filter(c=>!c.none);
+  const labels = rows.map(r=>String(r.year)).concat(cons.map(c=>`${c.year}E`));
+  const nP = rows.length, from = cons.length ? nP : null;
+  $('#n-note').innerHTML = `과거 ${rows.length}년 실적(DART) + 컨센서스 ${cons.length}개 연도(원래 값, 기준일 ${esc(SH.cons_asof||'–')}). 영업이익 점선은 엔진 규칙 고정 ×${SH.factor}(화면 위 '컨센서스 보정 적용'과 무관).`;
+  const revBg = labels.map((l,i)=> i<nP ? css('--s1') : rgba('--s1', 0.45));
+  const marg = rows.map(r=>r.margin).concat(cons.map(c=>c.margin));
+  const act = rows.map(r=>r.margin).filter(v=>v!=null); const mx = Math.max(...act), mn = Math.min(...act);
+  const mLab = marg.map((v,i)=> v==null ? '' : (i>=nP || v===mx || v===mn) ? v.toFixed(1)+'%' : '');
+  const seg = {borderDash: ctx => ctx.p1DataIndex >= nP ? [6,4] : undefined};
+  const o1 = baseOpts(); o1.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}};
+  o1.scales.y.ticks.callback = v => fmt(v,'억원'); o1.scales.y1 = {position:'right', grid:{display:false}, ticks:{color:css('--text-secondary'), callback:v=>v+'%'}};
+  o1.plugins.estZone = {from, label:'전망(컨센서스)'};
+  if (charts['n-rev']) charts['n-rev'].destroy();
+  charts['n-rev'] = new Chart($('#n-rev'), {data:{labels, datasets:[
+    {type:'bar', label:'매출(억 원)', data:rows.map(r=>r.revenue).concat(cons.map(c=>c.revenue)), backgroundColor:revBg, yAxisID:'y', order:2},
+    {type:'line', label:'영업이익률(%)', data:marg, borderColor:css('--s2'), backgroundColor:css('--s2'), pointRadius:3, borderWidth:2, tension:0, segment:seg, yAxisID:'y1', order:1, _labels:mLab, spanGaps:true}]},
+    options:o1, plugins:[estZonePlugin, valLabelPlugin]});
+  const o2 = baseOpts(); o2.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}}; o2.scales.y.ticks.callback = v => fmt(v,'억원');
+  o2.plugins.estZone = {from, label:'전망(컨센서스)'};
+  if (charts['n-op']) charts['n-op'].destroy();
+  charts['n-op'] = new Chart($('#n-op'), {data:{labels, datasets:[
+    {type:'bar', label:'영업이익(억 원)', data:rows.map(r=>r.op).concat(cons.map(c=>c.op)), backgroundColor:labels.map((l,i)=> i<nP ? css('--s3') : rgba('--s3',0.45)), order:2},
+    {type:'line', label:`×${SH.factor} 보정`, data:rows.map(()=>null).concat(cons.map(c=>c.op_adj)), borderColor:css('--text-primary'), backgroundColor:css('--text-primary'), borderDash:[5,4], pointRadius:4, borderWidth:2, order:1}]},
+    options:o2, plugins:[estZonePlugin]});
+  const Q = SH.quarters||[];
+  if (charts['n-q']) charts['n-q'].destroy();
+  if (SH.quarters_note){ $('#n-qnote').innerHTML = `<div class="warnbox">${esc(SH.quarters_note)}. 빠진 분기는 만들어 넣지 않습니다(분기 = 누적값의 차이: 2Q = 반기 − 1Q, 3Q = 3분기누적 − 반기, 4Q = 연간 − 3분기누적).</div>`; $('#n-qbox').style.display = 'none'; }
+  else { $('#n-qnote').innerHTML = ''; $('#n-qbox').style.display = '';
+    const o3 = baseOpts(); o3.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}}; o3.scales.y.ticks.callback = v => fmt(v,'억원');
+    charts['n-q'] = new Chart($('#n-q'), {type:'line', data:{labels:Q.map(q=>q.label), datasets:[
+      {label:'매출', data:Q.map(q=>q.revenue), borderColor:css('--s1'), backgroundColor:css('--s1'), tension:0},
+      {label:'영업이익', data:Q.map(q=>q.op), borderColor:css('--s3'), backgroundColor:css('--s3'), tension:0}]}, options:o3}); }
+  const n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
+  const pc = (v,d=1) => v==null ? '–' : v.toFixed(d)+'%';
+  let h = '<tr><th class="l">해</th><th>매출</th><th>영업이익</th><th>이익률</th><th>영업현금</th><th>연말 PBR</th><th>ROE%</th></tr>';
+  h += rows.map(r=>`<tr><td class="l">${r.year}</td><td>${n0(r.revenue)}</td><td>${n0(r.op)}</td><td>${pc(r.margin)}</td><td>${n0(r.ocf)}</td><td title="${r.pbr_unverified?'시가총액이 역산 주식수 기준(UNVERIFIED)':''}">${r.pbr==null?'–':r.pbr.toFixed(2)}${r.pbr_unverified&&r.pbr!=null?' <span class="badge b-UNVERIFIED">U</span>':''}</td><td>${r.roe==null?'–':r.roe.toFixed(1)}</td></tr>`).join('');
+  const p = SH.partial;
+  if (p) h += `<tr style="background:var(--info-bg)"><td class="l">${esc(p.label)}</td><td>${n0(p.revenue)}</td><td>${p.op==null?'–':p.op.toFixed(1)}</td><td>${pc(p.margin)}</td><td>${n0(p.ocf)}</td><td colspan="2" class="l">순차입 ${n0(p.net_debt)}억(−는 순현금, ${esc(p.net_debt_when)})</td></tr>`;
+  h += (SH.cons||[]).map(c=> c.none ? `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td colspan="6" class="l">컨센서스 없음</td></tr>`
+    : `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td>${n0(c.revenue)}</td><td>${n0(c.op)}</td><td>${pc(c.margin)}</td><td colspan="3" class="l">3개월 전 대비 영업이익 ${c.rev3m_tag ? esc(c.rev3m_tag) : c.rev3m==null ? '–' : (c.rev3m>=0?'+':'')+c.rev3m.toFixed(1)+'%'}</td></tr>`).join('');
+  $('#n-table').innerHTML = h;
+  $('#n-memo').textContent = SH.memo || '';
+}
+
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));

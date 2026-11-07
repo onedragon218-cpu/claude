@@ -27,6 +27,14 @@ def _corr(metric, year, raw):
     return {"value": raw * f, "raw": raw, "factor": f, "why": why}
 
 
+def _safe(fn):
+    """한 칸의 계산이 실패해도 다른 화면은 살린다."""
+    try:
+        return fn()
+    except Exception as e:      # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
 def payload(conn, code, base_year=None, last_run=None):
     P = config.periods(base_year)
     from . import valuation
@@ -104,6 +112,8 @@ def payload(conn, code, base_year=None, last_run=None):
         "growth": growth_table(conn, P),
         "calibration": calibration_info(P),
         "ctrend": consensus_trend(conn, code, P),
+        "good6": _safe(lambda: __import__("analyzer.goodco", fromlist=["good6"]).good6(conn, code, P)),
+        "shape": _safe(lambda: __import__("analyzer.goodco", fromlist=["shape"]).shape(conn, code, P)),
         "biz": __import__("analyzer.segments", fromlist=["payload"]).payload(conn, code, comp["name"] if comp else code, P),
         "screen": __import__("analyzer.screener", fromlist=["results"]).results(conn),
         "universe": [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()],
