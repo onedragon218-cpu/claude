@@ -473,6 +473,68 @@ class T(unittest.TestCase):
         self.assertEqual(goodco.rule_six(10000, 0, 500, 600, 5)[0], "✗")
         self.assertTrue(goodco.rule_six(1000, 0, 500, 600, None)[1].endswith("원천 수 미확인"))
 
+    def test_value5_face_values_from_seed(self):
+        from analyzer import value5
+        fb = value5.face_by_year("213500")
+        r = fb[2025]
+        self.assertAlmostEqual(r["recv"], 335510484604)
+        self.assertAlmostEqual(r["inv"], 372909723854)
+        self.assertAlmostEqual(r["pay"], 152423586979)
+        self.assertAlmostEqual(r["nci"], 421310695)
+        self.assertAlmostEqual(r["debt_cur"], 517645292384)     # 단기차입금및사채
+        self.assertAlmostEqual(r["div"], 11889153400)
+
+    def test_value5_xbrl_notes(self):
+        from analyzer import value5
+        ctx = lambda cid, dims, inst: (f'<xbrli:context id="{cid}"><xbrli:entity><xbrli:segment>' +
+            "".join(f'<xbrldi:explicitMember dimension="{a}">{m}</xbrldi:explicitMember>' for a, m in dims) +
+            f'</xbrli:segment></xbrli:entity><xbrli:period>{inst}</xbrli:period></xbrli:context>')
+        I = "<xbrli:instant>2025-12-31</xbrli:instant>"
+        D = "<xbrli:startDate>2025-01-01</xbrli:startDate><xbrli:endDate>2025-12-31</xbrli:endDate>"
+        C = ("ifrs-full:ConsolidatedAndSeparateFinancialStatementsAxis", "ifrs-full:ConsolidatedMember")
+        xml = "".join([
+            ctx("c1", [C, ("ifrs-full:ClassesOfPropertyPlantAndEquipmentAxis", "ifrs-full:LandMember")], I),
+            ctx("c2", [C, ("ifrs-full:ClassesOfPropertyPlantAndEquipmentAxis", "ifrs-full:BuildingsMember")], I),
+            ctx("c3", [C, ("ifrs-full:ClassesOfPropertyPlantAndEquipmentAxis", "ifrs-full:MachineryMember")], I),
+            ctx("c4", [C, ("ifrs-full:MaturityAxis", "ifrs-full:LaterThanOneYearAndNotLaterThanTwoYearsMember")], I),
+            ctx("c5", [C, ("ifrs-full:MaturityAxis", "ifrs-full:LaterThanTwoYearsAndNotLaterThanThreeYearsMember")], I),
+            ctx("c6", [C], D),
+            ctx("s1", [("ifrs-full:ConsolidatedAndSeparateFinancialStatementsAxis", "ifrs-full:SeparateMember"),
+                       ("ifrs-full:ClassesOfPropertyPlantAndEquipmentAxis", "ifrs-full:LandMember")], I),
+            '<ifrs-full:PropertyPlantAndEquipment contextRef="c1">100</ifrs-full:PropertyPlantAndEquipment>',
+            '<ifrs-full:PropertyPlantAndEquipment contextRef="c2">200</ifrs-full:PropertyPlantAndEquipment>',
+            '<ifrs-full:PropertyPlantAndEquipment contextRef="c3">300</ifrs-full:PropertyPlantAndEquipment>',
+            '<ifrs-full:PropertyPlantAndEquipment contextRef="s1">999</ifrs-full:PropertyPlantAndEquipment>',
+            '<ifrs-full:Borrowings contextRef="c4">40</ifrs-full:Borrowings>',
+            '<ifrs-full:Borrowings contextRef="c5">50</ifrs-full:Borrowings>',
+            '<ifrs-full:InterestExpense contextRef="c6">7</ifrs-full:InterestExpense>'])
+        r = value5.notes_from_xml(xml)[2025]
+        self.assertEqual((r["land"], r["bldg"], r["mat2"], r["mat3"], r["interest"]), (100, 500, 40, 50, 7))
+
+    def test_value5_compute_rules(self):
+        from analyzer import value5
+        base = dict(kind="실적", op=100.0, ni=10.0, eq=1000.0, liab=500.0, nci=0.0, shares=10.0, da=20.0, capex=20.0,
+                    wc=50.0, cash_st=100.0, recv=100.0, inv=100.0, land=100.0, bldg=100.0, nd=200.0, interest=5.0,
+                    mat1=10.0, mat2=10.0, mat3=10.0, rf=0.03, wacc=0.08, div=0.0)
+        Y = {y: dict(base, year=y, op=float(o)) for y, o in zip(range(2010, 2026), range(160, 0, -10))}   # 2010 160 … 2025 10
+        data = {"years": Y, "order": sorted(Y), "price": 50.0, "stress_from": 2006, "stress_to": 2025}
+        bad, by, n = value5.stress_op(data)
+        self.assertEqual((n, bad, by), (16, 40.0, 2022))   # 16년 중 하위 20% = ceil(16×0.2)=4번째로 낮은 값(10·20·30·40)
+        r = value5.compute(data)["rows"][2025]
+        fcff = 10 * 0.78                                   # 감가상각 = 설비투자, 운전자본 변화 0
+        fn = sum(o * 0.78 for o in (50, 40, 30, 20, 10)) / 5
+        self.assertAlmostEqual(r["fcff"], fcff)
+        self.assertAlmostEqual(r["fcff_n"], fn)
+        self.assertAlmostEqual(r["dcf"], (fn / 0.08 - 200) / 10)       # 23.4 ÷ 0.08 − 200 = 92.5 → 9.25원
+        self.assertEqual(r["asset"], 0.0)                # (100+85+60+100+30 − 500)/10 < 0 → 0
+        self.assertIn("asset", r["no_equity"])
+        st = (40 * 0.78 / 0.08 - 200) / 10               # ④ = (불황 40 × 0.78 ÷ 0.08 − 200)/10 = 19
+        self.assertAlmostEqual(r["stress"], st)
+        short = max(0, 3 * 5 + 30 - 3 * fn)              # 15 + 30 − 70.2 < 0 → 0
+        self.assertAlmostEqual(r["risk"], st * 10 / (10 + short / 50))
+        ke = 0.08
+        self.assertAlmostEqual(r["rim"], (1000 + (0.01 - ke) * 1000 * 0.6 / (1 + ke - 0.6)) / 10)
+
 
 if __name__ == "__main__":
     unittest.main()

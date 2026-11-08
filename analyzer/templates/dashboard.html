@@ -121,6 +121,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="L">L. 사업부 분석</button>
   <button data-s="M">M. 좋은 기업 6조건</button>
   <button data-s="N">N. 숫자 모양</button>
+  <button data-s="O">O. 가치 5방법</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -390,6 +391,31 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <h3>해마다 한 줄</h3>
     <div class="tablewrap"><table id="n-table"></table></div>
     <p class="muted" id="n-memo"></p>
+  </div>
+</section>
+
+<section id="O">
+  <div class="card">
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
+    <h2 style="margin:0">가치 5방법 <span class="muted" style="font-size:14px;font-weight:400">주당 가치(원) · ① DCF ② RIM ③ 자산가치 ④ 스트레스 ⑤ 재무위험</span></h2>
+    <p class="muted" id="o-note" style="margin:6px 0"></p>
+    <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap;margin:8px 0">
+      <label>Ke 가산(%, 국고채 10년 +)<input id="o-ke" type="number" step="0.1" style="width:90px"></label>
+      <label>WACC(%, 비우면 G 화면 연도별)<input id="o-wacc" type="number" step="0.1" style="width:110px"></label>
+      <label>ω(RIM)<input id="o-omega" type="number" step="0.05" min="0" max="1" style="width:80px"></label>
+      <label>회수율 현금·단기금융<input id="o-r-cash" type="number" step="5" style="width:70px"></label>
+      <label>매출채권<input id="o-r-recv" type="number" step="5" style="width:70px"></label>
+      <label>재고<input id="o-r-inv" type="number" step="5" style="width:70px"></label>
+      <label>토지<input id="o-r-land" type="number" step="5" style="width:70px"></label>
+      <label>건물·설비<input id="o-r-bldg" type="number" step="5" style="width:70px"></label>
+      <button id="o-reset">기본값</button>
+    </div>
+    <div class="chartbox" style="height:380px"><canvas id="o-chart"></canvas></div>
+    <h3>연도별 주당 가치(원) · 괄호 = 현재가 대비</h3>
+    <div class="tablewrap"><table id="o-table"></table></div>
+    <h3>빈칸 이유와 계산 재료</h3>
+    <div class="tablewrap" style="max-height:420px;overflow:auto"><table id="o-why"></table></div>
+    <p class="muted" id="o-rules"></p>
   </div>
 </section>
 
@@ -1424,7 +1450,100 @@ function renderN(){
   $('#n-memo').textContent = SH.memo || '';
 }
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+// ---- O. 가치 5방법 (analyzer/value5.py compute()와 같은 식) ----
+const V5 = D.value5 || {error:'자료 없음'};
+const O_METH = [['dcf','① DCF','--s1'],['rim','② RIM(ω)','--s2'],['asset','③ 자산가치','--s4'],['stress','④ 스트레스','--s6'],['risk','⑤ 재무위험','--s3']];
+function v5params(){
+  const num = (id, d) => { const v = $(id).value; return v==='' || isNaN(+v) ? d : +v; };
+  const df = V5.defaults || {rec:{}};
+  return {ke_premium: num('#o-ke', df.ke_premium*100)/100, wacc: $('#o-wacc').value==='' ? null : num('#o-wacc', 0)/100, omega: num('#o-omega', df.omega),
+    rec:{cash:num('#o-r-cash',100)/100, recv:num('#o-r-recv',85)/100, inv:num('#o-r-inv',60)/100, land:num('#o-r-land',100)/100, bldg:num('#o-r-bldg',30)/100, other:0}};
+}
+function v5compute(p){
+  const Y = V5.inputs, order = V5.order, price = V5.price, TAX = V5.tax, out = {}, fcff = {}, eq = {};
+  const G = y => Y[String(y)];
+  order.forEach(y=>{ const r = G(y);
+    if (r.kind==='실적'){ const pr = G(y-1); const ok = [r.op,r.da,r.capex,r.wc].every(v=>v!=null) && pr && pr.wc!=null;
+      fcff[y] = ok ? r.op*(1-TAX) + r.da - r.capex - (r.wc - pr.wc) : null; }
+    else fcff[y] = r.op==null ? null : r.op*(1-TAX); });
+  const bad = V5.stress_op;
+  order.forEach(y=>{ const r = G(y), res = {year:y, kind:r.kind, why:{}, zero:[]};
+    const wacc = p.wacc!=null ? p.wacc : r.wacc, ke = r.rf==null ? null : r.rf + p.ke_premium;
+    const sh = r.shares, nd = r.nd, nci = r.nci || 0;
+    let roe = null;
+    if (r.kind==='실적'){ eq[y] = r.eq; const e0 = (G(y-1)||{}).eq; roe = (r.ni!=null && r.eq) ? r.ni / (e0 ? (e0+r.eq)/2 : r.eq) : null; }
+    else { const e0 = eq[y-1]; if (e0==null || r.ni==null){ eq[y] = null; } else { eq[y] = e0 + r.ni - (r.div||0); roe = r.ni / ((e0+eq[y])/2); } }
+    res.roe = roe; res.ke = ke; res.wacc = wacc;
+    let fn;
+    if (r.kind==='실적'){ const win = []; for (let t=y-4;t<=y;t++) if (fcff[t]!=null) win.push(fcff[t]); fn = win.length>=3 ? win.reduce((a,b)=>a+b,0)/win.length : null; res.fcff_n_years = win.length; }
+    else fn = fcff[y];
+    res.fcff = fcff[y]; res.fcff_n = fn;
+    if (fn==null) res.why.dcf = r.kind==='실적' ? '감가상각비 또는 운전자본 자료 없음(FCFF 3년 미만)' : '영업이익 컨센서스 없음';
+    else if (!wacc || sh==null || nd==null) res.why.dcf = 'WACC·주식수·순차입금 중 없음';
+    else res.dcf = (fn/wacc - nd - nci)/sh;
+    if ([eq[y], roe, ke].some(v=>v==null) || sh==null) res.why.rim = '지배자본·ROE·Ke·주식수 중 없음';
+    else { const w = p.omega; res.rim = (eq[y] + (roe-ke)*eq[y]*w/(1+ke-w))/sh; res.rim_w1 = (eq[y] + (roe-ke)*eq[y]/ke)/sh; }
+    if (r.kind!=='실적') res.why.asset = '전망 연도 자산 명세 없음';
+    else if (r.land==null || r.bldg==null) res.why.asset = '토지·건물·설비 구분 없음(XBRL 유형자산 주석 미수집)';
+    else if ([r.cash_st, r.recv, r.inv, r.liab].some(v=>v==null) || sh==null) res.why.asset = '현금·매출채권·재고·부채·주식수 중 없음';
+    else { const c = p.rec; res.asset = (r.cash_st*c.cash + r.recv*c.recv + r.inv*c.inv + r.land*c.land + r.bldg*c.bldg - r.liab - nci)/sh; }
+    if (bad==null || !wacc || sh==null || nd==null) res.why.stress = '불황 영업이익·WACC·주식수·순차입금 중 없음';
+    else { res.stress_raw = (bad*(1-TAX)/wacc - nd - nci)/sh; res.stress = res.stress_raw; }
+    if (res.stress==null) res.why.risk = '④를 계산하지 못함';
+    else if ([r.interest, r.mat1, fn, price].some(v=>v==null)) res.why.risk = '이자·1년 내 만기·FCFF·주가 중 없음';
+    else if (r.mat2==null || r.mat3==null) res.why.risk = '2·3년차 만기 자료 없음(XBRL 만기 주석 미수집)';
+    else { const short = Math.max(0, 3*r.interest + r.mat1 + r.mat2 + r.mat3 - 3*fn); res.shortfall = short; res.risk = res.stress_raw<=0 ? 0 : res.stress_raw*sh/(sh + short/price); }
+    ['dcf','rim','asset','stress','risk'].forEach(k=>{ if (res[k]!=null && res[k]<0){ res[k] = 0; res.zero.push(k); } });
+    out[y] = res; });
+  return out;
+}
+const pricePlugin = {id:'priceLine', afterDatasetsDraw(chart, args, opts){ if (opts.price==null) return; const {ctx, chartArea:a, scales:{y}} = chart;
+  const py = y.getPixelForValue(opts.price); if (py < a.top || py > a.bottom) return;
+  ctx.save(); ctx.strokeStyle = css('--text-primary'); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+  ctx.fillStyle = css('--text-primary'); ctx.font = '600 12px sans-serif'; ctx.textAlign = 'right'; ctx.fillText(`현재가 ${fmt(opts.price,'원')}원`, a.right - 4, py - 6); ctx.restore(); }};
+function v5fillInputs(){ const df = V5.defaults || {rec:{}};
+  $('#o-ke').value = (df.ke_premium*100).toFixed(1); $('#o-wacc').value = ''; $('#o-omega').value = df.omega;
+  [['cash','#o-r-cash'],['recv','#o-r-recv'],['inv','#o-r-inv'],['land','#o-r-land'],['bldg','#o-r-bldg']].forEach(([k,id])=>$(id).value = Math.round(df.rec[k]*100)); }
+function renderO(){
+  if (V5.error){ $('#o-note').textContent = '계산하지 못했습니다: ' + V5.error; return; }
+  const p = v5params(), R = v5compute(p), price = V5.price;
+  const years = V5.order.filter(y=>y>=2016), last = V5.last;
+  const nShare = years.filter(y=>V5.inputs[String(y)].shares!=null).length;
+  $('#o-note').innerHTML = `현재가 ${price==null?'없음':fmt(price,'원')+'원'} · 세율 ${V5.tax*100}% · g = 0 · 컨센서스 이익 ×${V5.cut[0]} (3개월 사이 ${-V5.cut[2]}% 넘게 깎였으면 ×${V5.cut[1]}) · ④ 불황 영업이익 = ${V5.stress_from}~${V5.stress_to} 중 자료가 있는 ${V5.stress_n}년의 하위 ${V5.stress_pct*100}% 값 ${V5.stress_op==null?'없음':fmt(V5.stress_op/1e8,'억원')+'억('+V5.stress_year+')'}.` +
+    (nShare===0 ? ' <b>주식수(발행주식 − 자사주)가 없어 주당 가치를 계산하지 못했습니다 — DART 키가 있는 PC에서 「지금 갱신」을 하면 DART 주식총수를 받아 채웁니다.</b>' : '');
+  const ds = [];
+  O_METH.forEach(([k, nm, col])=>{
+    const data = years.map(y=>R[y][k]==null ? null : R[y][k]);
+    ds.push({label:nm, data, borderColor:css(col), backgroundColor:css(col), borderWidth:2.25, pointRadius:3, tension:0, spanGaps:false,
+      segment:{borderDash: c => years[c.p1DataIndex] > last ? [6,4] : undefined}});
+    if (k==='rim') ds.push({label:'② RIM(ω=1, 참고)', data:years.map(y=>R[y].rim_w1==null?null:Math.max(0,R[y].rim_w1)), borderColor:rgba(col,0.45), backgroundColor:rgba(col,0.45), borderWidth:1.25, borderDash:[3,3], pointRadius:0, tension:0});
+  });
+  const o = baseOpts(); o.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}}; o.scales.y.ticks.callback = v => fmt(v,'원');
+  o.plugins.estZone = {from: years.findIndex(y=>y>last) < 0 ? null : years.findIndex(y=>y>last), label:'전망(컨센서스 보정)'};
+  o.plugins.priceLine = {price};
+  o.plugins.tooltip.callbacks = {label: c => c.parsed.y==null ? null : `${c.dataset.label}: ${fmt(c.parsed.y,'원')}원${price?` (현재가 대비 ${((c.parsed.y/price-1)*100).toFixed(0)}%)`:''}`};
+  if (charts['o-chart']) charts['o-chart'].destroy();
+  charts['o-chart'] = new Chart($('#o-chart'), {type:'line', data:{labels:years.map(y=>y>last?`${y}E`:String(y)), datasets:ds}, options:o, plugins:[estZonePlugin, pricePlugin]});
+  const cell = (res, k) => { const v = res[k]; if (v==null) return `<td class="muted" title="${esc(res.why[k]||'')}">–</td>`;
+    const z = res.zero.includes(k); const pc = price ? ` <span class="muted">(${v/price>=1?'+':''}${((v/price-1)*100).toFixed(0)}%)</span>` : '';
+    return `<td>${fmt(v,'원')}${pc}${z?' <span class="badge b-WARN" title="계산값이 음수 → 0으로 표시">주주 몫 없음</span>':''}</td>`; };
+  $('#o-table').innerHTML = '<tr><th class="l">연도</th>' + O_METH.map(m=>`<th>${m[1]}</th>`).join('') + '</tr>' +
+    years.map(y=>`<tr${y>last?' style="color:var(--text-secondary)"':''}><td class="l">${y>last?y+'E':y}</td>${O_METH.map(m=>cell(R[y], m[0])).join('')}</tr>`).join('');
+  const e = v => v==null ? '–' : fmt(v/1e8,'억원');
+  const pc = v => v==null ? '–' : (v*100).toFixed(2)+'%';
+  $('#o-why').innerHTML = '<tr><th class="l">연도</th><th>영업이익(억)</th><th>FCFF(억)</th><th>정상화 FCFF(억)</th><th>지배자본(억)</th><th>ROE</th><th>Ke</th><th>WACC</th><th>순차입금(억)</th><th>리스(억)</th><th>비지배(억)</th><th>주식수</th><th class="l">빈칸 이유</th></tr>' +
+    years.map(y=>{ const r = V5.inputs[String(y)], x = R[y]; const ws = Object.entries(x.why).map(([k,v])=>`${O_METH.find(m=>m[0]===k)[1]}: ${v}`).join(' / ');
+      return `<tr><td class="l">${y>last?y+'E':y}</td><td>${e(r.op)}${r.f_op?` <span class="muted">(×${r.f_op})</span>`:''}</td><td>${e(x.fcff)}</td><td>${e(x.fcff_n)}${x.fcff_n_years!=null&&x.fcff_n!=null?` <span class="muted">(${x.fcff_n_years}년)</span>`:''}</td><td>${e(x.eq ?? r.eq)}</td><td>${pc(x.roe)}</td><td>${pc(x.ke)}</td><td>${pc(x.wacc)}</td><td>${e(r.nd)}</td><td>${r.lease==null?'미확인':e(r.lease)}</td><td>${e(r.nci)}</td><td>${r.shares==null?'–':Math.round(r.shares).toLocaleString('ko-KR')}</td><td class="l" style="white-space:normal;min-width:260px">${esc(ws)}</td></tr>`; }).join('');
+  $('#o-rules').innerHTML = '계산식 — ① FCFF = 영업이익×(1−22%) + 감가상각 − 설비투자 − 운전자본 증가(매출채권+재고−매입채무), 정상화 = 최근 5개년 평균(3년 이상일 때, 전망은 그해 값), 주당 = (정상화 FCFF ÷ WACC − 순차입금 − 비지배지분) ÷ 주식수. ' +
+    '② 주당 = [지배자본 + (ROE − Ke) × 지배자본 × ω ÷ (1 + Ke − ω)] ÷ 주식수(옅은 점선 = ω 1). ③ [Σ(장부가 × 회수율) − 부채총계 − 비지배지분] ÷ 주식수, 기타 자산 0%. ' +
+    '④ [불황 영업이익 × (1−22%) ÷ WACC − 순차입금 − 비지배지분] ÷ 주식수. ⑤ 부족분 = 3년 × 이자 + 1·2·3년차 만기 − 3년 × 정상화 FCFF(0 미만은 0), 주당 = ④ × 주식수 ÷ (주식수 + 부족분 ÷ 현재가). ' +
+    '순차입금 = 연결 차입 계정 전부 + 리스부채 − 현금·단기금융(전망 연도는 최근 시점 값). 전망 연도: 자본 = 전년 자본 + 보정 순이익 − 배당(마지막 실적 배당 유지), 설비투자 = 감가상각, 운전자본 증가 0, 주식수·비지배지분은 마지막 실적값. 이자는 XBRL 이자비용, 없으면 현금흐름표 이자 지급.';
+}
+['#o-ke','#o-wacc','#o-omega','#o-r-cash','#o-r-recv','#o-r-inv','#o-r-land','#o-r-bldg'].forEach(id=>$(id).addEventListener('input', renderO));
+$('#o-reset').onclick = () => { v5fillInputs(); renderO(); };
+v5fillInputs();
+
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));

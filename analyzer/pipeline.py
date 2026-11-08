@@ -408,6 +408,12 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
 
     # 8) 사업부 분석(화면 L): 주요제품 매출구성 → 공시 제목 → 뉴스 제목
     collect_business(conn, code, stats, has_key, _corp)
+    # 9) 가치 5방법(화면 O): 최근 사업보고서 XBRL 주석(토지·건물·이자비용·만기) 보관
+    try:
+        from . import value5
+        value5.collect(conn, code, stats, has_key)
+    except Exception as e:      # noqa: BLE001
+        stats.notes.append(f"가치 5방법 주석 수집 건너뜀: {e}")
     return need
 
 
