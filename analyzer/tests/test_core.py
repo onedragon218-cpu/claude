@@ -542,6 +542,14 @@ class T(unittest.TestCase):
         self.assertTrue(any("2020년" in w for w in st["old_warnings"]))
         self.assertEqual(st["warn_from"], 2021)
 
+    def test_batch_job_stops_before_next_company(self):
+        from analyzer import server
+        with server.JOB_LOCK:
+            server.JOB.update(running=True, total=2, done=0, results=[], stop=True, stopped=False, finished_at=None)
+        server._update_all([("000001", "가"), ("000002", "나")], 2026, False)
+        self.assertTrue(server.JOB["stopped"])
+        self.assertEqual((server.JOB["done"], server.JOB["running"]), (0, False))   # 중지 요청이 있으면 다음 기업을 시작하지 않음
+
 
 if __name__ == "__main__":
     unittest.main()

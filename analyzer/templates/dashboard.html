@@ -51,6 +51,7 @@ section{display:none} section.on{display:block}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 label{font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px}
 input,select{font:inherit;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-1);color:var(--text-primary)}
+button:disabled{opacity:.45;cursor:not-allowed}
 button.primary{font:inherit;padding:8px 16px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
@@ -154,7 +155,14 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <h2 style="margin:0">기본 종목 목록 <span class="muted" id="ucount"></span></h2>
       <label style="flex-direction:row;align-items:center;gap:6px">목록에서 찾기 <input id="ufilter" placeholder="이름 또는 코드" style="width:180px"></label>
     </div>
-    <p class="muted" style="margin:6px 0 10px">컨센서스가 있는 상장기업 목록입니다. <b>목록만 들어 있고 자동으로 수집하지 않습니다.</b> 수집된 기업은 눌러서 바로 보고, 미수집 기업은 눌러서 확인하면 그 기업만 수집합니다. [전체 갱신]과 평일 자동 수집은 위 'DB에 있는 기업'만 대상입니다.</p>
+    <div class="row" style="align-items:center;gap:8px;margin:8px 0;flex-wrap:wrap">
+      <button class="primary" id="uaddsel" disabled>체크한 기업 올리기</button>
+      <button id="uaddall">미수집 전체 올리기</button>
+      <button id="ustop" style="display:none">중지</button>
+      <span class="muted" id="uselinfo"></span>
+    </div>
+    <div id="ujob"></div>
+    <p class="muted" style="margin:6px 0 10px">컨센서스가 있는 상장기업 목록입니다. <b>목록만 들어 있고 자동으로 수집하지 않습니다.</b> 수집된 기업은 눌러서 바로 보고, 미수집 기업은 눌러서 확인하면 그 기업만 수집합니다. 여러 곳은 왼쪽 체크 상자로 골라 <b>[체크한 기업 올리기]</b>, 한꺼번에는 <b>[미수집 전체 올리기]</b>(맨 위 체크 상자 = 지금 보이는 미수집 기업 모두 선택, '목록에서 찾기'와 함께 쓰면 일부만 고르기 쉬움). 올린 기업은 'DB에 있는 기업'이 되어 [전체 갱신]과 평일 자동 수집 대상이 됩니다.</p>
     <div class="tablewrap" style="max-height:420px;overflow:auto"><table id="utable"></table></div>
   </div>
 </section>
@@ -1560,8 +1568,9 @@ function renderUniverse(){
   const f = ($('#ufilter').value||'').trim().toLowerCase().replace(/\s/g,'');
   const rows = U.filter(u => !f || u.code.toLowerCase().startsWith(f) || u.name.toLowerCase().replace(/\s/g,'').includes(f));
   $('#ucount').textContent = `(${U.length}곳 · 수집됨 ${U.filter(u=>inDb.has(u.code)).length}곳)`;
-  $('#utable').innerHTML = '<tr><th class="l">종목코드</th><th class="l">기업명</th><th class="l">상태</th><th class="l"></th></tr>' +
-    rows.map(u=>`<tr class="clickrow" data-code="${esc(u.code)}" data-name="${esc(u.name)}" tabindex="0"><td class="l">${esc(u.code)}</td><td class="l">${esc(u.name)}</td><td class="l">${inDb.has(u.code)?badge('OK')+' 수집됨':'<span class="muted">미수집</span>'}</td><td class="l">${inDb.has(u.code)?'열기 →':'수집하기'}</td></tr>`).join('');
+  const vis = rows.filter(u=>!inDb.has(u.code));
+  $('#utable').innerHTML = `<tr><th class="l" style="width:34px"><input type="checkbox" id="uchkall" title="보이는 미수집 기업 모두 체크/해제" ${vis.length && vis.every(u=>uChecked.has(u.code))?'checked':''} ${vis.length?'':'disabled'}></th><th class="l">종목코드</th><th class="l">기업명</th><th class="l">상태</th><th class="l"></th></tr>` +
+    rows.map(u=>`<tr class="clickrow" data-code="${esc(u.code)}" data-name="${esc(u.name)}" tabindex="0"><td class="l"><input type="checkbox" class="uchk" data-code="${esc(u.code)}" ${inDb.has(u.code)?'disabled title="이미 수집됨"':''} ${uChecked.has(u.code)?'checked':''}></td><td class="l">${esc(u.code)}</td><td class="l">${esc(u.name)}</td><td class="l">${inDb.has(u.code)?badge('OK')+' 수집됨':'<span class="muted">미수집</span>'}</td><td class="l">${inDb.has(u.code)?'열기 →':'수집하기'}</td></tr>`).join('');
   document.querySelectorAll('#utable tr.clickrow').forEach(tr=>{
     const go = ()=>{
       const code = tr.dataset.code;
@@ -1570,9 +1579,34 @@ function renderUniverse(){
       if (!confirm(`${tr.dataset.name}(${code})의 자료를 지금 수집할까요? DART·컨센서스·주가를 받습니다(1~2분).`)) return;
       $('#q').value = code; window.scrollTo(0,0); runAnalyze();
     };
-    tr.onclick = go; tr.onkeydown = e => { if (e.key==='Enter') go(); };
+    tr.onclick = e => { if (e.target.closest('input')) return; go(); }; tr.onkeydown = e => { if (e.key==='Enter' && !e.target.closest('input')) go(); };
   });
+  document.querySelectorAll('#utable .uchk').forEach(c=>c.onchange = () => { c.checked ? uChecked.add(c.dataset.code) : uChecked.delete(c.dataset.code); uSelInfo(); renderUniverse(); });
+  const all = $('#uchkall'); if (all) all.onchange = () => { vis.forEach(u=> all.checked ? uChecked.add(u.code) : uChecked.delete(u.code)); uSelInfo(); renderUniverse(); };
+  uSelInfo();
 }
+const uChecked = new Set();
+let UJOB_RUNNING = false;
+function uMissing(){ const inDb = new Set(D.companies.filter(c=>c.n>0).map(c=>c.stock_code)); return (D.universe||[]).filter(u=>!inDb.has(u.code)); }
+function uSelInfo(){ const n = uChecked.size, m = uMissing().length;
+  $('#uaddsel').disabled = !n || UJOB_RUNNING; $('#uaddsel').textContent = `체크한 기업 올리기${n?` (${n}곳)`:''}`;
+  $('#uaddall').textContent = `미수집 전체 올리기 (${m}곳)`; $('#uaddall').disabled = !m || UJOB_RUNNING;
+  $('#uselinfo').textContent = n ? `예상 소요: 약 ${Math.ceil(n*1.5)}분(기업당 1~2분)` : '체크 상자로 고르거나, 미수집 기업을 한꺼번에 올릴 수 있습니다. 행을 누르면 한 곳만 바로 수집합니다.'; }
+async function uStartBatch(items, label){
+  if (!SERVED){ alert('저장된 화면 파일에서는 수집할 수 없습니다. 재무분석 열기.bat 으로 연 화면에서 누르세요.'); return; }
+  if (!items.length) return;
+  const mins = Math.ceil(items.length*1.5);
+  if (!confirm(`${label} ${items.length}곳의 자료를 수집합니다(DART·컨센서스·주가·뉴스).\n예상 소요: 약 ${mins}분${mins>=60?`(약 ${(mins/60).toFixed(1)}시간)`:''}. 진행 중에도 화면은 쓸 수 있고, '중지'를 누르면 지금 기업까지만 하고 멈춥니다.\n진행할까요?`)) return;
+  try { const r = await fetch(`/api/update-all?base_year=${BY}&fresh=0`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({codes: items.map(u=>[u.code, u.name])})});
+    const j = await r.json(); if (j.error) throw new Error(j.error);
+    if (j.already){ alert('이미 다른 수집·갱신 작업이 진행 중입니다. 끝난 뒤 다시 눌러 주세요.'); }
+    uChecked.clear(); renderJob(j); renderUniverse(); setTimeout(pollJob, 1000);
+  } catch(e){ $('#ujob').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)">시작 실패: ${esc(e.message)}</div>`; }
+}
+$('#uaddsel').onclick = () => { const U = D.universe||[]; uStartBatch(U.filter(u=>uChecked.has(u.code)), '체크한 기업'); };
+$('#uaddall').onclick = () => uStartBatch(uMissing(), '아직 수집하지 않은 기본 목록 기업');
+$('#ustop').onclick = async () => { if (!confirm('지금 수집 중인 기업까지만 하고 멈출까요? 이미 받은 자료는 그대로 남습니다.')) return;
+  try { renderJob(await (await fetch('/api/job/stop', {method:'POST'})).json()); } catch(e){ alert('중지 요청 실패: ' + e.message); } };
 $('#ufilter').addEventListener('input', renderUniverse);
 
 function localSearch(q){
@@ -1620,9 +1654,18 @@ $('#run').onclick = runAnalyze;
 // ---- 전체 갱신 ----
 function renderJob(j){
   const rows = (j.results||[]).map(r=>`<tr><td class="l">${esc(r.name||'')} (${esc(r.code)})</td><td class="l">${r.ok?badge('OK'):badge('ERROR')}</td><td>${r.ok?r.requests:'–'}</td><td>${r.ok?r.new:'–'}</td><td>${r.ok?r.changed:'–'}</td><td class="l" style="white-space:normal">${esc(r.ok?(r.notes||[]).join(' / '):r.error)}</td></tr>`).join('');
-  const head = j.running ? `갱신 중… ${j.done} / ${j.total} ${j.current?'· 지금: '+esc(j.current):''}` : (j.finished_at ? `갱신 완료 (${j.done} / ${j.total}, ${esc(j.finished_at)})` : '');
-  $('#ustatus').innerHTML = head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head}${j.fresh?' · 컨센서스·주가 새로 받기':''}</div>` +
-    (rows ? `<div class="tablewrap"><table><tr><th class="l">기업</th><th class="l">결과</th><th>외부 요청</th><th>신규 값</th><th>변경 값</th><th class="l">메모</th></tr>${rows}</table></div>` : '') : '';
+  const kind = j.kind || '전체 갱신';
+  const left = j.running && j.done ? Math.ceil((Date.now() - Date.parse(String(j.started_at).replace(' ','T'))) / 60000 / j.done * (j.total - j.done)) : null;
+  const head = j.running ? `${esc(kind)} 중… ${j.done} / ${j.total} ${j.current?'· 지금: '+esc(j.current):''}${j.stop?' · 중지 요청됨(지금 기업까지만)':''}${left!=null&&!isNaN(left)?` · 남은 시간 약 ${left}분`:''}`
+    : (j.finished_at ? `${esc(kind)} ${j.stopped?'중지됨':'완료'} (${j.done} / ${j.total}, ${esc(j.finished_at)})` : '');
+  const html = head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head}${j.fresh?' · 컨센서스·주가 새로 받기':''}</div>` +
+    (rows ? `<div class="tablewrap" style="max-height:320px;overflow:auto"><table><tr><th class="l">기업</th><th class="l">결과</th><th>외부 요청</th><th>신규 값</th><th>변경 값</th><th class="l">메모</th></tr>${rows}</table></div>` : '') : '';
+  const isList = kind === '목록 기업 수집';
+  $('#ustatus').innerHTML = isList ? (head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head} <span class="muted">(아래 기본 종목 목록에서 진행 상황 보기)</span></div>` : '') : html;
+  $('#ujob').innerHTML = isList ? html : '';
+  $('#ustop').style.display = j.running ? '' : 'none'; $('#ustop').disabled = !!j.stop;
+  UJOB_RUNNING = !!j.running;
+  ['#uaddsel','#uaddall','#uall'].forEach(id=>{ if (j.running) $(id).disabled = true; });
 }
 async function pollJob(){
   try { const j = await (await fetch('/api/job')).json(); renderJob(j);
