@@ -148,6 +148,9 @@ def render(data, out_path=None):
     return html
 
 
+WARN_YEARS = 5     # 재무 안정성 경고에 쓰는 기간(올해 기준 최근 5개 실적 연도)
+
+
 def stability(conn, code, P, vrows, comp):
     """재무 안정성: 부채비율·이자보상배율·순차입금과 한국은행 업종 평균, 경고."""
     from . import benchmark, valuation
@@ -209,16 +212,21 @@ def stability(conn, code, P, vrows, comp):
             if ratio >= 1.5:
                 warn.append(f"{last['year']}년 부채비율 {last['debt_ratio']:.0f}% = 업종 평균 {last['ind_debt_ratio']:.0f}%의 "
                             f"{ratio:.1f}배")
+    # 상단 경고는 최근 5개 실적 연도만(올해 기준 5년보다 오래된 해는 H 화면에 '참고'로만 남김)
+    recent_from = cy - WARN_YEARS
     low = [r["year"] for r in act if r["icr"] is not None and r["icr"] < 1]
-    if low:
-        warn.append("이자보상배율 1배 미만(영업이익으로 이자를 다 못 냄): " + ", ".join(f"{y}년" for y in low))
+    old_warn = []
+    if [y for y in low if y >= recent_from]:
+        warn.append("이자보상배율 1배 미만(영업이익으로 이자를 다 못 냄): " + ", ".join(f"{y}년" for y in low if y >= recent_from))
+    if [y for y in low if y < recent_from]:
+        old_warn.append("이자보상배율 1배 미만: " + ", ".join(f"{y}년" for y in low if y < recent_from))
     cur = next((r for r in rows if r["kind"] != "실적"), None)
     if cur and cur["icr"] is not None and cur["icr"] < 1:
         warn.append(f"현재(최근 12개월) 이자보상배율 {cur['icr']:.2f}배")
     lev = [r for r in rows if r.get("lev_grade") not in (None, "미확인") and not r.get("lev_halfyear")]
     lev_alert = lev[-1] if lev and lev[-1]["lev_grade"] in ("주의", "위험") else None
     from . import valuation as _v
-    return {"rows": rows, "warnings": warn, "lev_alert": lev_alert,
+    return {"rows": rows, "warnings": warn, "old_warnings": old_warn, "warn_from": recent_from, "lev_alert": lev_alert,
             "lev_rules": _v.load_assumptions().get("순차입금_EBITDA_구간"),
             "nd_ratio_rules": _v.load_assumptions().get("순차입금비율_구간"), "industry": {"item": bm["item"], "name": bm["name"], "source": bm["source"],
             "missing_reason": bm["missing_reason"], "induty_code": induty}}

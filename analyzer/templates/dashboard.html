@@ -1076,6 +1076,8 @@ function renderH(){
   $('#hnote').innerHTML = `회사 값(색 선)과 한국은행 「기업경영분석」 업종 평균(회색 점선), 전산업 평균(옅은 점선)을 비교합니다. ${ind.item?`업종: ${esc(ind.name)} (DART 업종코드 ${esc(ind.induty_code)})`:`<b>${esc(ind.missing_reason||'업종 자료 없음')}</b> → 업종 기준선은 그리지 않음`}. 업종 평균은 기업규모 '종합' 기준입니다.`;
   const w = ST.warnings||[];
   $('#hwarn').innerHTML = w.length ? `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)">${w.map(x=>'⚠ '+esc(x)).join('<br>')}</div>` : '<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">최근 실적 기준 경고 항목 없음(부채비율 업종의 1.5배 미만, 이자보상배율 1배 이상)</div>';
+  const ow = ST.old_warnings||[];
+  if (ow.length) $('#hwarn').innerHTML += `<p class="muted" style="margin:4px 0 0">참고(경고 대상 아님 — 경고는 ${ST.warn_from}년 이후만): ${ow.map(esc).join(' · ')}</p>`;
   const line = (label, data, color, extra) => Object.assign({label, data, borderColor:css(color), backgroundColor:css(color), borderWidth:2.25, pointRadius:4, tension:0, segment:seg}, extra||{});
   const ref = (label, data, color, dash) => ({label, data, borderColor:css(color), backgroundColor:css(color), borderWidth:1.5, borderDash:dash, pointRadius:0, tension:0});
   const mk = (id, datasets, unit, extraOpts) => { const o = baseOpts(); o.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}};

@@ -535,6 +535,13 @@ class T(unittest.TestCase):
         ke = 0.08
         self.assertAlmostEqual(r["rim"], (1000 + (0.01 - ke) * 1000 * 0.6 / (1 + ke - 0.6)) / 10)
 
+    def test_stability_warning_only_recent_5_years(self):
+        pipeline.import_seed(self.conn, "086900", 2026)
+        st = report.payload(self.conn, "086900", 2026)["stability"]
+        self.assertFalse(any("이자보상배율" in w for w in st["warnings"]))       # 2020년은 5년보다 오래됨 → 상단 경고 없음
+        self.assertTrue(any("2020년" in w for w in st["old_warnings"]))
+        self.assertEqual(st["warn_from"], 2021)
+
 
 if __name__ == "__main__":
     unittest.main()
