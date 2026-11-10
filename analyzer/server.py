@@ -132,31 +132,34 @@ class H(BaseHTTPRequestHandler):
                     JOB["stop"] = True
                 job = dict(JOB)
             return self._send(200, json.dumps(job, ensure_ascii=False), "application/json")
-        if u.path == "/api/update-all":
+        if u.path in ("/api/update-all", "/api/collect-list"):
+            # /api/update-all = 'DB에 있는 기업' 전체 갱신, /api/collect-list = 기본 종목 목록에서 고른 기업만 수집
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
             with JOB_LOCK:
                 if JOB["running"]:
                     return self._send(200, json.dumps(dict(JOB, already=True), ensure_ascii=False), "application/json")
-                n = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
-                if body.get("codes"):      # 기본 종목 목록에서 고른 기업(아직 DB에 없는 기업 포함)
+                if u.path == "/api/collect-list":
                     seen, codes = set(), []
-                    for it in body["codes"]:
+                    for it in body.get("codes") or []:
                         c, nm = (str(it[0]), str(it[1])) if isinstance(it, (list, tuple)) else (str(it), "")
+                        c = c.strip().upper()
                         if c not in seen and len(c) == 6 and c.isalnum():
-                            seen.add(c); codes.append((c.upper(), nm))
+                            seen.add(c); codes.append((c, nm))
                     kind = "목록 기업 수집"
+                    if not codes:
+                        return self._send(400, json.dumps({"error": "고른 종목이 없습니다"}, ensure_ascii=False), "application/json")
                 else:
                     conn = db.connect()
                     codes = [(r["stock_code"], r["name"]) for r in
                              conn.execute("SELECT stock_code, name FROM companies ORDER BY name")]
                     conn.close()
                     kind = "전체 갱신"
-                if not codes:
-                    return self._send(400, json.dumps({"error": "기업이 없습니다"}, ensure_ascii=False), "application/json")
                 by = int(q["base_year"][0]) if q.get("base_year") else None
                 fresh = q.get("fresh", ["0"])[0] == "1"
                 JOB.update(running=True, total=len(codes), done=0, current=None, results=[], started_at=db.now(),
-                           finished_at=None, fresh=fresh, kind=kind, stop=False, stopped=False)
+                           finished_at=None, fresh=fresh, kind=kind, stop=False, stopped=False,
+                           targets=[f"{nm}({c})" for c, nm in codes[:50]])
             threading.Thread(target=_update_all, args=(codes, by, fresh), daemon=True).start()
             return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
         if u.path != "/api/analyze":

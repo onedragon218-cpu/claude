@@ -1,5 +1,6 @@
 """DB → 화면용 자료(JSON) → HTML 한 장(화면 A~F)."""
 import json
+import re
 import os
 
 from . import config, db
@@ -138,10 +139,21 @@ def _row(r):
                               "source_ref", "source_url", "collected_at", "as_of", "status", "status_note", "version")}
 
 
+def disk_version():
+    """설치 폴더에 있는 코드의 버전(실행 중인 서버가 읽어 둔 값이 아니라 파일에서 직접 읽음)"""
+    try:
+        txt = open(os.path.join(os.path.dirname(__file__), "__init__.py"), encoding="utf-8").read()
+        m = re.search(r'__version__\s*=\s*"([^"]+)"', txt)
+        return m.group(1) if m else None
+    except OSError:
+        return None
+
+
 def render(data, out_path=None):
     tpl = open(os.path.join(os.path.dirname(__file__), "templates", "dashboard.html"), encoding="utf-8").read()
     html = tpl.replace("/*__DATA__*/null", json.dumps(data, ensure_ascii=False, default=str).replace("</", "<\\/"))
     html = html.replace("__TITLE__", f"{data['company']['name']} 재무 분석")
+    html = html.replace("/*__DISK_VERSION__*/null", json.dumps(disk_version()))
     if out_path:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         open(out_path, "w", encoding="utf-8").write(html)

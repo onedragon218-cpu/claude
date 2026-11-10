@@ -437,6 +437,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 
 <script>
 const D = /*__DATA__*/null;
+const DISK_VERSION = /*__DISK_VERSION__*/null;   // 설치 폴더 코드의 버전(서버가 옛 코드로 떠 있으면 다름)
 const $ = s => document.querySelector(s);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const COLORS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
@@ -1597,8 +1598,15 @@ async function uStartBatch(items, label){
   if (!items.length) return;
   const mins = Math.ceil(items.length*1.5);
   if (!confirm(`${label} ${items.length}곳의 자료를 수집합니다(DART·컨센서스·주가·뉴스).\n예상 소요: 약 ${mins}분${mins>=60?`(약 ${(mins/60).toFixed(1)}시간)`:''}. 진행 중에도 화면은 쓸 수 있고, '중지'를 누르면 지금 기업까지만 하고 멈춥니다.\n진행할까요?`)) return;
-  try { const r = await fetch(`/api/update-all?base_year=${BY}&fresh=0`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({codes: items.map(u=>[u.code, u.name])})});
+  try {
+    const ver = await (await fetch('/api/version')).json().catch(()=>({}));
+    if (!DISK_VERSION || ver.version !== DISK_VERSION){
+      $('#ujob').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)"><b>화면 서버가 예전 코드로 켜져 있어 시작하지 않았습니다</b>(서버 ${esc(ver.version||'확인 불가')} · 설치 폴더 ${esc(DISK_VERSION||'예전 버전')}). 예전 서버는 고른 기업 대신 DB 전체를 갱신합니다.<br>바탕화면 '재무분석 열기'를 다시 실행하면 서버를 새 코드로 다시 켭니다(또는 windows\\install.bat). 그다음 이 버튼을 다시 누르세요.</div>`;
+      return; }
+    const r = await fetch(`/api/collect-list?base_year=${BY}&fresh=0`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({codes: items.map(u=>[u.code, u.name])})});
+    if (r.status === 404) throw new Error('서버가 목록 수집을 모릅니다(예전 서버). 재무분석 열기를 다시 실행하세요.');
     const j = await r.json(); if (j.error) throw new Error(j.error);
+    if (!j.already && j.kind !== '목록 기업 수집') throw new Error('서버가 다른 작업을 시작했습니다: ' + j.kind);
     if (j.already){ alert('이미 다른 수집·갱신 작업이 진행 중입니다. 끝난 뒤 다시 눌러 주세요.'); }
     uChecked.clear(); renderJob(j); renderUniverse(); setTimeout(pollJob, 1000);
   } catch(e){ $('#ujob').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)">시작 실패: ${esc(e.message)}</div>`; }
@@ -1658,7 +1666,8 @@ function renderJob(j){
   const left = j.running && j.done ? Math.ceil((Date.now() - Date.parse(String(j.started_at).replace(' ','T'))) / 60000 / j.done * (j.total - j.done)) : null;
   const head = j.running ? `${esc(kind)} 중… ${j.done} / ${j.total} ${j.current?'· 지금: '+esc(j.current):''}${j.stop?' · 중지 요청됨(지금 기업까지만)':''}${left!=null&&!isNaN(left)?` · 남은 시간 약 ${left}분`:''}`
     : (j.finished_at ? `${esc(kind)} ${j.stopped?'중지됨':'완료'} (${j.done} / ${j.total}, ${esc(j.finished_at)})` : '');
-  const html = head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head}${j.fresh?' · 컨센서스·주가 새로 받기':''}</div>` +
+  const tg = (kind==='목록 기업 수집' && j.targets && j.targets.length) ? `<br><span class="muted">대상: ${j.targets.map(esc).join(', ')}${j.total>j.targets.length?` 외 ${j.total-j.targets.length}곳`:''}</span>` : '';
+  const html = head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head}${j.fresh?' · 컨센서스·주가 새로 받기':''}${tg}</div>` +
     (rows ? `<div class="tablewrap" style="max-height:320px;overflow:auto"><table><tr><th class="l">기업</th><th class="l">결과</th><th>외부 요청</th><th>신규 값</th><th>변경 값</th><th class="l">메모</th></tr>${rows}</table></div>` : '') : '';
   const isList = kind === '목록 기업 수집';
   $('#ustatus').innerHTML = isList ? (head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head} <span class="muted">(아래 기본 종목 목록에서 진행 상황 보기)</span></div>` : '') : html;

@@ -2,6 +2,15 @@
 . (Join-Path $PSScriptRoot 'common.ps1')
 $py = Find-Python
 if (-not $py) { Write-Host '파이썬을 찾지 못했습니다. install.bat을 먼저 실행하세요.' -ForegroundColor Red; Read-Host 'Enter를 누르면 닫힙니다'; exit 1 }
+if (Test-Server) {
+    # 이미 켜진 서버가 이 폴더의 새 코드가 아니면(ZIP을 덮어쓴 뒤 등) 껐다가 다시 켠다
+    $v = Test-ServerVersion
+    if (-not $v.ok) {
+        Write-Host "화면 서버가 예전 버전($($v.running))입니다. 새 버전($(Get-LocalVersion))으로 다시 켭니다..." -ForegroundColor Yellow
+        Stop-Server
+        Start-Sleep -Milliseconds 800
+    }
+}
 if (-not (Test-Server)) {
     Write-Host '화면 서버를 켜는 중입니다...'
     $null = Start-Server $py
