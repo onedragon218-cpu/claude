@@ -550,6 +550,25 @@ class T(unittest.TestCase):
         self.assertTrue(server.JOB["stopped"])
         self.assertEqual((server.JOB["done"], server.JOB["running"]), (0, False))   # 중지 요청이 있으면 다음 기업을 시작하지 않음
 
+    def test_upvalue_rising_and_tiers(self):
+        from analyzer import upvalue
+        self.assertEqual(upvalue.rising([1, 2, 3, 4], "%")[0], True)
+        self.assertEqual(upvalue.rising([1, 2, 2, 4], "%")[0], False)          # 같으면 우상향 아님
+        self.assertEqual(upvalue.rising([-100, 50, 80, 100], "%", 20)[0], True)  # 적자 → 흑자(턴어라운드), 이 구간은 % 문턱 제외
+        self.assertEqual(upvalue.rising([100, 110, 115, 130], "%", 6)[0], False)   # 110→115 = +4.5% < 6%
+        self.assertEqual(upvalue.rising([5, 5.5, 6.5, 7], "%p", 0.5)[0], True)
+        self.assertIsNone(upvalue.rising([1, 2, None, 4], "%")[0])
+        row = {"price": 10000.0, "series": {m: [1, 2, 3, 4] for m in upvalue.METRICS},
+               "roe": [8.0, 10.0, 15.0], "bps": [10000.0, 11000.0, 12000.0]}
+        c = upvalue.classify(row)
+        # 적정가 = ROE × 0.1 × 0.83 × BPS → 6,640 / 9,130 / 14,940
+        self.assertEqual([round(v) for v in c["fair"]], [6640, 9130, 14940])
+        self.assertEqual(c["tier"], 2)                   # 내후년 기준에서야 쌈 → 1차
+        self.assertEqual(upvalue.classify(row, factor=False)["tier"], 1)   # 보정 끄면 내년 기준 11,000 > 10,000 → 2차
+        row["series"]["eps"] = [1, 2, None, 4]
+        self.assertEqual(upvalue.classify(row)["status"], "제외")
+        self.assertEqual(upvalue.classify(row, use=("roe",))["status"], "통과")
+
 
 if __name__ == "__main__":
     unittest.main()

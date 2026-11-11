@@ -115,6 +115,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "ctrend": consensus_trend(conn, code, P),
         "good6": _safe(lambda: __import__("analyzer.goodco", fromlist=["good6"]).good6(conn, code, P)),
         "shape": _safe(lambda: __import__("analyzer.goodco", fromlist=["shape"]).shape(conn, code, P)),
+        "upvalue": _safe(lambda: __import__("analyzer.upvalue", fromlist=["rows"]).rows(conn, P)),
         "value5": _safe(lambda: __import__("analyzer.value5", fromlist=["payload"]).payload(conn, code, P, vres["rows"])),
         "biz": __import__("analyzer.segments", fromlist=["payload"]).payload(conn, code, comp["name"] if comp else code, P),
         "screen": __import__("analyzer.screener", fromlist=["results"]).results(conn),
