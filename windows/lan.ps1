@@ -41,10 +41,15 @@ function Lock-Files {
     if (Test-Path $d) { & icacls $d /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" /grant:r 'SYSTEM:(OI)(CI)F' /T /Q | Out-Null }
 }
 function Ensure-DesktopShortcut {
-    $txt = (Get-Content (Join-Path $PSScriptRoot 'lan.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
+    $target = Join-Path $PSScriptRoot 'lan.bat'
     foreach ($d in (Desktop-Dirs)) {
-        $f = Join-Path $d '재무분석 태블릿 접속 설정.bat'
-        if (-not (Test-Path $f)) { [IO.File]::WriteAllText($f, $txt, (New-Object System.Text.UTF8Encoding($false))); Write-Host "      바탕화면 바로가기 만듦: $f" }
+        $f = Join-Path $d '재무분석 태블릿 접속 설정.lnk'
+        if (Test-Path $f) { continue }
+        try {
+            $sh = New-Object -ComObject WScript.Shell; $l = $sh.CreateShortcut($f)
+            $l.TargetPath = $target; $l.WorkingDirectory = $PSScriptRoot; $l.Description = '태블릿 접속 설정'; $l.Save()
+            if (Test-Path $f) { Write-Host "      바탕화면 바로가기 만듦: $f" -ForegroundColor Green }
+        } catch { Write-Host "      바탕화면 바로가기를 만들지 못했습니다: $($_.Exception.Message)" -ForegroundColor Yellow }
     }
 }
 

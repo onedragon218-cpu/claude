@@ -1,6 +1,9 @@
 ﻿# 설치: 파이썬 확인 → DART 인증키 저장 → 작업 스케줄러 등록 → 첫 수집 → 화면 열기
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
+# 설치 기록: 화면에 나온 글을 그대로 %LOCALAPPDATA%\CorpAnalyzer\install_log.txt 에 남긴다(문제가 생기면 이 파일을 보내 주세요)
+$InstallLog = Join-Path $env:LOCALAPPDATA 'CorpAnalyzer\install_log.txt'
+try { New-Item -ItemType Directory -Force -Path (Split-Path $InstallLog) | Out-Null; Start-Transcript -Path $InstallLog -Force | Out-Null } catch { }
 Write-Host ''
 Write-Host '=== 상장기업 재무분석 시스템 설치 (Windows 11) ===' -ForegroundColor Cyan
 Write-Host "프로그램 폴더: $Root"
@@ -121,22 +124,6 @@ Remove-Item (Join-Path $desk '재무분석 열기.url') -ErrorAction SilentlyCon
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $openTxt = (Get-Content (Join-Path $PSScriptRoot 'open.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 열기.bat'), $openTxt, $utf8)
-# '태블릿 접속 설정' 바로가기: 바탕화면이 원드라이브로 옮겨진 PC도 있어 두 곳 모두 확인하고, 만든 위치를 보여 준다
-try {
-    $lanTxt = (Get-Content (Join-Path $PSScriptRoot 'lan.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
-    $made = @()
-    $cand = @($desk, (Join-Path $env:USERPROFILE 'Desktop'))
-    if ($env:OneDrive) { $cand += (Join-Path $env:OneDrive 'Desktop'); $cand += (Join-Path $env:OneDrive '바탕 화면') }
-    foreach ($d in @($cand | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)) {
-        $f = Join-Path $d '재무분석 태블릿 접속 설정.bat'
-        [IO.File]::WriteAllText($f, $lanTxt, $utf8)
-        if (Test-Path $f) { $made += $f }
-    }
-    if ($made) { $made | ForEach-Object { Write-Host "      바로가기: $_" } }
-    else { Write-Host "      바탕화면을 찾지 못했습니다. 태블릿 접속 설정은 $PSScriptRoot\lan.bat 을 직접 실행하세요." -ForegroundColor Yellow }
-} catch {
-    Write-Host "      '태블릿 접속 설정' 바로가기를 만들지 못했습니다: $($_.Exception.Message). $PSScriptRoot\lan.bat 을 직접 실행하세요." -ForegroundColor Yellow
-}
 # 바탕화면 '지금 갱신' 파일(BOM 없는 UTF-8로 써야 cmd가 첫 줄을 읽음)
 $batTxt = (Get-Content (Join-Path $PSScriptRoot 'run_now.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 지금 갱신.bat'), $batTxt, (New-Object System.Text.UTF8Encoding($false)))
@@ -157,3 +144,46 @@ Start-Process $Url
 Write-Host ''
 Write-Host "설치 완료. 화면: $Url  (바탕화면 '재무분석 열기.bat')" -ForegroundColor Green
 Write-Host "데이터·기록: $DataDir  ·  제거: windows\uninstall.bat"
+
+# 바로가기 확인과 '태블릿 접속 설정' 바로가기: 맨 마지막에 만들고 결과를 요약해 보여 준다
+function New-Lnk([string]$path, [string]$target, [string]$desc) {
+    $sh = New-Object -ComObject WScript.Shell
+    $l = $sh.CreateShortcut($path)
+    $l.TargetPath = $target
+    $l.WorkingDirectory = Split-Path $target
+    $l.Description = $desc
+    $l.Save()
+}
+Write-Host ''
+Write-Host '=== 바로가기 ===' -ForegroundColor Cyan
+$lanBat = Join-Path $PSScriptRoot 'lan.bat'
+$cand = @($desk, (Join-Path $env:USERPROFILE 'Desktop'))
+if ($env:OneDrive) { $cand += (Join-Path $env:OneDrive 'Desktop'); $cand += (Join-Path $env:OneDrive '바탕 화면') }
+$desks = @($cand | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
+$okLan = $false
+foreach ($d in $desks) {
+    $f = Join-Path $d '재무분석 태블릿 접속 설정.lnk'
+    try {
+        Remove-Item (Join-Path $d '재무분석 태블릿 접속 설정.bat') -ErrorAction SilentlyContinue   # 예전 방식(.bat 복사본)은 지움
+        New-Lnk $f $lanBat '같은 와이파이 태블릿에서 화면 보기(https + 비밀번호) 켜기·끄기'
+        if (Test-Path $f) { Write-Host "  [만듦] $f" -ForegroundColor Green; $okLan = $true }
+        else { Write-Host "  [실패] $f (만든 뒤 파일이 없음 — 백신 프로그램이 지웠을 수 있음)" -ForegroundColor Yellow }
+    } catch { Write-Host "  [실패] $f : $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+try {
+    $sm = Join-Path ([Environment]::GetFolderPath('Programs')) '재무분석'
+    New-Item -ItemType Directory -Force -Path $sm | Out-Null
+    New-Lnk (Join-Path $sm '재무분석 태블릿 접속 설정.lnk') $lanBat '같은 와이파이 태블릿에서 화면 보기 켜기·끄기'
+    New-Lnk (Join-Path $sm '재무분석 열기.lnk') (Join-Path $PSScriptRoot 'open.bat') '재무분석 화면 열기'
+    Write-Host "  [만듦] 시작 메뉴 → 재무분석 폴더" -ForegroundColor Green
+} catch { Write-Host "  [실패] 시작 메뉴: $($_.Exception.Message)" -ForegroundColor Yellow }
+foreach ($n in @('재무분석 열기.bat', '재무분석 지금 갱신.bat')) {
+    $f = Join-Path $desk $n
+    if (Test-Path $f) { Write-Host "  [있음] $f" } else { Write-Host "  [없음] $f" -ForegroundColor Yellow }
+}
+if (-not $okLan) {
+    Write-Host "  바탕화면에 '태블릿 접속 설정'을 만들지 못했습니다. 아래 파일을 직접 실행하세요:" -ForegroundColor Yellow
+    Write-Host "    $lanBat" -ForegroundColor Yellow
+}
+Write-Host "설치 기록: $InstallLog"
+try { Stop-Transcript | Out-Null } catch { }
