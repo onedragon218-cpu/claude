@@ -393,7 +393,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted" id="n-note" style="margin:6px 0"></p>
     <h3>매출(막대, 억 원)과 영업이익률(선, %, 오른쪽 축)</h3>
     <div class="chartbox" style="height:300px"><canvas id="n-rev"></canvas></div>
-    <h3>영업이익(막대, 억 원) — 연한 막대 = 컨센서스 그대로, 점선 = ×0.83 보정</h3>
+    <h3>영업이익(막대, 억 원) — 연한 막대 = 컨센서스 그대로, 점선 = 보정 값(×0.83, 3개월 급하향이면 ×0.73)</h3>
     <div class="chartbox" style="height:260px"><canvas id="n-op"></canvas></div>
     <h3>분기 매출·영업이익(억 원, 최근 12분기)</h3>
     <div id="n-qnote"></div>
@@ -410,7 +410,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <h2 style="margin:0">가치 5방법 <span class="muted" style="font-size:14px;font-weight:400">주당 가치(원) · ① DCF ② RIM ③ 자산가치 ④ 스트레스 ⑤ 재무위험</span></h2>
     <p class="muted" id="o-note" style="margin:6px 0"></p>
     <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap;margin:8px 0">
-      <label>Ke 가산(%, 국고채 10년 +)<input id="o-ke" type="number" step="0.1" style="width:90px"></label>
+      <label>Ke 가산(%, 국고채 10년 + β×ERP)<input id="o-ke" type="number" step="0.1" style="width:90px"></label>
       <label>WACC(%, 비우면 G 화면 연도별)<input id="o-wacc" type="number" step="0.1" style="width:110px"></label>
       <label>ω(RIM)<input id="o-omega" type="number" step="0.05" min="0" max="1" style="width:80px"></label>
       <label>회수율 현금·단기금융<input id="o-r-cash" type="number" step="5" style="width:70px"></label>
@@ -440,7 +440,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="p-use" value="roe" checked> ROE</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="p-use" value="revenue" checked> 매출액</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="p-use" value="eps" checked> EPS</label>
-      <label style="flex-direction:row;align-items:center;gap:6px" title="적정가 = ROE × 1/10 × 0.83 × BPS. 끄면 0.83을 곱하지 않음"><input type="checkbox" id="p-factor" checked> 보정 ×0.83 적용</label>
+      <label style="flex-direction:row;align-items:center;gap:6px" title="적정가 = ROE × 1/10 × 0.83 × BPS. 끄면 0.83을 곱하지 않음"><input type="checkbox" id="p-factor" checked> 보정 적용(×0.83, 급하향 ×0.73)</label>
     </div>
     <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">
       <span class="muted">최소 증가폭(선택, 비우면 조금이라도 오르면 통과)</span>
@@ -475,9 +475,9 @@ MET.forEach((m,i)=>{ m.color = COLORS[i]; m.ps = 'circle'; });
 // 가치평가 지표(화면 G의 계산 결과)를 통합 그래프에 함께 겹치기 위한 정의
 const VMET = [
   {key:'v_price',  name:'주가',          unit:'원', val:true, color:'--text-primary', ps:'crossRot', f:r=>r.price},
-  {key:'v_srim',   name:'S-RIM 주당가치', unit:'원', val:true, color:'--s8', ps:'triangle', f:r=>(r.values||{}).srim},
-  {key:'v_dcf',    name:'DCF(현금흐름) 주당가치', unit:'원', val:true, color:'--text-secondary', ps:'rect', f:r=>(r.values||{}).dcf},
-  {key:'v_dcf_e',  name:'DCF(이익 기준) 주당가치', unit:'원', val:true, color:'--s7', ps:'rect', f:r=>(r.values||{}).dcf_e},
+  {key:'v_srim',   name:'S-RIM(ω 0.9) 주당가치', unit:'원', val:true, color:'--s8', ps:'triangle', f:r=>(r.values||{}).srim},
+  {key:'v_dcf',    name:'DCF 주당가치', unit:'원', val:true, color:'--text-secondary', ps:'rect', f:r=>(r.values||{}).dcf},
+  {key:'v_dcf_e',  name:'NOPAT÷WACC(무성장) 주당가치', unit:'원', val:true, color:'--s7', ps:'rect', f:r=>(r.values||{}).dcf_e},
   {key:'v_per',    name:'PER 가치',       unit:'원', val:true, color:'--s3', ps:'triangle', f:r=>(r.values||{}).per},
   {key:'v_pbr',    name:'PBR 가치',       unit:'원', val:true, color:'--s4', ps:'triangle', f:r=>(r.values||{}).pbr},
   {key:'v_psr',    name:'PSR 가치',       unit:'원', val:true, color:'--s1', ps:'triangle', f:r=>(r.values||{}).psr},
@@ -598,7 +598,7 @@ function mkChart(canvas, cfg){
   return new Chart(canvas, cfg);
 }
 // 그 연도에 빈 가치평가 항목과 이유(툴팁)
-const MISS_NAME = {roic:'ROIC', wacc:'WACC', dcf:'DCF(현금흐름)', dcf_e:'DCF(이익 기준)'};
+const MISS_NAME = {roic:'ROIC', wacc:'WACC', dcf:'DCF', dcf_e:'NOPAT÷WACC(무성장)'};
 function gapNotes(year, keys){
   const row = ((D.valuation||{}).rows||[]).find(r=>r.year===year); if (!row || !row.missing) return [];
   return Object.entries(row.missing).filter(([k])=>!keys || keys.includes(k)).map(([k,why])=>`${MISS_NAME[k]||k} 빈칸: ${why}`);
@@ -873,7 +873,7 @@ const EST_LABEL = '예상(보수적 추정)\n실제 값 아님';
 // ---- G. 가치평가 ----
 const V = D.valuation || {rows:[], assumptions:{}};
 const VROWS = V.rows || [];
-const VMETH = [['price','주가','--text-primary'],['srim','S-RIM','--s1'],['dcf','DCF(현금흐름)','--s2'],['dcf_e','DCF(이익 기준)','--s8'],['per','PER 가치','--s3'],['pbr','PBR 가치','--s4'],['psr','PSR 가치','--s5'],['median','종합(중앙값)','--s7']];
+const VMETH = [['price','주가','--text-primary'],['srim','S-RIM(ω 0.9)','--s1'],['dcf','DCF','--s2'],['dcf_e','NOPAT÷WACC(무성장)','--s8'],['per','PER 가치','--s3'],['pbr','PBR 가치','--s4'],['psr','PSR 가치','--s5'],['median','종합(중앙값)','--s7']];
 const gVisible = new PSet('vis_g', VMETH.map(m=>m[0]));
 let GTAB = (()=>{ try{ return localStorage.getItem('gtab')||'all'; }catch(e){ return 'all'; } })();
 const allVisible = new PSet('vis_gall', ['price','srim','dcf','dcf_e','median','roic','wacc']);
@@ -1013,13 +1013,13 @@ function renderGRoic(byNote){
   const ok = rows.filter(r=>r.spread!=null && !r.estimated); const pos = ok.filter(r=>r.spread>0).length;   // 요약은 실제 값만
   $('#gsum').innerHTML = ok.length ? `<span>ROIC > WACC인 해 <b>${pos} / ${ok.length}</b></span><span>평균 차이 <b>${(ok.reduce((a,r)=>a+r.spread,0)/ok.length*100).toFixed(2)}%p</b></span><span>최근(${ok[ok.length-1].year}) ROIC <b>${pct(ok[ok.length-1].roic,2)}</b> · WACC <b>${pct(ok[ok.length-1].wacc,2)}</b></span>` : '<span>ROIC·WACC를 계산할 수 있는 연도가 없습니다(차입금 미식별 등).</span>';
   $('#glegend').innerHTML = '<span>ROIC = 영업이익×(1−세율) ÷ 평균 투하자본(자본총계+차입금−현금)</span><span>WACC = 시가총액 비중×Ke + 차입금 비중×Kd×(1−세율)</span>' +
-    (estFrom(rows)!=null ? '<span><b>회색 배경·점선·빈 점 = 예상(보수적 추정)</b>: 증권사 컨센서스에 ROIC·WACC가 없어 직접 추정. 영업이익 컨센서스 ×0.83 보정, 세율·투하자본은 크게, WACC는 높게 잡음</span>' : '');
+    (estFrom(rows)!=null ? '<span><b>회색 배경·점선·빈 점 = 예상(보수적 추정)</b>: 증권사 컨센서스에 ROIC·WACC가 없어 직접 추정. 영업이익 컨센서스는 공통 보정(×0.83, 급하향 ×0.73), 세율은 법정 한계세율, 투하자본은 크게, WACC는 높게 잡음</span>' : '');
 }
 
 function renderGTable(byNote){
   $('#gtitle').textContent='가치평가 계산 근거(연도별)';
   $('#gnote').textContent='모든 금액은 지배주주 기준이며, 억원 표시는 반올림 값입니다.'+byNote;
-  const H = ['연도','구분','주가','S-RIM','DCF(현금흐름)','DCF(이익 기준)','PER 가치','PBR 가치','PSR 가치','종합','괴리율','Rf','Ke','Kd','세율','WACC','ROIC','ROIC−WACC','NOPAT(억)','가중NOPAT(억)','투하자본(억)','FCFF(억)','가중FCFF(억)','차입금(억)','현금(억)','가중ROE','PER(실제)','PBR(실제)','PSR(실제)','적정 PER','적정 PBR','적정 PSR'];
+  const H = ['연도','구분','주가','S-RIM(ω 0.9)','DCF','NOPAT÷WACC(무성장)','PER 가치','PBR 가치','PSR 가치','종합','괴리율','Rf','Ke','Kd','세율','WACC','ROIC','ROIC−WACC','NOPAT(억)','가중NOPAT(억)','투하자본(억)','FCFF(억)','가중FCFF(억)','차입금(억)','현금(억)','가중ROE','PER(실제)','PBR(실제)','PSR(실제)','적정 PER','적정 PBR','적정 PSR'];
   const f2 = x => x==null?'–':x.toFixed(2);
   $('#gtable').innerHTML = '<tr>'+H.map((h,i)=>`<th class="${i<2?'l':''}">${h}</th>`).join('')+'</tr>' + VROWS.map(r=>{
     const v=r.values||{}, m=r.mult||{}, fa=r.fair||{};
@@ -1045,15 +1045,17 @@ function renderGAssump(){
   const A = V.assumptions||{};
   const rf = A['무위험수익률_국고채10년']||{};
   const rows = [
-    ['자기자본비용 Ke','무위험수익률 + 베타 × 시장위험프리미엄', `베타 ${A['베타']}, 시장위험프리미엄 ${pct(A['시장위험프리미엄_ERP'],1)}`],
+    ['자기자본비용 Ke','무위험수익률 + 베타 × 시장위험프리미엄(CAPM)', `베타 ${A['베타']}(회사별 자료 없음), 시장위험프리미엄 ${pct(A['시장위험프리미엄_ERP'],1)}(다모다란 2026-01 한국 4.87% 근처)`],
     ['무위험수익률','그해 국고채 10년 연평균', esc(rf['_출처']||'')],
     ['타인자본비용 Kd','이자지급 ÷ 평균 차입금', `1% 미만·15% 초과면 무위험수익률 + ${pct(A['타인자본비용_가산'],1)}p`],
-    ['세율','법인세 ÷ 세전이익', `0~50% 밖이거나 세전이익 ≤ 0이면 ${pct(A['대체세율'],0)}`],
-    ['WACC','E/(D+E)×Ke + D/(D+E)×Kd×(1−t)','E = 연말 시가총액, D = 차입금·사채·리스부채(장부가)'],
+    ['세율 t','법정 한계세율(지방소득세 10% 포함)','과세표준 구간 = 최근 5년 흑자 세전이익 중앙값(2025년까지 9·19·21·24%, 2026년부터 10·20·22·25% × 1.1). 영구 가치·부채 절세에는 한계세율을 씀(다모다란)'],
+    ['순차입금','차입 계정 전부 + 리스부채 − 현금·단기금융','리스·단기금융상품이 본문에 없으면 XBRL 주석 값. 모든 화면 공통'],
+    ['주식수','발행주식(보통+우선) − 자사주','DART 주식총수. 없으면 지배순이익 ÷ EPS 역산(미검증 표시)'],
+    ['WACC','E/(D+E)×Ke + D/(D+E)×Kd×(1−t)','E = 연말 시가총액, D = 차입 전부 + 리스부채(장부가)'],
     ['ROIC','NOPAT ÷ 평균 투하자본','NOPAT = 영업이익×(1−t), 투하자본 = 자본총계 + 차입금 − 현금·단기금융상품'],
-    ['S-RIM','B + B×(ROE−Ke)×w ÷ (1+Ke−w)', `B = 지배주주 자본, ROE = 최근 3년 3:2:1 가중, w = ${A['S-RIM_초과이익지속계수_w']}`],
-    ['DCF(이익 기준)','가중NOPAT ÷ WACC − 순차입금', '새 투자가 자본비용만큼만 번다고 보는 보수적 가정(성장 가치 0). 현금흐름이 투자·운전자본으로 크게 출렁여 DCF(현금흐름)를 계산할 수 없는 해에도 실제 영업이익으로 계산. 종합(중앙값)에는 넣지 않음'],
-    ['DCF(현금흐름)','가중FCFF×(1+g) ÷ (WACC−g) − 순차입금', `FCFF = 영업현금흐름 − 설비·무형투자 + 영업활동 이자지급×(1−t), 3:2:1 가중, g = ${pct(A['영구성장률_g'],1)}, 지배지분 비율 적용`],
+    ['S-RIM(ω 0.9)','[B + B×(ROE−Ke)×ω ÷ (1+Ke−ω)] ÷ 주식수', `B = 지배주주 자본, ROE = 최근 3년 3:2:1 가중(전망 연도는 그해 보정 ROE), ω = ${A['S-RIM_초과이익지속계수_w']}. 화면 O의 RIM(ω 0.6)과는 다른 방법`],
+    ['DCF','정상화 FCFF×(1+g) ÷ (WACC−g) − 순차입금 − 비지배지분', `FCFF = 영업현금흐름 + 영업 이자지급×(1−t) − 설비투자(유형+무형), 정상화 = 최근 5년 평균(3년 이상), 전망 연도 = 보정 영업이익×(1−t), g = ${pct(A['영구성장률_g'],1)}. 음수면 0(주주 몫 없음). 화면 O의 DCF와 같은 식`],
+    ['NOPAT÷WACC(무성장)','정상화 NOPAT ÷ WACC − 순차입금 − 비지배지분','NOPAT = 영업이익×(1−t), 최근 5년 평균. 현금흐름 대신 이익이 그대로 계속된다고 볼 때의 가치'],
     ['PER·PBR·PSR 가치','적정 배수 × EPS·BPS·주당매출', `적정 배수 = 그 연도까지 자기 배수의 중앙값(최소 ${A['상대가치_최소관측연수']}년), 적자 해 PER 제외`],
     ['종합','계산된 방법들의 중앙값','3개 이상 계산된 해에만'],
   ];
@@ -1461,7 +1463,7 @@ function renderN(){
   const rows = SH.rows||[], cons = (SH.cons||[]).filter(c=>!c.none);
   const labels = rows.map(r=>String(r.year)).concat(cons.map(c=>`${c.year}E`));
   const nP = rows.length, from = cons.length ? nP : null;
-  $('#n-note').innerHTML = `과거 ${rows.length}년 실적(DART) + 컨센서스 ${cons.length}개 연도(원래 값, 기준일 ${esc(SH.cons_asof||'–')}). 영업이익 점선은 엔진 규칙 고정 ×${SH.factor}(화면 위 '컨센서스 보정 적용'과 무관).`;
+  $('#n-note').innerHTML = `과거 ${rows.length}년 실적(DART) + 컨센서스 ${cons.length}개 연도(원래 값, 기준일 ${esc(SH.cons_asof||'–')}). 영업이익 점선 = 보정 값(${SH.factor}, 연도별 계수는 표 참고).`;
   const revBg = labels.map((l,i)=> i<nP ? css('--s1') : rgba('--s1', 0.45));
   const marg = rows.map(r=>r.margin).concat(cons.map(c=>c.margin));
   const act = rows.map(r=>r.margin).filter(v=>v!=null); const mx = Math.max(...act), mn = Math.min(...act);
@@ -1480,7 +1482,7 @@ function renderN(){
   if (charts['n-op']) charts['n-op'].destroy();
   charts['n-op'] = new Chart($('#n-op'), {data:{labels, datasets:[
     {type:'bar', label:'영업이익(억 원)', data:rows.map(r=>r.op).concat(cons.map(c=>c.op)), backgroundColor:labels.map((l,i)=> i<nP ? css('--s3') : rgba('--s3',0.45)), order:2},
-    {type:'line', label:`×${SH.factor} 보정`, data:rows.map(()=>null).concat(cons.map(c=>c.op_adj)), borderColor:css('--text-primary'), backgroundColor:css('--text-primary'), borderDash:[5,4], pointRadius:4, borderWidth:2, order:1}]},
+    {type:'line', label:'보정 값(×0.83, 급하향 ×0.73)', data:rows.map(()=>null).concat(cons.map(c=>c.op_adj)), borderColor:css('--text-primary'), backgroundColor:css('--text-primary'), borderDash:[5,4], pointRadius:4, borderWidth:2, order:1}]},
     options:o2, plugins:[estZonePlugin]});
   const Q = SH.quarters||[];
   if (charts['n-q']) charts['n-q'].destroy();
@@ -1512,12 +1514,12 @@ function v5params(){
     rec:{cash:num('#o-r-cash',100)/100, recv:num('#o-r-recv',85)/100, inv:num('#o-r-inv',60)/100, land:num('#o-r-land',100)/100, bldg:num('#o-r-bldg',30)/100, other:0}};
 }
 function v5compute(p){
-  const Y = V5.inputs, order = V5.order, price = V5.price, TAX = V5.tax, out = {}, fcff = {}, eq = {};
+  const Y = V5.inputs, order = V5.order, price = V5.price, GR = V5.g || 0, out = {}, fcff = {}, eq = {};
   const G = y => Y[String(y)];
+  // FCFF: 실적 = 가치평가(G)와 같은 값(영업현금흐름 + 영업 이자×(1−t) − 설비투자), 전망 = 보정 영업이익 × (1−t)
   order.forEach(y=>{ const r = G(y);
-    if (r.kind==='실적'){ const pr = G(y-1); const ok = [r.op,r.da,r.capex,r.wc].every(v=>v!=null) && pr && pr.wc!=null;
-      fcff[y] = ok ? r.op*(1-TAX) + r.da - r.capex - (r.wc - pr.wc) : null; }
-    else fcff[y] = r.op==null ? null : r.op*(1-TAX); });
+    if (r.kind==='실적') fcff[y] = r.fcff==null ? null : r.fcff;
+    else fcff[y] = (r.op==null || r.tax==null) ? null : r.op*(1-r.tax); });
   const bad = V5.stress_op;
   order.forEach(y=>{ const r = G(y), res = {year:y, kind:r.kind, why:{}, zero:[]};
     const wacc = p.wacc!=null ? p.wacc : r.wacc, ke = r.rf==null ? null : r.rf + p.ke_premium;
@@ -1530,9 +1532,9 @@ function v5compute(p){
     if (r.kind==='실적'){ const win = []; for (let t=y-4;t<=y;t++) if (fcff[t]!=null) win.push(fcff[t]); fn = win.length>=3 ? win.reduce((a,b)=>a+b,0)/win.length : null; res.fcff_n_years = win.length; }
     else fn = fcff[y];
     res.fcff = fcff[y]; res.fcff_n = fn;
-    if (fn==null) res.why.dcf = r.kind==='실적' ? '감가상각비 또는 운전자본 자료 없음(FCFF 3년 미만)' : '영업이익 컨센서스 없음';
+    if (fn==null) res.why.dcf = r.kind==='실적' ? 'FCFF(영업현금흐름 기준)가 3년 미만' : '영업이익 컨센서스 없음';
     else if (!wacc || sh==null || nd==null) res.why.dcf = 'WACC·주식수·순차입금 중 없음';
-    else res.dcf = (fn/wacc - nd - nci)/sh;
+    else res.dcf = (fn*(1+GR)/(wacc-GR) - nd - nci)/sh;
     if ([eq[y], roe, ke].some(v=>v==null) || sh==null) res.why.rim = '지배자본·ROE·Ke·주식수 중 없음';
     else { const w = p.omega; res.rim = (eq[y] + (roe-ke)*eq[y]*w/(1+ke-w))/sh; res.rim_w1 = (eq[y] + (roe-ke)*eq[y]/ke)/sh; }
     if (r.kind!=='실적') res.why.asset = '전망 연도 자산 명세 없음';
@@ -1540,7 +1542,7 @@ function v5compute(p){
     else if ([r.cash_st, r.recv, r.inv, r.liab].some(v=>v==null) || sh==null) res.why.asset = '현금·매출채권·재고·부채·주식수 중 없음';
     else { const c = p.rec; res.asset = (r.cash_st*c.cash + r.recv*c.recv + r.inv*c.inv + r.land*c.land + r.bldg*c.bldg - r.liab - nci)/sh; }
     if (bad==null || !wacc || sh==null || nd==null) res.why.stress = '불황 영업이익·WACC·주식수·순차입금 중 없음';
-    else { res.stress_raw = (bad*(1-TAX)/wacc - nd - nci)/sh; res.stress = res.stress_raw; }
+    else { res.stress_raw = (bad*(1-(r.tax ?? 0.22))/wacc - nd - nci)/sh; res.stress = res.stress_raw; }
     if (res.stress==null) res.why.risk = '④를 계산하지 못함';
     else if ([r.interest, r.mat1, fn, price].some(v=>v==null)) res.why.risk = '이자·1년 내 만기·FCFF·주가 중 없음';
     else if (r.mat2==null || r.mat3==null) res.why.risk = '2·3년차 만기 자료 없음(XBRL 만기 주석 미수집)';
@@ -1561,7 +1563,7 @@ function renderO(){
   const p = v5params(), R = v5compute(p), price = V5.price;
   const years = V5.order.filter(y=>y>=2016), last = V5.last;
   const nShare = years.filter(y=>V5.inputs[String(y)].shares!=null).length;
-  $('#o-note').innerHTML = `현재가 ${price==null?'없음':fmt(price,'원')+'원'} · 세율 ${V5.tax*100}% · g = 0 · 컨센서스 이익 ×${V5.cut[0]} (3개월 사이 ${-V5.cut[2]}% 넘게 깎였으면 ×${V5.cut[1]}) · ④ 불황 영업이익 = ${V5.stress_from}~${V5.stress_to} 중 자료가 있는 ${V5.stress_n}년의 하위 ${V5.stress_pct*100}% 값 ${V5.stress_op==null?'없음':fmt(V5.stress_op/1e8,'억원')+'억('+V5.stress_year+')'}.` +
+  $('#o-note').innerHTML = `현재가 ${price==null?'없음':fmt(price,'원')+'원'} · 세율 = 법정 한계세율(지방세 포함, 연도별) · g = ${((V5.g||0)*100).toFixed(1)}% · 컨센서스 이익 ×${V5.cut[0]} (3개월 사이 ${-V5.cut[2]}% 넘게 깎였으면 ×${V5.cut[1]}) · ④ 불황 영업이익 = ${V5.stress_from}~${V5.stress_to} 중 자료가 있는 ${V5.stress_n}년의 하위 ${V5.stress_pct*100}% 값 ${V5.stress_op==null?'없음':fmt(V5.stress_op/1e8,'억원')+'억('+V5.stress_year+')'}.` +
     (nShare===0 ? ' <b>주식수(발행주식 − 자사주)가 없어 주당 가치를 계산하지 못했습니다 — DART 키가 있는 PC에서 「지금 갱신」을 하면 DART 주식총수를 받아 채웁니다.</b>' : '');
   const ds = [];
   O_METH.forEach(([k, nm, col])=>{
@@ -1586,10 +1588,10 @@ function renderO(){
   $('#o-why').innerHTML = '<tr><th class="l">연도</th><th>영업이익(억)</th><th>FCFF(억)</th><th>정상화 FCFF(억)</th><th>지배자본(억)</th><th>ROE</th><th>Ke</th><th>WACC</th><th>순차입금(억)</th><th>리스(억)</th><th>비지배(억)</th><th>주식수</th><th class="l">빈칸 이유</th></tr>' +
     years.map(y=>{ const r = V5.inputs[String(y)], x = R[y]; const ws = Object.entries(x.why).map(([k,v])=>`${O_METH.find(m=>m[0]===k)[1]}: ${v}`).join(' / ');
       return `<tr><td class="l">${y>last?y+'E':y}</td><td>${e(r.op)}${r.f_op?` <span class="muted">(×${r.f_op})</span>`:''}</td><td>${e(x.fcff)}</td><td>${e(x.fcff_n)}${x.fcff_n_years!=null&&x.fcff_n!=null?` <span class="muted">(${x.fcff_n_years}년)</span>`:''}</td><td>${e(x.eq ?? r.eq)}</td><td>${pc(x.roe)}</td><td>${pc(x.ke)}</td><td>${pc(x.wacc)}</td><td>${e(r.nd)}</td><td>${r.lease==null?'미확인':e(r.lease)}</td><td>${e(r.nci)}</td><td>${r.shares==null?'–':Math.round(r.shares).toLocaleString('ko-KR')}</td><td class="l" style="white-space:normal;min-width:260px">${esc(ws)}</td></tr>`; }).join('');
-  $('#o-rules').innerHTML = '계산식 — ① FCFF = 영업이익×(1−22%) + 감가상각 − 설비투자 − 운전자본 증가(매출채권+재고−매입채무), 정상화 = 최근 5개년 평균(3년 이상일 때, 전망은 그해 값), 주당 = (정상화 FCFF ÷ WACC − 순차입금 − 비지배지분) ÷ 주식수. ' +
-    '② 주당 = [지배자본 + (ROE − Ke) × 지배자본 × ω ÷ (1 + Ke − ω)] ÷ 주식수(옅은 점선 = ω 1). ③ [Σ(장부가 × 회수율) − 부채총계 − 비지배지분] ÷ 주식수, 기타 자산 0%. ' +
-    '④ [불황 영업이익 × (1−22%) ÷ WACC − 순차입금 − 비지배지분] ÷ 주식수. ⑤ 부족분 = 3년 × 이자 + 1·2·3년차 만기 − 3년 × 정상화 FCFF(0 미만은 0), 주당 = ④ × 주식수 ÷ (주식수 + 부족분 ÷ 현재가). ' +
-    '순차입금 = 연결 차입 계정 전부 + 리스부채 − 현금·단기금융(전망 연도는 최근 시점 값). 전망 연도: 자본 = 전년 자본 + 보정 순이익 − 배당(마지막 실적 배당 유지), 설비투자 = 감가상각, 운전자본 증가 0, 주식수·비지배지분은 마지막 실적값. 이자는 XBRL 이자비용, 없으면 현금흐름표 이자 지급.';
+  $('#o-rules').innerHTML = '계산식(앱 공통 기준, 화면 G와 같음) — ① FCFF = 영업현금흐름 + 영업 이자지급 × (1−t) − 설비투자(유형+무형)(운전자본 변동이 모두 반영된 현금흐름표 기준), 정상화 = 최근 5개년 평균(3년 이상), 전망 연도 FCFF = 보정 영업이익 × (1−t), 주당 = (정상화 FCFF × (1+g) ÷ (WACC − g) − 순차입금 − 비지배지분) ÷ 주식수. ' +
+    '② RIM(ω 0.6) = [지배자본 + (ROE − Ke) × 지배자본 × ω ÷ (1 + Ke − ω)] ÷ 주식수(옅은 점선 = ω 1). 화면 G의 S-RIM은 ω 0.9·3년 가중 ROE로 이름이 다른 방법. ③ [Σ(장부가 × 회수율) − 부채총계 − 비지배지분] ÷ 주식수, 기타 자산 0%. ' +
+    '④ [불황 영업이익 × (1−t) ÷ WACC − 순차입금 − 비지배지분] ÷ 주식수. ⑤ 부족분 = 3 × 이자 + 1·2·3년차 만기 − 3 × 정상화 FCFF(0 미만은 0), 주당 = ④ × 주식수 ÷ (주식수 + 부족분 ÷ 현재가). ' +
+    '공통 재료: 세율 t = 법정 한계세율(지방세 포함, 최근 5년 흑자 세전이익 중앙값 구간), 주식수 = 발행 − 자사주(없으면 지배순이익 ÷ EPS 역산, 미검증), 순차입금 = 차입 전부 + 리스 − 현금·단기금융, Ke = 국고채 10년 + β(1.0) × ERP(5%). 올해 열은 컨센서스 기준이라 화면 G의 올해(최근 12개월 실적)와 다를 수 있음.';
 }
 ['#o-ke','#o-wacc','#o-omega','#o-r-cash','#o-r-recv','#o-r-inv','#o-r-land','#o-r-bldg'].forEach(id=>$(id).addEventListener('input', renderO));
 $('#o-reset').onclick = () => { v5fillInputs(); renderO(); };
@@ -1608,8 +1610,8 @@ function pClassify(row, use, th, factor){
   for (const m of use){ const [ok, why] = pRising(row.series[m], PV.metrics[m][1], th[m]);
     if (ok===null) return {status:'제외', why:`${PV.metrics[m][0]} ${why}`};
     if (!ok) return {status:'우상향 아님', why:`${PV.metrics[m][0]} ${why}`}; }
-  const f = factor ? PV.factor : 1;
-  const fair = row.roe.map((r,i)=> r==null || row.bps[i]==null ? null : r*0.1*f*row.bps[i]);
+  const fs = row.f || [PV.factor, PV.factor, PV.factor];
+  const fair = row.roe.map((r,i)=> r==null || row.bps[i]==null ? null : r*0.1*(factor ? fs[i] : 1)*row.bps[i]);
   if (row.price==null || fair.some(v=>v==null)) return {status:'제외', why:'주가 또는 ROE·BPS 컨센서스 없음'};
   const tier = [0,1,2].find(i=>fair[i] > row.price);
   return {status:'통과', tier: tier===undefined ? null : tier, fair, margin: fair.map(v=>v/row.price-1), cheap: fair.map(v=>v>row.price)};
@@ -1620,7 +1622,7 @@ function renderP(){
   const Y = PV.years, use = [...document.querySelectorAll('.p-use')].filter(c=>c.checked).map(c=>c.value);
   const th = {}; ['op_margin','roe','revenue','eps'].forEach(m=>{ const v = $('#p-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
   const factor = $('#p-factor').checked;
-  $('#p-note').innerHTML = `<b>1단계 우상향</b>: ${Y[0]}(실적) &lt; ${Y[1]}E &lt; ${Y[2]}E &lt; ${Y[3]}E 를 고른 지표 모두 만족하는 기업. <b>2단계 가격</b>: 적정가 = ROE(%) × 1/10${factor?' × 0.83':''} × BPS(그해 컨센서스) &gt; 현재 주가. <b>1차 분류</b> = ${Y[3]}E(내후년) 기준, <b>2차 분류</b> = ${Y[2]}E(내년) 기준, <b>3차 분류</b> = ${Y[1]}E(올해) 기준. 대상: DB에 있는 기업 ${PV.rows.length}곳.`;
+  $('#p-note').innerHTML = `<b>1단계 우상향</b>: ${Y[0]}(실적) &lt; ${Y[1]}E &lt; ${Y[2]}E &lt; ${Y[3]}E 를 고른 지표 모두 만족하는 기업. <b>2단계 가격</b>: 적정가 = ROE(%) × 1/10${factor?' × 보정(0.83, 3개월 급하향이면 0.73)':''} × BPS(그해 컨센서스) &gt; 현재 주가. <b>1차 분류</b> = ${Y[3]}E(내후년) 기준, <b>2차 분류</b> = ${Y[2]}E(내년) 기준, <b>3차 분류</b> = ${Y[1]}E(올해) 기준. 대상: DB에 있는 기업 ${PV.rows.length}곳.`;
   const res = PV.rows.map(r=>({r, c: use.length ? pClassify(r, use, th, factor) : {status:'제외', why:'우상향 지표를 하나 이상 고르세요'}}));
   const up = res.filter(x=>x.c.status==='통과'), ex = res.filter(x=>x.c.status==='제외'), no = res.filter(x=>x.c.status==='우상향 아님');
   // 분류(말씀하신 정의 그대로, 서로 독립): 1차 = 내후년 적정가 > 주가, 2차 = 내년, 3차 = 올해
@@ -1639,8 +1641,8 @@ function renderP(){
   const n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
   const ser = (vals, m) => vals.map(v=> v==null ? '–' : (m==='revenue'||m==='eps' ? n0(v) : v.toFixed(1))).join(' → ');
   const pcell = (r, c, i) => { if (!c.fair) return '<td class="muted">–</td>'; const pc = c.margin[i]*100, hit = c.cheap[i], sel = T[PTAB] && T[PTAB].i===i;
-    const f = factor ? PV.factor : 1;
-    const tip = `ROE ${r.roe[i]}% × 1/10${factor?' × 0.83':''} × BPS ${n0(r.bps[i])} = ${n0(c.fair[i])}원`;
+    const ff = (r.f || [])[i] ?? PV.factor;
+    const tip = `ROE ${r.roe[i]}% × 1/10${factor?` × ${ff}`:''} × BPS ${n0(r.bps[i])} = ${n0(c.fair[i])}원${factor && r.f_why ? ' (' + r.f_why[i] + ')' : ''}`;
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${hit?'color:var(--good);font-weight:600':''}">${n0(c.fair[i])}원 ${hit?'✓':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   $('#p-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +

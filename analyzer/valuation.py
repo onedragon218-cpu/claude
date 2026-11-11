@@ -94,8 +94,8 @@ def _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals):
     if "dcf" not in vals:
         if debt is None:
             out["dcf"] = nodebt
-        elif fcff_w is not None and fcff_w <= 0:
-            out["dcf"] = "최근 3년 가중 FCFF(영업현금흐름−투자)가 0 이하 → 영구가치 공식 적용 불가"
+        elif fcff_w is None:
+            out["dcf"] = "FCFF(영업현금흐름+이자×(1−t)−설비투자)가 3년 미만"
         elif not wacc:
             out["dcf"] = "WACC 없음"
         else:
@@ -103,8 +103,8 @@ def _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals):
     if "dcf_e" not in vals:
         if debt is None:
             out["dcf_e"] = nodebt
-        elif nopat_w is not None and nopat_w <= 0:
-            out["dcf_e"] = "최근 3년 가중 세후 영업이익이 0 이하"
+        elif nopat_w is None:
+            out["dcf_e"] = "세후 영업이익이 3년 미만"
         elif not wacc:
             out["dcf_e"] = "WACC 없음"
         else:
@@ -112,7 +112,7 @@ def _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals):
     return out
 
 
-def estimate_roic_wacc(A, rows, cons, P):
+def estimate_roic_wacc(A, rows, cons, P, F=None):
     """ROIC·WACC 예상값(보수적). 증권사 컨센서스에는 ROIC·WACC가 없어서, 실제 값이 있는 마지막 시점을 기준으로 추정한다.
     - ROIC(예상) = 보정 후 컨센서스 영업이익 × (1 − 세율) ÷ 투하자본
         세율 = 기준 시점 유효세율과 대체세율 중 높은 쪽, 투하자본 = 기준 시점 실제값과 '컨센서스 BPS × 주식 수 + 기준 시점 순차입금' 중 큰 쪽
@@ -130,9 +130,9 @@ def estimate_roic_wacc(A, rows, cons, P):
         op = cons.get((fy, "op_income"))
         if op is None:
             continue
-        f_op, why = calibration.factor("op_income", fy)
+        f_op, why = F[(fy, "op_income")] if F else calibration.factor("op_income", fy)
         op_adj = op * f_op * 1e8
-        tax = max(base.get("tax") or 0, A["대체세율"])
+        tax = row.get("tax") if row is not None and row.get("tax") is not None else base.get("tax")   # 법정 한계세율
         nopat = op_adj * (1 - tax)
         ic = base["ic"]
         bps, sh = cons.get((fy, "bps")), base.get("shares")
@@ -144,6 +144,7 @@ def estimate_roic_wacc(A, rows, cons, P):
         rf, _ = _rf(A, fy)
         ke = rf + A["베타"] * A["시장위험프리미엄_ERP"]
         wacc_now = None
+        tax = tax if tax is not None else A["대체세율"]
         if base.get("mcap") and base.get("debt") is not None:
             E, D = base["mcap"] * 1e8, base["debt"]
             kd = base.get("kd") or (rf + A["타인자본비용_가산"])
@@ -176,7 +177,12 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
     if rf_note:
         notes.append(rf_note)
     ke = rf + beta * erp
-    t = _tax_rate(A, flows.get("acc_pretax"), flows.get("acc_tax"), notes)
+    # 세율: 법정 한계세율(지방세 포함, 과세표준 구간). 실효세율은 참고로만 남김
+    t = flows.get("_tax")
+    if t is None:
+        t = _tax_rate(A, flows.get("acc_pretax"), flows.get("acc_tax"), notes)
+    if flows.get("_tax_note"):
+        notes.append(f"세율 {t:.1%}: {flows['_tax_note']}")
 
     debt, cash = stocks.get("acc_debt"), stocks.get("acc_cash")
     int_paid = (flows.get("acc_int_paid") or 0) + (flows.get("acc_int_paid_fin") or 0)
@@ -212,6 +218,14 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
         kd = rf + A["타인자본비용_가산"]
         notes.append("이자지급 자료 없음 → 타인자본비용 = 무위험수익률+가산")
 
+    # 순차입금: 차입 전부 + 리스(본문에 없으면 주석) − 현금·단기금융 (공통 기준). 차입금 미식별이면 그대로 빈칸
+    if debt is not None and stocks.get("_debt_total") is not None:
+        debt, cash = stocks["_debt_total"], stocks.get("_cash_total", cash)
+        if stocks.get("_lease_added"):
+            notes.append(f"리스부채 {_eok(stocks['_lease_added'])}(주석)을 차입금에 더함")
+        if stocks.get("_stfin_added"):
+            notes.append(f"단기금융상품 {_eok(stocks['_stfin_added'])}(주석)을 현금에 더함")
+    nci = stocks.get("_nci") or 0
     E = mcap * 1e8 if mcap else None
     wacc = None
     if E and debt is not None and (kd is not None or debt == 0):
@@ -231,38 +245,43 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
     ocf, capex = flows.get("acc_ocf"), (flows.get("acc_capex_ppe") or 0) + (flows.get("acc_capex_int") or 0)
     fcff = ocf - capex + (flows.get("acc_int_paid") or 0) * (1 - t) if ocf is not None else None
 
-    shares = eq_owner / bps if eq_owner and bps else None
-    vals = {}
+    shares = stocks.get("_shares")
+    if stocks.get("_shares_note") and stocks.get("_shares_unverified"):
+        notes.append(f"주식수: {stocks['_shares_note']}")
+    vals, zero = {}, []
+
+    def _eqv(ev):
+        """기업가치 → 주당 지배주주 가치. 음수면 0(주주 몫 없음)"""
+        v = (ev - (debt - (cash or 0)) - nci) / shares
+        return v
     # S-RIM
     roe_w = wavg3(roe_hist)
     if eq_owner and roe_w is not None and shares:
         vals["srim"] = (eq_owner + eq_owner * (roe_w - ke) * w / (1 + ke - w)) / shares
-    # DCF(FCFF): 3:2:1 가중 FCFF → 영구성장 → 기업가치 − 순차입금 → 지배지분
-    fcff_w = wavg3(fcff_hist := flows.get("_fcff_hist", [fcff]))
-    if fcff_w is not None and fcff_w > 0 and wacc and wacc > g + 0.005 and debt is not None and shares and eq:
-        ev = fcff_w * (1 + g) / (wacc - g)
-        dv = (ev - (debt - (cash or 0))) * (eq_owner / eq) / shares
-        if dv > 0:
-            vals["dcf"] = dv
-        else:
-            notes.append("DCF 지분가치가 0 이하(순차입금 > 기업가치) → 빈칸")
-        if wacc - g < 0.03:
-            notes.append(f"WACC({wacc:.1%})와 성장률({g:.1%}) 차이가 3%p 미만 → DCF가 크게 부풀 수 있음(주의)")
-    elif fcff_w is not None and fcff_w <= 0:
-        notes.append("가중 FCFF가 0 이하 → DCF 계산 안 함")
+    # DCF(공통 기준): FCFF = 영업현금흐름 + 영업 이자지급 × (1−t) − 설비투자(유형+무형) (운전자본 변동이 모두 반영된 현금흐름표 기준)
+    #   정상화 = 최근 5년 단순 평균(3년 이상일 때), 성장률 g → 기업가치 = 정상화 FCFF × (1+g) ÷ (WACC − g)
+    #   주당 = (기업가치 − 순차입금 − 비지배지분) ÷ 주식수, 음수면 0(주주 몫 없음)
+    fh = [x for x in flows.get("_fcff_hist", [fcff]) if x is not None]
+    fcff_w = sum(fh) / len(fh) if len(fh) >= 3 else None
+    if fcff_w is not None and wacc and wacc > g + 0.005 and debt is not None and shares:
+        dv = _eqv(fcff_w * (1 + g) / (wacc - g))
+        vals["dcf"] = max(dv, 0.0)
+        if dv <= 0:
+            zero.append("dcf")
+            notes.append("DCF: 순차입금·비지배지분이 기업가치보다 큼 → 0(주주 몫 없음)")
+    elif fcff_w is None and fh:
+        notes.append(f"FCFF가 {len(fh)}년뿐 → DCF 계산 안 함(3년 이상 필요)")
     elif debt is None:
         notes.append("차입금 미식별 → DCF·ROIC·WACC 계산 안 함")
-    # DCF(이익 기준): 현금흐름이 투자·운전자본으로 크게 출렁이는 회사(예: 콘텐츠 제작비가 영업현금흐름에 잡히는 회사)를 위해
-    # 실제 영업이익으로 계산한다. 기업가치 = 가중 NOPAT ÷ WACC (새 투자가 자본비용만큼만 번다고 보는 보수적 가정, 성장 가치 0)
-    nopat_w = wavg3(flows.get("_nopat_hist", [nopat]))
-    if nopat_w is not None and nopat_w > 0 and wacc and debt is not None and shares and eq:
-        dv2 = (nopat_w / wacc - (debt - (cash or 0))) * (eq_owner / eq) / shares
-        if dv2 > 0:
-            vals["dcf_e"] = dv2
-        else:
-            notes.append("DCF(이익 기준) 지분가치가 0 이하(순차입금 > 기업가치) → 빈칸")
-    elif nopat_w is not None and nopat_w <= 0:
-        notes.append("가중 NOPAT(세후 영업이익)가 0 이하 → DCF(이익 기준) 계산 안 함")
+    # NOPAT ÷ WACC(무성장): 세후 영업이익 5년 평균을 그대로 영구히 번다고 볼 때의 가치(현금흐름 대신 이익 기준)
+    nh = [x for x in flows.get("_nopat_hist", [nopat]) if x is not None]
+    nopat_w = sum(nh) / len(nh) if len(nh) >= 3 else None
+    if nopat_w is not None and wacc and debt is not None and shares:
+        dv2 = _eqv(nopat_w / wacc)
+        vals["dcf_e"] = max(dv2, 0.0)
+        if dv2 <= 0:
+            zero.append("dcf_e")
+            notes.append("NOPAT÷WACC: 순차입금·비지배지분이 기업가치보다 큼 → 0(주주 몫 없음)")
     # 상대가치
     if fair.get("per") and eps and eps > 0:
         vals["per"] = fair["per"] * eps
@@ -270,7 +289,7 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
         vals["pbr"] = fair["pbr"] * bps
     if fair.get("psr") and revenue and shares:
         vals["psr"] = fair["psr"] * revenue * 1e8 / shares
-    core = [v for k, v in vals.items() if k != "dcf_e"]   # 종합은 기존 5가지 방법(S-RIM·DCF·PER·PBR·PSR)으로 유지
+    core = [v for k, v in vals.items() if k != "dcf_e" and k not in zero]   # 종합: S-RIM·DCF·PER·PBR·PSR(주주 몫 없음 0은 제외)
     med = _median(core) if len(core) >= 3 else None
     if len(core) < 3:
         notes.append(f"계산된 방법이 {len(core)}개뿐 → 종합 중앙값 내지 않음(3개 이상일 때만)")
@@ -282,12 +301,15 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
     return {
         "year": y, "kind": kind, "price": price, "mcap": mcap, "shares": shares,
         "values": vals, "median": med, "gap": (med / price - 1) if med and price else None,
-        "rf": rf, "ke": ke, "kd": kd, "tax": t, "wacc": wacc, "roic": roic,
+        "rf": rf, "ke": ke, "kd": kd, "tax": t, "tax_eff": flows.get("_tax_eff"), "wacc": wacc, "roic": roic,
         "spread": roic - wacc if roic is not None and wacc is not None else None,
         "nopat": nopat, "ic": ic, "fcff": fcff, "fcff_w": fcff_w, "debt": debt, "cash": cash,
         "net_debt": debt - (cash or 0) if debt is not None else None, "roe_w": roe_w,
         "mult": mult, "fair": dict(fair), "notes": notes,
-        "nopat_w": nopat_w, "eq": eq, "eq_owner": eq_owner,
+        "nopat_w": nopat_w, "eq": eq, "eq_owner": eq_owner, "nci": nci, "zero": zero,
+        "shares_note": stocks.get("_shares_note"), "shares_unverified": stocks.get("_shares_unverified"),
+        "lease": stocks.get("_lease"), "fcff_n_years": len(fh),
+        "fcff_hist": {str(y - i): v for i, v in enumerate(flows.get("_fcff_hist") or []) if v is not None} if kind == "실적" else {},
         "missing": _missing(notes, debt, wacc, roic, fcff_w, nopat_w, mcap, vals),
     }
 
@@ -305,18 +327,44 @@ def run(conn, code, P):
     hist_mult = {"per": [], "pbr": [], "psr": []}
     min_obs = A["상대가치_최소관측연수"]
 
+    from . import standards
+    try:
+        from . import value5
+        face, xnotes = value5.face_by_year(code), value5.notes_by_year(code)
+    except Exception:       # noqa: BLE001  주석·원본이 없어도 계산은 계속
+        face, xnotes = {}, {}
+
+    def tax_of(y, per="FY", ttm=False):
+        """법정 한계세율(지방세 포함)과 사유. 과세표준은 세전이익으로 근사"""
+        pt = bk.ttm(y, "acc_pretax", per) if ttm else bk.v(y, "acc_pretax", per)
+        return standards.marginal_tax(y, pt, [bk.v(y - i, "acc_pretax") for i in range(1, 6)])
+
     def fcff_of(y, per="FY", ttm=False):
         f = {k: (bk.ttm(y, k, per) if ttm else bk.v(y, k, per)) for k in FLOW_KEYS}
-        t = _tax_rate(A, f["acc_pretax"], f["acc_tax"], [])
+        t, _ = tax_of(y, per, ttm)
         if f["acc_ocf"] is None:
             return None
         return f["acc_ocf"] - (f["acc_capex_ppe"] or 0) - (f["acc_capex_int"] or 0) + (f["acc_int_paid"] or 0) * (1 - t)
 
     def nopat_of(y, per="FY", ttm=False):
-        f = {k: (bk.ttm(y, k, per) if ttm else bk.v(y, k, per)) for k in ("acc_op", "acc_pretax", "acc_tax")}
-        if f["acc_op"] is None:
+        op = bk.ttm(y, "acc_op", per) if ttm else bk.v(y, "acc_op", per)
+        if op is None:
             return None
-        return f["acc_op"] * (1 - _tax_rate(A, f["acc_pretax"], f["acc_tax"], []))
+        return op * (1 - tax_of(y, per, ttm)[0])
+
+    def extras(y, per="FY", ttm=False, share_year=None):
+        """공통 재료: 세율·주식수·순차입금(리스·단기금융 포함)·비지배지분"""
+        t, tn = tax_of(y, per, ttm)
+        sy = share_year if share_year is not None else y
+        sh, sn, su = standards.shares(lambda yy, k, pp="FY": bk.v(yy, k, pp), sy)
+        nd = standards.net_debt(lambda yy, k, pp="FY": bk.v(yy, k, pp), y, per, xnotes.get(y if per == "FY" else y - 1))
+        nci = (face.get(y) or face.get(y - 1) or {}).get("nci")
+        fl = {"_tax": t, "_tax_note": tn}
+        pt, tx = (bk.ttm(y, "acc_pretax", per), bk.ttm(y, "acc_tax", per)) if ttm else (bk.v(y, "acc_pretax", per), bk.v(y, "acc_tax", per))
+        fl["_tax_eff"] = tx / pt if pt and pt > 0 and tx is not None else None
+        st = {"_shares": sh, "_shares_note": sn, "_shares_unverified": su, "_debt_total": nd["debt"], "_cash_total": nd["cash"],
+              "_lease": nd["lease"], "_lease_added": nd["lease_added"], "_stfin_added": nd["stfin_added"], "_nci": nci or 0}
+        return fl, st
 
     def roe(y):
         r = bk.v(y, "roe")
@@ -324,9 +372,12 @@ def run(conn, code, P):
 
     for y in P["past"]:
         flows = {k: bk.v(y, k) for k in FLOW_KEYS}
-        flows["_fcff_hist"] = [fcff_of(y), fcff_of(y - 1), fcff_of(y - 2)]
-        flows["_nopat_hist"] = [nopat_of(y), nopat_of(y - 1), nopat_of(y - 2)]
+        flows["_fcff_hist"] = [fcff_of(y - i) for i in range(5)]
+        flows["_nopat_hist"] = [nopat_of(y - i) for i in range(5)]
+        fx, sx = extras(y)
+        flows.update(fx)
         stocks = {k: bk.v(y, k) for k in STOCK_KEYS}
+        stocks.update(sx)
         prev = {k: bk.v(y - 1, k) for k in STOCK_KEYS}
         price, mcap, eps, bps, rev = (bk.v(y, "price_close"), bk.v(y, "market_cap"), bk.v(y, "eps"),
                                       bk.v(y, "bps"), bk.v(y, "revenue"))
@@ -358,12 +409,16 @@ def run(conn, code, P):
         if missing:
             flows = {k: bk.v(cy - 1, k) for k in FLOW_KEYS}
             note = f"최근 12개월 계산 불가({', '.join(missing)}) → {cy - 1}년 연간 흐름 사용"
-            flows["_fcff_hist"] = [fcff_of(cy - 1), fcff_of(cy - 2), fcff_of(cy - 3)]
-            flows["_nopat_hist"] = [nopat_of(cy - 1), nopat_of(cy - 2), nopat_of(cy - 3)]
+            flows["_fcff_hist"] = [fcff_of(cy - 1 - i) for i in range(5)]
+            flows["_nopat_hist"] = [nopat_of(cy - 1 - i) for i in range(5)]
+            fx = extras(cy - 1)[0]
         else:
-            flows["_fcff_hist"] = [fcff_of(cy, per, ttm=True), fcff_of(cy - 1), fcff_of(cy - 2)]
-            flows["_nopat_hist"] = [nopat_of(cy, per, ttm=True), nopat_of(cy - 1), nopat_of(cy - 2)]
+            flows["_fcff_hist"] = [fcff_of(cy, per, ttm=True)] + [fcff_of(cy - i) for i in range(1, 5)]
+            flows["_nopat_hist"] = [nopat_of(cy, per, ttm=True)] + [nopat_of(cy - i) for i in range(1, 5)]
+            fx = extras(cy, per, ttm=True, share_year=cy - 1)[0]
+        flows.update(fx)
         stocks = {k: bk.v(cy, k, per) for k in STOCK_KEYS}
+        stocks.update(extras(cy, per, share_year=cy - 1)[1])      # 재무상태는 최근 분기·반기말, 주식수는 작년 말
         prev = {k: bk.v(cy - 1, k) for k in STOCK_KEYS}
         eq_now, eq_prev = stocks.get("acc_eq_owner"), bk.v(cy - 1, "acc_eq_owner")
         ni = flows.get("acc_ni_owner")
@@ -380,40 +435,73 @@ def run(conn, code, P):
         r["caution"] = True
         rows.append(r)
 
-    # 미래: 컨센서스가 있을 때만(주당 EPS·BPS·매출 추정치)
+    # 미래: 컨센서스가 있을 때만. 보정은 공통 규칙(×0.83, 3개월 사이 5% 넘게 하향이면 ×0.73, 매출은 보정 안 함)
     cons = {(r["target_year"], r["metric"]): r["value"] for r in db.latest_consensus(conn, code)}
-    last_sh = next((r["shares"] for r in reversed(rows) if r.get("shares")), None)
-    for fy in P["future"]:
-        eps, bps, rev, roe_e = cons.get((fy, "eps")), cons.get((fy, "bps")), cons.get((fy, "revenue")), cons.get((fy, "roe"))
-        # 컨센서스 보정계수(원래 값은 DB에 그대로): EPS·ROE는 EPS 계수, 매출은 매출 계수, BPS는 보정 안 함
-        from . import calibration
-        fe, why_e = calibration.factor("eps", fy)
-        fr, _ = calibration.factor("revenue", fy)
+    F = standards.factors(conn, code, P)
+    base = next((r for r in reversed(rows) if r.get("shares")), None)
+    last_sh = base["shares"] if base else None
+    nd_now = base["net_debt"] if base else None
+    nci_now = base.get("nci", 0) if base else 0
+    # 자본 굴리기: 전년 지배자본 + 보정 순이익 − 배당(마지막 실적 배당 유지)
+    div_last = (face.get(cy - 1) or {}).get("div") or 0
+    eq_r, rolled = bk.v(cy - 1, "acc_eq_owner"), {}
+    for y in [cy] + list(P["future"]):
+        ni = cons.get((y, "net_income"))
+        if ni is None or eq_r is None:
+            break
+        ni_adj = ni * 1e8 * F[(y, "net_income")][0]
+        e1 = eq_r + ni_adj - div_last
+        rolled[y] = (eq_r, e1, ni_adj)
+        eq_r = e1
+    pretax_hist = [bk.v(cy - i, "acc_pretax") for i in range(1, 6)]
+    has_cy = any(r["year"] == cy for r in rows)          # 올해 실적(분기·반기)이 없으면 올해도 컨센서스로
+    for fy in ([] if has_cy else [cy]) + list(P["future"]):
+        eps, bps, rev = cons.get((fy, "eps")), cons.get((fy, "bps")), cons.get((fy, "revenue"))
+        fe, why_e = F[(fy, "eps")]
+        fo, why_o = F[(fy, "op_income")]
         eps = eps * fe if eps is not None else None
-        roe_e = roe_e * fe if roe_e is not None else None
-        rev = rev * fr if rev is not None else None
         if not any((eps, bps, rev)):
             continue
         fair = {m: (statistics.median(v) if len(v) >= min_obs else None) for m, v in hist_mult.items()}
         rf, _ = _rf(A, fy)
-        ke = rf + A["베타"] * A["시장위험프리미엄_ERP"]
-        vals = {}
-        if bps and roe_e is not None:
+        ke = standards.ke(A, rf)
+        t, tn = standards.marginal_tax(fy, None, pretax_hist)
+        vals, notes, roe_f, eq_f = {}, [], None, None
+        if fy in rolled and last_sh:
+            e0, e1, ni_adj = rolled[fy]
+            roe_f, eq_f = ni_adj / ((e0 + e1) / 2), e1
             w = A["S-RIM_초과이익지속계수_w"]
-            vals["srim"] = bps + bps * (roe_e / 100 - ke) * w / (1 + ke - w)
+            vals["srim"] = (e1 + e1 * (roe_f - ke) * w / (1 + ke - w)) / last_sh
         if fair.get("per") and eps and eps > 0:
             vals["per"] = fair["per"] * eps
         if fair.get("pbr") and bps:
             vals["pbr"] = fair["pbr"] * bps
         if fair.get("psr") and rev and last_sh:
             vals["psr"] = fair["psr"] * rev * 1e8 / last_sh
+        op = cons.get((fy, "op_income"))
         rows.append({"year": fy, "kind": "전망(컨센서스)", "price": None, "values": vals,
                      "median": _median(vals.values()) if len(vals) >= 3 else None,
-                     "gap": None, "ke": ke, "fair": fair, "mult": {}, "notes": ["컨센서스 EPS·BPS·ROE·매출로 계산, DCF 제외",
-                               f"보정계수 적용: EPS·ROE ×{fe:.2f}, 매출 ×{fr:.2f} ({why_e})"],
-                     "caution": True})
+                     "gap": None, "rf": rf, "ke": ke, "tax": t, "fair": fair, "mult": {}, "caution": True,
+                     "shares": last_sh, "net_debt": nd_now, "nci": nci_now, "roe_f": roe_f, "eq_owner": eq_f,
+                     "op_adj": op * 1e8 * fo if op is not None else None, "zero": [],
+                     "notes": [f"컨센서스 보정: 영업이익 {why_o}, EPS·순이익·ROE {why_e}, 매출 보정 안 함",
+                               f"S-RIM 자본 = 전년 자본 + 보정 순이익 − 배당({_eok(div_last)} 유지), 주식수·순차입금은 최근 값",
+                               f"세율 {t:.1%}" + (f"({tn})" if tn else "")]})
 
-    estimate_roic_wacc(A, rows, cons, P)
+    estimate_roic_wacc(A, rows, cons, P, F)
+    # 전망 연도 DCF(공통 기준): 보정 영업이익 × (1−t) = FCFF(설비투자 = 감가상각, 운전자본 증가 0) → ÷ (WACC − g)
+    g = A["영구성장률_g"]
+    for r in rows:
+        if r.get("kind") != "전망(컨센서스)" or not r.get("op_adj") or not r.get("wacc") or r.get("shares") is None \
+                or r.get("net_debt") is None or r["wacc"] <= g + 0.005:
+            continue
+        dv = (r["op_adj"] * (1 - r["tax"]) * (1 + g) / (r["wacc"] - g) - r["net_debt"] - (r.get("nci") or 0)) / r["shares"]
+        r["values"]["dcf"] = max(dv, 0.0)
+        if dv <= 0:
+            r["zero"].append("dcf")
+        r["fcff_w"] = r["op_adj"] * (1 - r["tax"])
+        core = [v for k, v in r["values"].items() if k != "dcf_e" and k not in r["zero"]]
+        r["median"] = _median(core) if len(core) >= 3 else None
 
     # 검증 항목 11~12
     for r in rows:

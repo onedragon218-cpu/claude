@@ -5,7 +5,7 @@
    - 최소 증가폭은 선택 입력(매출·EPS는 %, 영업이익률·ROE는 %p). 비우면 조금이라도 오르면 통과.
    - 작년이 적자(0 이하)였다가 오른 경우도 우상향(턴어라운드)으로 본다. 이때 %로 재는 문턱은 적용하지 않는다.
    - 고른 지표의 컨센서스가 하나라도 없으면 제외.
-2) 가격 판정: 적정가 = ROE(%) × 1/10 × 0.83(보정, 기본 켬) × BPS(컨센서스 그해 값) > 현재 주가
+2) 가격 판정: 적정가 = ROE(%) × 1/10 × 보정(앱 공통 규칙 ×0.83, 급하향 ×0.73, 기본 켬) × BPS(컨센서스 그해 값) > 현재 주가
    1차 = 내후년 기준, 2차 = 내년 기준, 3차 = 올해 기준. 화면에는 '몇 년 뒤 기준부터 싼가' 한 칸과 안전 여유(적정가 ÷ 주가 − 1)를 함께 보여 준다.
 리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님
 """
@@ -39,7 +39,10 @@ def rows(conn, P):
                     vals.append(cv(y, m))
             series[m] = vals
         asof = max(((cons.get((y, "roe")) or {}).get("as_of") or "" for y in years[1:]), default="") or None
+        from . import standards
+        Fx = standards.factors(conn, code, P)
         out.append({"code": code, "name": c["name"], "price": fv(cy, "price_close", "ASOF"),
+                    "f": [Fx[(y, "eps")][0] for y in years[1:]], "f_why": [Fx[(y, "eps")][1] for y in years[1:]],
                     "series": series, "roe": [cv(y, "roe") for y in years[1:]], "bps": [cv(y, "bps") for y in years[1:]],
                     "as_of": asof})
     return {"years": years, "rows": out, "factor": FACTOR, "metrics": METRICS,
@@ -63,8 +66,9 @@ def rising(vals, kind, th=None):
 
 
 def fair_prices(row, factor=True):
-    f = FACTOR if factor else 1.0
-    return [None if r is None or b is None else r * 0.1 * f * b for r, b in zip(row["roe"], row["bps"])]
+    """적정가 = ROE × 1/10 × 보정 × BPS. 보정은 앱 공통 규칙(EPS 기준: ×0.83, 3개월 사이 5% 넘게 하향이면 ×0.73)"""
+    fs = row.get("f") or [FACTOR] * 3
+    return [None if r is None or b is None else r * 0.1 * (f if factor else 1.0) * b for r, b, f in zip(row["roe"], row["bps"], fs)]
 
 
 def classify(row, use=("op_margin", "roe", "revenue", "eps"), th=None, factor=True):

@@ -14,8 +14,8 @@ import statistics
 
 from . import config, db
 
-ENGINE_FACTOR = 0.83          # 엔진 규칙: 이익 컨센서스 고정 할인
-REQ_DIV = 7.8                 # 10배 × (1 − 세율 22%)
+ENGINE_FACTOR = 0.83          # 공통 보정 규칙의 기본값(급하향이면 0.73 — analyzer/standards.py)
+REQ_DIV = 7.8                 # 예전 기본값: 10배 × (1 − 22%). 지금은 10배 × (1 − 법정 한계세율)을 씀
 MARKS = ("✓", "△", "✗", "조사")
 PRINCIPLE = "좋은 기업이어도 주가가 많이 오르면 '투자하기 좋은 기업'이 아니다."
 DISCLAIMER = "리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님"
@@ -97,13 +97,21 @@ class Data:
         return None
 
     def net_debt(self):
-        """가장 최근 시점의 차입금 − 현금(억원). (값, 시점 설명)"""
+        """가장 최근 시점의 순차입금(억원, 공통 기준: 차입 전부 + 리스 − 현금·단기금융). (값, 시점 설명)"""
+        from . import standards
+        try:
+            from .value5 import notes_by_year
+            xn = notes_by_year(self.code)
+        except Exception:      # noqa: BLE001
+            xn = {}
+        get = lambda y, k, per="FY": self.v(y, k, per)
         per = self.latest_interim()
         if per and self.v(self.cy, "acc_debt", per) is not None:
-            return (self.v(self.cy, "acc_debt", per) - (self.v(self.cy, "acc_cash", per) or 0)) / 1e8, f"{self.cy} {per}말"
+            nd = standards.net_debt(get, self.cy, per, xn.get(self.cy - 1))
+            return nd["nd"] / 1e8, f"{self.cy} {per}말"
         for y in reversed(self.years):
             if self.v(y, "acc_debt") is not None:
-                return (self.v(y, "acc_debt") - (self.v(y, "acc_cash") or 0)) / 1e8, f"{y} 연말"
+                return standards.net_debt(get, y, "FY", xn.get(y))["nd"] / 1e8, f"{y} 연말"
         return None, "차입금 자료 없음"
 
     def market_cap_now(self):
@@ -159,18 +167,19 @@ def rule_three(r3, roe_est, rpk):
     return "✗"
 
 
-def rule_six(mc, nd, op27, op28, n27, last_op=None, last=None):
-    """⑥ 반환: (판정, 숫자 칸)"""
+def rule_six(mc, nd, op27, op28, n27, last_op=None, last=None, tax=0.22, f27=ENGINE_FACTOR, f28=ENGINE_FACTOR):
+    """⑥ 반환: (판정, 숫자 칸). 요구 영업이익 = (시총 + 순차입금) ÷ (10 × (1 − 세율)), 컨센 영업이익은 공통 보정 계수"""
     if n27 is not None and n27 <= 1:
         return "판정 못 함(원천 대기)", f"{_e(last + 2) if last else '27E'} 컨센 원천 {n27}곳 — 원천이 더 생기면 판정"
     if mc is None:
         return "판정 못 함(시총 없음)", "지금 시가총액 자료 없음"
     if op27 is None:
         return "판정 못 함(컨센 없음)", "영업이익 컨센서스 없음"
-    req = (mc + (nd or 0)) / REQ_DIV
-    r27, r28 = op27 * ENGINE_FACTOR, (op28 * ENGINE_FACTOR if op28 is not None else None)
+    div = 10 * (1 - tax)
+    req = (mc + (nd or 0)) / div
+    r27, r28 = op27 * f27, (op28 * f28 if op28 is not None else None)
     mark = "✓(컨센 기준)" if req < r27 else "✗"
-    txt = (f"지금 시총이 요구하는 영업이익 {_f(req)}억 vs 27E×0.83 {_f(r27)}억 · 28E×0.83 {_f(r28)}억"
+    txt = (f"지금 시총이 요구하는 영업이익 {_f(req)}억(÷{div:.2f} = 10배 × (1−{tax:.1%})) vs 27E×{f27} {_f(r27)}억 · 28E×{f28} {_f(r28)}억"
            + (f" · {last} 실적 {_f(last_op)}억" if last else ""))
     if n27 is None:
         txt += " · 원천 수 미확인"
@@ -181,7 +190,7 @@ def good6(conn, code, P):
     D = Data(conn, code, P)
     man = load_manual().get(code) or {}
     out = {"names": NAMES, "principle": PRINCIPLE, "disclaimer": DISCLAIMER, "cons_asof": D.cons_asof(),
-           "factor_note": "보정: 고정 0.83(엔진 규칙) — 화면 위 '컨센서스 보정 적용'과 무관",
+           "factor_note": "보정: 앱 공통 규칙(×0.83, 3개월 사이 5% 넘게 하향이면 ×0.73) · 세율: 법정 한계세율(지방세 포함)",
            "manual": man, "rows": {}}
     rev = {y: D.eok(y, "acc_revenue") for y in D.years}
     rev = {y: v for y, v in rev.items() if v is not None and v > 0}
@@ -283,7 +292,11 @@ def good6(conn, code, P):
     # ⑥
     mc, mc_st = D.market_cap_now()
     nd, nd_when = D.net_debt()
-    mark, t = rule_six(mc, nd, D.c(cy + 1, "op_income"), D.c(cy + 2, "op_income"), n27, op.get(last), last)
+    from . import standards
+    Fs = standards.factors(conn, code, P)
+    tax6, _ = standards.marginal_tax(cy + 1, None, [D.v(last - i, "acc_pretax") for i in range(5)])
+    mark, t = rule_six(mc, nd, D.c(cy + 1, "op_income"), D.c(cy + 2, "op_income"), n27, op.get(last), last,
+                       tax=tax6, f27=Fs[(cy + 1, "op_income")][0], f28=Fs[(cy + 2, "op_income")][0])
     if mc is not None:
         t += f" · 시총 {_f(mc)}억{'(역산 주식수 · UNVERIFIED)' if mc_st == 'UNVERIFIED' else ''} · 순차입 {_f(nd)}억({nd_when})"
     eng = engine_row(code)
@@ -337,6 +350,8 @@ def shape(conn, code, P):
                    "margin": op / rev * 100 if rev and op is not None else None, "ocf": D.eok(cy, "acc_ocf", per),
                    "net_debt": nd, "net_debt_when": nd_when}
     rev3m = {(it["year"], it["metric"]): it for it in consensus_trend(conn, code, P).get("summary", [])}
+    from . import standards
+    Fn = standards.factors(conn, code, P)
     cons = []
     for y in (cy, cy + 1, cy + 2):
         rv, op = D.c(y, "revenue"), D.c(y, "op_income")
@@ -344,7 +359,8 @@ def shape(conn, code, P):
             cons.append({"year": y, "none": True})
             continue
         r = rev3m.get((y, "op_income")) or {}
-        cons.append({"year": y, "revenue": rv, "op": op, "op_adj": op * ENGINE_FACTOR if op is not None else None,
+        fy_ = Fn[(y, "op_income")][0]
+        cons.append({"year": y, "revenue": rv, "op": op, "op_adj": op * fy_ if op is not None else None, "factor": fy_,
                      "margin": op / rv * 100 if rv and op is not None else None,
                      "rev3m": (r.get("ch") or {}).get(3), "rev3m_tag": (r.get("tag") or {}).get(3)})
     ms = [r["margin"] for r in rows if r["margin"] is not None]
@@ -362,4 +378,4 @@ def shape(conn, code, P):
     q = quarters(D)
     return {"rows": rows, "partial": partial, "cons": cons, "memo": memo, "quarters": q,
             "quarters_note": None if len(q) >= 4 else "분기 자료 미수집 — 최근 3년 1분기·반기·3분기 보고서 수집 필요",
-            "factor": ENGINE_FACTOR, "cons_asof": D.cons_asof(), "disclaimer": DISCLAIMER}
+            "factor": "공통 규칙(×0.83, 급하향 ×0.73)", "cons_asof": D.cons_asof(), "disclaimer": DISCLAIMER}

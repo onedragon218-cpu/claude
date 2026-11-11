@@ -9,20 +9,19 @@ FLOW = {"revenue", "eps", "roe"}           # 현재 연도 부분 실적을 연�
 STOCK = {"bps", "debt_ratio", "market_cap"}  # 시점 값(현재 연도에 최신 실제치를 쓸 수 있음)
 
 
-def _corr(metric, year, raw):
-    """컨센서스 원래 값과 보정 값. 매출·EPS는 각 계수, 영업이익률은 영업이익 계수 ÷ 매출 계수, ROE는 EPS 계수,
-    BPS는 이미 쌓인 자본이라 보정하지 않음."""
-    from . import calibration
+def _corr(metric, year, raw, F=None):
+    """컨센서스 원래 값과 보정 값(앱 공통 규칙: ×0.83, 3개월 사이 5% 넘게 하향이면 ×0.73, 매출은 보정 안 함).
+    영업이익률은 영업이익 계수 ÷ 매출 계수, EPS·ROE는 EPS 계수, BPS는 이미 쌓인 자본이라 보정하지 않음."""
     if raw is None:
         return {"value": None, "raw": None, "factor": 1.0, "why": None}
-    if metric in ("revenue", "eps"):
-        f, why = calibration.factor(metric, year)
+    F = F or {}
+    pick = lambda m: F.get((year, m), (1.0 if m == "revenue" else 0.83, "공통 규칙"))
+    if metric in ("revenue", "eps", "roe"):
+        f, why = pick("eps" if metric == "roe" else metric)
     elif metric == "op_margin":
-        fo, w1 = calibration.factor("op_income", year)
-        fr, _ = calibration.factor("revenue", year)
+        fo, w1 = pick("op_income")
+        fr, _ = pick("revenue")
         f, why = (fo / fr if fr else 1.0), f"영업이익 계수 ÷ 매출 계수 ({w1})"
-    elif metric == "roe":
-        f, why = calibration.factor("eps", year)
     else:
         f, why = 1.0, "보정 대상 아님"
     return {"value": raw * f, "raw": raw, "factor": f, "why": why}
@@ -55,6 +54,8 @@ def payload(conn, code, base_year=None, last_run=None):
             latest[(ty, "op_margin")] = dict(r, metric="op_margin", unit="%",
                                              value=r["value"] / latest[(ty, "revenue")]["value"] * 100,
                                              source_ref=(r["source_ref"] or "") + " (영업이익/매출 추정치로 계산)")
+    from . import standards
+    F = standards.factors(conn, code, P)
     series = {}
     for m in config.METRIC_KEYS:
         pts = {}
@@ -65,7 +66,7 @@ def payload(conn, code, base_year=None, last_run=None):
             est = latest.get((y, m))
             pts[y] = {
                 "fy": _pt(fy), "partial": _pt(part),
-                "est": None if est is None else dict(_corr(m, y, est["value"]), provider=est["provider"],
+                "est": None if est is None else dict(_corr(m, y, est["value"], F), provider=est["provider"],
                                                      as_of=est["as_of"], n=est["n_estimates"],
                                                      source_ref=est["source_ref"]),
             }
@@ -111,7 +112,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "companies": companies,
         "last_run": last_run,
         "growth": growth_table(conn, P),
-        "calibration": calibration_info(P),
+        "calibration": calibration_info(P, F),
         "ctrend": consensus_trend(conn, code, P),
         "good6": _safe(lambda: __import__("analyzer.goodco", fromlist=["good6"]).good6(conn, code, P)),
         "shape": _safe(lambda: __import__("analyzer.goodco", fromlist=["shape"]).shape(conn, code, P)),
@@ -350,15 +351,15 @@ def grade_leverage(conn, code, rows, bk, vr):
         r["lev_notes"] = notes
 
 
-def calibration_info(P):
-    """화면 표시용 보정계수(연도·지표별)와 근거"""
+def calibration_info(P, F=None):
+    """화면 표시용 보정계수(연도·지표별)와 근거 — 앱 공통 규칙(standards.factors)"""
     from . import calibration
     cal = calibration.load()
     out = {"available": bool(cal), "fiscal_year": cal.get("fiscal_year") if cal else None,
            "companies": cal.get("companies") if cal else None, "factors": {}}
     for y in [P["current"]] + P["future"]:
         for m in ("revenue", "op_income", "eps"):
-            f, why = calibration.factor(m, y)
+            f, why = (F or {}).get((y, m), (1.0 if m == "revenue" else 0.83, "공통 규칙"))
             out["factors"][f"{y}:{m}"] = {"factor": f, "why": why}
     if cal and cal.get("factors"):   # 측정값은 참고로만 보여 준다(적용은 assumptions.json 방식을 따름)
         name = {"revenue": "매출", "op_income": "영업이익", "eps": "EPS"}
@@ -440,8 +441,8 @@ def consensus_trend(conn, code, P):
 
 
 def growth_table(conn, P):
-    """DB에 자료가 있는 기업의 작년 실적·올해~내후년 컨센서스(원래 값과 보정 값)"""
-    from . import calibration, db as _db
+    """DB에 자료가 있는 기업의 작년 실적·올해~내후년 컨센서스(원래 값과 보정 값, 공통 보정 규칙)"""
+    from . import calibration, standards, db as _db
     cy = P["current"]
     years = [cy - 1, cy, cy + 1, cy + 2]
     cal = calibration.load()
@@ -452,6 +453,7 @@ def growth_table(conn, P):
         fv = lambda y, k: (lambda r: None if r is None else r["value"])(_db.current_fact(conn, code, y, k))
         cons = {(r["target_year"], r["metric"]): dict(r) for r in _db.latest_consensus(conn, code)}
         row = {"code": code, "name": c["name"], "years": {}, "rev3m": {}}
+        Fc = standards.factors(conn, code, P)
         for it in consensus_trend(conn, code, P).get("summary", []):    # 영업이익 컨센서스 3개월 수정률
             if it["metric"] == "op_income" and it["year"] in (cy, cy + 1):
                 row["rev3m"][it["year"]] = {"pct": it["ch"][3], "tag": it["tag"][3], "dir": it["dir"]}
@@ -470,7 +472,7 @@ def growth_table(conn, P):
                 continue
             adj = {}
             for m, v in raw.items():
-                f, _ = calibration.factor(m, y, cal=cal)
+                f, _ = Fc.get((y, m), (1.0, ""))
                 adj[m] = None if v is None else v * f
             asof = max(((cons.get((y, m)) or {}).get("as_of") or "") for m in raw)
             row["years"][y] = {"kind": "컨센서스", "raw": raw, "adj": adj, "as_of": asof}

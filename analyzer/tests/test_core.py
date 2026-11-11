@@ -88,13 +88,15 @@ class T(unittest.TestCase):
         self.assertIn(2025, rows)
         r = rows[2025]
         self.assertGreater(r["values"]["srim"], 0)
-        self.assertAlmostEqual(r["ke"], 0.02894 + 0.055, places=6)            # 국고채 2025 + ERP, 베타 1
+        self.assertAlmostEqual(r["ke"], 0.02894 + 0.05, places=6)             # 국고채 2025 + ERP 5%, 베타 1
         self.assertIsNotNone(r["roic"]); self.assertIsNotNone(r["wacc"])
         for y, row in rows.items():                                            # 종합은 3개 이상일 때만
             if row["median"] is not None:
                 self.assertGreaterEqual(len(row["values"]), 3)
-            for v in row["values"].values():
-                self.assertGreater(v, 0)                                       # 0 이하 가치는 저장하지 않음
+            for k, v in row["values"].items():
+                self.assertGreaterEqual(v, 0)                                  # 음수는 0(주주 몫 없음)으로
+                if v == 0:
+                    self.assertIn(k, row.get("zero") or [])
         # 2016~2017은 상대가치 적정 배수가 아직 없어야 함(사후 정보 금지)
         self.assertIsNone(rows[2016]["fair"]["per"])
 
@@ -359,7 +361,7 @@ class T(unittest.TestCase):
             self.assertGreater(r["year"], base["year"])
             self.assertGreaterEqual(r["wacc"], base["wacc"])                  # WACC는 높게
             self.assertGreaterEqual(r["ic"], base["ic"])                      # 투하자본은 크게
-            self.assertGreaterEqual(r["tax"], valuation.load_assumptions()["대체세율"])
+            self.assertGreaterEqual(r["tax"], 0.099)            # 법정 한계세율(지방세 포함) — 최저 구간 9%×1.1 이상
             self.assertTrue(any("예상(보수적 추정)" in n for n in r["notes"]))
 
     def test_fnguide_parser(self):
@@ -516,8 +518,8 @@ class T(unittest.TestCase):
         base = dict(kind="실적", op=100.0, ni=10.0, eq=1000.0, liab=500.0, nci=0.0, shares=10.0, da=20.0, capex=20.0,
                     wc=50.0, cash_st=100.0, recv=100.0, inv=100.0, land=100.0, bldg=100.0, nd=200.0, interest=5.0,
                     mat1=10.0, mat2=10.0, mat3=10.0, rf=0.03, wacc=0.08, div=0.0)
-        Y = {y: dict(base, year=y, op=float(o)) for y, o in zip(range(2010, 2026), range(160, 0, -10))}   # 2010 160 … 2025 10
-        data = {"years": Y, "order": sorted(Y), "price": 50.0, "stress_from": 2006, "stress_to": 2025}
+        Y = {y: dict(base, year=y, op=float(o), tax=0.22, fcff=float(o) * 0.78) for y, o in zip(range(2010, 2026), range(160, 0, -10))}   # 2010 160 … 2025 10
+        data = {"years": Y, "order": sorted(Y), "price": 50.0, "stress_from": 2006, "stress_to": 2025, "g": 0.0}
         bad, by, n = value5.stress_op(data)
         self.assertEqual((n, bad, by), (16, 40.0, 2022))   # 16년 중 하위 20% = ceil(16×0.2)=4번째로 낮은 값(10·20·30·40)
         r = value5.compute(data)["rows"][2025]
@@ -632,6 +634,40 @@ class T(unittest.TestCase):
                 os.environ.pop("APPDATA", None)
             else:
                 os.environ["APPDATA"] = old
+
+    def test_standards_tax_factor_netdebt(self):
+        from analyzer import standards
+        self.assertAlmostEqual(standards.statutory_marginal(2025, 5000e8), 0.264)    # 24% × 1.1
+        self.assertAlmostEqual(standards.statutory_marginal(2026, 5000e8), 0.275)    # 25% × 1.1 (2026년 1%p 환원)
+        self.assertAlmostEqual(standards.statutory_marginal(2025, 100e8), 0.209)     # 19% × 1.1
+        self.assertAlmostEqual(standards.statutory_marginal(2020, 1e8), 0.11)        # 10% × 1.1
+        t, _ = standards.marginal_tax(2025, 5e8, [500e8, 600e8, -10e8, 400e8])        # 일시적으로 작은 해 → 정상 이익(중앙값 450억) 구간
+        self.assertAlmostEqual(t, 0.231)
+        self.assertEqual(standards.cons_factor({"ch": {3: -6.0}, "tag": {3: None}}, "op_income")[0], 0.73)
+        self.assertEqual(standards.cons_factor({"ch": {3: -4.9}, "tag": {3: None}}, "eps")[0], 0.83)
+        self.assertEqual(standards.cons_factor(None, "revenue")[0], 1.0)
+        vals = {(2025, "acc_debt"): 100.0, (2025, "acc_cash"): 30.0, (2025, "acc_cash_only"): 30.0, (2025, "acc_lease_face"): 0.0}
+        get = lambda y, k, per="FY": vals.get((y, k))
+        nd = standards.net_debt(get, 2025, "FY", {"lease": 20.0, "stfin": 5.0})
+        self.assertEqual((nd["debt"], nd["cash"], nd["nd"]), (120.0, 35.0, 85.0))   # 리스(주석) 더하고 단기금융(주석) 빼기
+        sh = standards.shares(lambda y, k, per="FY": {"shares_common": 1000, "shares_pref": 10, "treasury_common": 50}.get(k), 2025)
+        self.assertEqual(sh[0], 960)
+
+    def test_same_dcf_in_valuation_and_value5(self):
+        """같은 이름이면 같은 식: 화면 G의 DCF와 화면 O의 ① DCF가 실적 연도에 같은 값"""
+        from analyzer import valuation, value5
+        pipeline.analyze("253450", 2026, offline=True, conn=self.conn)
+        P = config.periods(2026)
+        vr = valuation.run(self.conn, "253450", P)["rows"]
+        G = {r["year"]: r for r in vr}
+        res = value5.compute(value5.inputs(self.conn, "253450", P, vr))["rows"]
+        n = 0
+        for y, o in res.items():
+            g = G.get(y)
+            if g and g["kind"] == "실적" and g["values"].get("dcf") is not None:
+                self.assertAlmostEqual(g["values"]["dcf"], o["dcf"], places=3, msg=str(y))
+                n += 1
+        self.assertGreater(n, 3)
 
 
 if __name__ == "__main__":
