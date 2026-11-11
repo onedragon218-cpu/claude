@@ -126,6 +126,15 @@ class H(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
             return self._send(200, json.dumps({"saved": True}, ensure_ascii=False), "application/json")
+        if u.path == "/api/open-data":
+            # 데이터 폴더를 윈도우 탐색기로 연다(이 PC에서만 동작)
+            try:
+                if hasattr(os, "startfile"):
+                    os.startfile(config.DATA_DIR)
+                    return self._send(200, json.dumps({"opened": True, "path": config.DATA_DIR}, ensure_ascii=False), "application/json")
+                return self._send(200, json.dumps({"opened": False, "path": config.DATA_DIR}, ensure_ascii=False), "application/json")
+            except OSError as e:
+                return self._send(200, json.dumps({"opened": False, "path": config.DATA_DIR, "error": str(e)}, ensure_ascii=False), "application/json")
         if u.path == "/api/job/stop":
             with JOB_LOCK:
                 if JOB["running"]:

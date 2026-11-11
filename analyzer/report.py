@@ -121,6 +121,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "universe": [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()],
         "stability": stability(conn, code, P, vres["rows"], comp),
         "app_version": __import__("analyzer").__version__,
+        "data_dir": config.DATA_DIR,
         "valuation": {"rows": vres["rows"], "assumptions": vres["assumptions"], "base_year": P["base_year"]},
         "total_facts": len(cur), "total_versions": len(allf),
     }

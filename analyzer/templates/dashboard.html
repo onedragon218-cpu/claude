@@ -149,6 +149,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted" style="margin:6px 0 10px">전체 갱신: DB의 모든 기업에 대해 빠진 값, 새 공시·정정 공시, 컨센서스, 기준일 주가를 확인합니다. 이미 검증된 DART 실적은 다시 받지 않습니다.</p>
     <div id="ustatus"></div>
     <div class="tablewrap"><table id="comps"></table></div>
+    <p class="muted" style="margin:8px 0 0">기업 자료가 저장되는 데이터 폴더: <code id="datadir"></code> <button id="opendata" style="margin-left:6px">폴더 열기</button> <span id="opendatamsg"></span></p>
   </div>
   <div class="card">
     <div class="row" style="justify-content:space-between;align-items:center">
@@ -1616,6 +1617,12 @@ $('#uaddall').onclick = () => uStartBatch(uMissing(), '아직 수집하지 않�
 $('#ustop').onclick = async () => { if (!confirm('지금 수집 중인 기업까지만 하고 멈출까요? 이미 받은 자료는 그대로 남습니다.')) return;
   try { renderJob(await (await fetch('/api/job/stop', {method:'POST'})).json()); } catch(e){ alert('중지 요청 실패: ' + e.message); } };
 $('#ufilter').addEventListener('input', renderUniverse);
+$('#datadir').textContent = D.data_dir || '(알 수 없음)';
+$('#opendata').onclick = async () => {
+  if (!SERVED){ $('#opendatamsg').textContent = '재무분석 열기.bat 으로 연 화면에서 누르세요. 위 경로를 탐색기 주소창에 붙여 넣어도 됩니다.'; return; }
+  try { const j = await (await fetch('/api/open-data', {method:'POST'})).json();
+    $('#opendatamsg').textContent = j.opened ? '탐색기로 열었습니다.' : `열지 못했습니다. 위 경로를 탐색기 주소창에 붙여 넣으세요.${j.error?' ('+j.error+')':''}`;
+  } catch(e){ $('#opendatamsg').textContent = '실패: ' + e.message; } };
 
 function localSearch(q){
   const nq = q.replace(/\s/g,'').toLowerCase();
