@@ -448,9 +448,9 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <label>ROE(%p)<input id="p-th-roe" type="number" step="0.1" style="width:80px"></label>
       <label>매출액(%)<input id="p-th-revenue" type="number" step="0.5" style="width:80px"></label>
       <label>EPS(%)<input id="p-th-eps" type="number" step="0.5" style="width:80px"></label>
-      <label>표시<select id="p-show"><option value="cheap">가격 판정 통과만(1차 이상)</option><option value="up">우상향 통과 전체</option><option value="all">전체(탈락·제외 포함)</option></select></label>
     </div>
-    <p id="p-count" style="margin:10px 0"></p>
+    <div class="subtabs" id="p-tabs" role="tablist" style="margin-top:12px"></div>
+    <p id="p-count" style="margin:8px 0"></p>
     <div class="tablewrap"><table id="p-table"></table></div>
     <p class="muted" id="p-rules"></p>
   </div>
@@ -1602,33 +1602,48 @@ function pClassify(row, use, th, factor){
   const tier = [0,1,2].find(i=>fair[i] > row.price);
   return {status:'통과', tier: tier===undefined ? null : tier, fair, margin: fair.map(v=>v/row.price-1), cheap: fair.map(v=>v>row.price)};
 }
+let PTAB = 't1';
 function renderP(){
   if (PV.error){ $('#p-note').textContent = '계산하지 못했습니다: ' + PV.error; return; }
   const Y = PV.years, use = [...document.querySelectorAll('.p-use')].filter(c=>c.checked).map(c=>c.value);
   const th = {}; ['op_margin','roe','revenue','eps'].forEach(m=>{ const v = $('#p-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
-  const factor = $('#p-factor').checked, show = $('#p-show').value;
-  $('#p-note').innerHTML = `<b>1단계 우상향</b>: ${Y[0]}(실적) &lt; ${Y[1]}E &lt; ${Y[2]}E &lt; ${Y[3]}E 를 고른 지표 모두 만족하는 기업. <b>2단계 가격</b>: 적정가 = ROE(%) × 1/10${factor?' × 0.83':''} × BPS(그해 컨센서스) &gt; 현재 주가 → 1차(${Y[3]}E 기준) · 2차(${Y[2]}E) · 3차(${Y[1]}E). 대상: DB에 있는 기업 ${PV.rows.length}곳.`;
+  const factor = $('#p-factor').checked;
+  $('#p-note').innerHTML = `<b>1단계 우상향</b>: ${Y[0]}(실적) &lt; ${Y[1]}E &lt; ${Y[2]}E &lt; ${Y[3]}E 를 고른 지표 모두 만족하는 기업. <b>2단계 가격</b>: 적정가 = ROE(%) × 1/10${factor?' × 0.83':''} × BPS(그해 컨센서스) &gt; 현재 주가. <b>1차 분류</b> = ${Y[3]}E(내후년) 기준, <b>2차 분류</b> = ${Y[2]}E(내년) 기준, <b>3차 분류</b> = ${Y[1]}E(올해) 기준. 대상: DB에 있는 기업 ${PV.rows.length}곳.`;
   const res = PV.rows.map(r=>({r, c: use.length ? pClassify(r, use, th, factor) : {status:'제외', why:'우상향 지표를 하나 이상 고르세요'}}));
   const up = res.filter(x=>x.c.status==='통과'), ex = res.filter(x=>x.c.status==='제외'), no = res.filter(x=>x.c.status==='우상향 아님');
-  const t = i => up.filter(x=>x.c.cheap && x.c.cheap[i]).length;
-  $('#p-count').innerHTML = `우상향 통과 <b>${up.length}</b>곳 · 우상향 아님 ${no.length}곳 · 컨센서스 부족 제외 ${ex.length}곳 &nbsp;|&nbsp; 1차(${Y[3]}E 기준 쌈) <b>${t(2)}</b>곳 · 2차(${Y[2]}E) <b>${t(1)}</b>곳 · 3차(${Y[1]}E) <b>${t(0)}</b>곳`;
-  const tierTxt = c => c.tier===0 ? `<span class="badge b-OK">3차 · ${Y[1]}E부터 쌈</span>` : c.tier===1 ? `<span class="badge b-OK">2차 · ${Y[2]}E부터 쌈</span>` : c.tier===2 ? `<span class="badge b-OK">1차 · ${Y[3]}E부터 쌈</span>` : '<span class="muted">해당 없음</span>';
-  const n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
-  const ser = (vals, m) => vals.map((v,i)=> v==null ? '–' : (m==='revenue'||m==='eps' ? n0(v) : v.toFixed(1)) ).join(' → ');
-  let rows = show==='cheap' ? up.filter(x=>x.c.tier!=null) : show==='up' ? up : res;
+  // 분류(말씀하신 정의 그대로, 서로 독립): 1차 = 내후년 적정가 > 주가, 2차 = 내년, 3차 = 올해
+  const T = {t1:{name:'1차 분류', i:2, y:Y[3]}, t2:{name:'2차 분류', i:1, y:Y[2]}, t3:{name:'3차 분류', i:0, y:Y[1]}};
+  const inTier = (x, k) => x.c.status==='통과' && x.c.cheap[T[k].i];
+  const tabs = [['t1', `1차 분류 (${Y[3]}E 기준)`, up.filter(x=>inTier(x,'t1')).length], ['t2', `2차 분류 (${Y[2]}E 기준)`, up.filter(x=>inTier(x,'t2')).length],
+    ['t3', `3차 분류 (${Y[1]}E 기준)`, up.filter(x=>inTier(x,'t3')).length], ['up', '우상향 통과 전체', up.length], ['all', '전체(탈락·제외 포함)', res.length]];
+  $('#p-tabs').innerHTML = tabs.map(([k,n,c])=>`<button data-k="${k}" class="${PTAB===k?'on':''}">${n} <span class="muted">${c}</span></button>`).join('');
+  document.querySelectorAll('#p-tabs button').forEach(b=>b.onclick=()=>{ PTAB = b.dataset.k; renderP(); });
+  $('#p-count').innerHTML = `우상향 통과 <b>${up.length}</b>곳 · 우상향 아님 ${no.length}곳 · 컨센서스 부족 제외 ${ex.length}곳` +
+    (T[PTAB] ? ` &nbsp;|&nbsp; <b>${T[PTAB].name}</b>: 우상향 통과 기업 중 ${T[PTAB].y}E 적정가가 현재 주가보다 높은 기업` : '');
+  let rows = T[PTAB] ? up.filter(x=>inTier(x, PTAB)) : PTAB==='up' ? up : res;
+  const key = T[PTAB] ? T[PTAB].i : 2;
   rows = rows.slice().sort((a,b)=> (a.c.status==='통과'?0:a.c.status==='우상향 아님'?1:2) - (b.c.status==='통과'?0:b.c.status==='우상향 아님'?1:2)
-    || (a.c.tier??9) - (b.c.tier??9) || ((b.c.margin||[0,0,0])[2] - (a.c.margin||[0,0,0])[2]));
-  const mcell = (c, i) => { if (!c.fair) return '<td>–</td>'; const pc = (c.margin[i]*100); return `<td style="${c.cheap[i]?'color:var(--good);font-weight:600':''}">${n0(c.fair[i])}<br><span class="muted" style="font-weight:400">${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
-  $('#p-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>${use.map(m=>`<th class="l">${PV.metrics[m][0]}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('')}<th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E</span></th><th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E</span></th><th class="l">판정</th></tr>` +
-    (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td>${n0(r.price)}</td>` +
-      use.map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'?'%':''}</td>`).join('') +
-      mcell(c,0) + mcell(c,1) + mcell(c,2) +
-      `<td class="l">${c.status==='통과' ? tierTxt(c) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td></tr>`).join('')
-    : `<tr><td colspan="${6+use.length}" class="l">조건에 맞는 기업이 없습니다. '표시'를 '우상향 통과 전체'나 '전체'로 바꿔 보세요.</td></tr>`);
-  $('#p-rules').innerHTML = `작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로(ROE·BPS·EPS·매출·영업이익률). 작년이 적자였다가 오른 경우도 우상향(턴어라운드)으로 보며, 이때 증가율(%) 문턱은 적용하지 않습니다. 고른 지표 중 컨센서스가 하나라도 없으면 제외합니다. 적정가 칸 아래 % = 적정가 ÷ 현재가 − 1(안전 여유), 초록 = 현재가보다 높음. 판정은 가장 가까운 해부터 봐서 처음 싸지는 해를 적습니다(올해 기준으로 싸면 3차, 내년이면 2차, 내후년이면 1차). 적정가 = ROE × BPS ÷ 10 ≈ 그해 EPS × 10(PER 10배, 요구수익률 10%)${factor?' × 0.83':''}.`;
+    || ((b.c.margin||[-9,-9,-9])[key] - (a.c.margin||[-9,-9,-9])[key]));
+  const n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
+  const ser = (vals, m) => vals.map(v=> v==null ? '–' : (m==='revenue'||m==='eps' ? n0(v) : v.toFixed(1))).join(' → ');
+  const pcell = (r, c, i) => { if (!c.fair) return '<td class="muted">–</td>'; const pc = c.margin[i]*100, hit = c.cheap[i], sel = T[PTAB] && T[PTAB].i===i;
+    const f = factor ? PV.factor : 1;
+    const tip = `ROE ${r.roe[i]}% × 1/10${factor?' × 0.83':''} × BPS ${n0(r.bps[i])} = ${n0(c.fair[i])}원`;
+    return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${hit?'color:var(--good);font-weight:600':''}">${n0(c.fair[i])}원 ${hit?'✓':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
+  const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
+  $('#p-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +
+    `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th>` +
+    use.map(m=>`<th class="l">${PV.metrics[m][0]}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
+    (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td><b>${n0(r.price)}원</b></td>` +
+      pcell(r,c,2) + pcell(r,c,1) + pcell(r,c,0) +
+      `<td class="l">${c.status==='통과' ? (tierList(c)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tierList(c)}</span>`) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td>` +
+      use.map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'?'%':''}</td>`).join('') + '</tr>').join('')
+    : `<tr><td colspan="${6+use.length}" class="l">${T[PTAB] ? `${T[PTAB].name}에 해당하는 기업이 없습니다. 다른 분류나 '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+  $('#p-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 적정가 칸: 위 = 적정가(✓ = 현재가보다 높음), 아래 = 현재가 대비 %(안전 여유). 칸에 마우스를 올리면 계산식이 보입니다. 적정가 = ROE × BPS ÷ 10 ≈ 그해 EPS × 10(PER 10배, 요구수익률 10%)${factor?' × 0.83':''}. ` +
+    `작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로. 작년이 적자였다가 오른 경우도 우상향(턴어라운드)으로 보며 그 구간은 증가율(%) 문턱을 적용하지 않습니다. 고른 지표 중 컨센서스가 하나라도 없으면 제외합니다.`;
 }
 document.querySelectorAll('.p-use').forEach(c=>c.addEventListener('change', renderP));
-['#p-factor','#p-show','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps'].forEach(id=>$(id).addEventListener('input', renderP));
+['#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps'].forEach(id=>$(id).addEventListener('input', renderP));
 
 function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
