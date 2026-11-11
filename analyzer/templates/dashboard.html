@@ -492,7 +492,19 @@ const MUNIT = Object.fromEntries(XMET.map(m=>[m.key,m.unit]));
 const CONS_NAME = {op_income:'영업이익', net_income:'당기순이익', per:'PER', pbr:'PBR', ev_ebitda:'EV/EBITDA', target_price:'목표주가'};
 const ACC = D.accounts;
 let BY = D.periods.base_year;
-const visible = new Set(MET.map(m=>m.key).concat(['v_srim','v_dcf','v_dcf_e','v_roic','v_wacc']));
+// 화면 선택 기억: 고른 항목·탭·입력값을 이 브라우저에 저장해, 다른 기업을 열어도 마지막 선택을 그대로 쓴다
+class PSet extends Set {
+  constructor(key, def){ super(); let arr = def;
+    try { const v = localStorage.getItem('ui:' + key); if (v) arr = JSON.parse(v); } catch(e){}
+    (Array.isArray(arr) ? arr : def).forEach(x => super.add(x)); this._key = key; }
+  _save(){ if (!this._key) return; try { localStorage.setItem('ui:' + this._key, JSON.stringify([...this])); } catch(e){} }
+  add(x){ super.add(x); this._save(); return this; }
+  delete(x){ const r = super.delete(x); this._save(); return r; }
+  clear(){ super.clear(); this._save(); }
+}
+const uiGet = (k, d) => { try { const v = localStorage.getItem('ui:' + k); return v === null ? d : v; } catch(e){ return d; } };
+const uiSet = (k, v) => { try { localStorage.setItem('ui:' + k, v); } catch(e){} };
+const visible = new PSet('vis_c', MET.map(m=>m.key).concat(['v_srim','v_dcf','v_dcf_e','v_roic','v_wacc']));
 const charts = {};
 let CORR = (()=>{ try{ return (localStorage.getItem('corr') ?? '1') === '1'; }catch(e){ return true; } })();
 const estV = e => e ? (CORR ? e.value : (e.raw ?? e.value)) : null;
@@ -673,7 +685,7 @@ function renderC(){
 // 원데이터 중첩: 표준화하지 않고 실제 단위 그대로 겹친다. 단위가 달라 축을 단위별로 나눈다(억원·원 왼쪽, % 오른쪽).
 const UNIT_AXIS = {'억원':'y_eok', '원':'y_won', '%':'y_pct', '%p':'y_pct'};
 // 처음 화면: ROIC·WACC가 눌리지 않도록 부채비율(200%대)과 DCF(값이 큼)는 꺼 둔다. 단추로 켤 수 있음
-const rawVisible = new Set(['op_margin','roe','v_price','v_srim','v_dcf_e','v_median','v_roic','v_wacc','v_spread']);
+const rawVisible = new PSet('vis_raw', ['op_margin','roe','v_price','v_srim','v_dcf_e','v_median','v_roic','v_wacc','v_spread']);
 function renderRawAll(){
   setCMode(false);
   $('#normcard').style.display='none';
@@ -862,9 +874,9 @@ const EST_LABEL = '예상(보수적 추정)\n실제 값 아님';
 const V = D.valuation || {rows:[], assumptions:{}};
 const VROWS = V.rows || [];
 const VMETH = [['price','주가','--text-primary'],['srim','S-RIM','--s1'],['dcf','DCF(현금흐름)','--s2'],['dcf_e','DCF(이익 기준)','--s8'],['per','PER 가치','--s3'],['pbr','PBR 가치','--s4'],['psr','PSR 가치','--s5'],['median','종합(중앙값)','--s7']];
-const gVisible = new Set(VMETH.map(m=>m[0]));
+const gVisible = new PSet('vis_g', VMETH.map(m=>m[0]));
 let GTAB = (()=>{ try{ return localStorage.getItem('gtab')||'all'; }catch(e){ return 'all'; } })();
-const allVisible = new Set(['price','srim','dcf','dcf_e','median','roic','wacc']);
+const allVisible = new PSet('vis_gall', ['price','srim','dcf','dcf_e','median','roic','wacc']);
 const pct = (x,d=1) => x==null? '–' : (x*100).toFixed(d)+'%';
 const won = x => x==null? '–' : Math.round(x).toLocaleString('ko-KR');
 const eok = x => x==null? '–' : Math.round(x/1e8).toLocaleString('ko-KR');
@@ -1298,7 +1310,7 @@ document.querySelectorAll('.j-per').forEach(c=>c.addEventListener('change', rend
 // ---- K. 컨센서스 추이 ----
 const KT = D.ctrend || {available:false};
 const K_MET = [['op_income','영업이익','억원'],['eps','EPS','원'],['revenue','매출','억원']];
-let KTAB = 'op_income';
+let KTAB = uiGet('ktab', 'op_income');
 const kPct = (v, tag) => tag ? tag : (v==null ? '–' : (v>=0?'+':'') + v.toFixed(1) + '%');
 const kColor = (v, tag) => { const up = tag ? ['흑자전환','적자축소'].includes(tag) : v!=null && v >= (KT.flat||1);
   const dn = tag ? ['적자전환','적자확대'].includes(tag) : v!=null && v <= -(KT.flat||1);
@@ -1320,7 +1332,7 @@ function renderK(){
       [1,3,6,12].map(k=>`<td style="${kColor(x.ch[k], x.tag[k])}">${kPct(x.ch[k], x.tag[k])}</td>`).join('') +
       `<td><span style="color:var(--good)">▲${x.ups}</span> / <span style="color:var(--bad)">▼${x.downs}</span></td><td class="l">${kDir(x.dir)}</td></tr>`; }).join('');
   $('#k-tabs').innerHTML = K_MET.map(m=>`<button data-k="${m[0]}" class="${m[0]===KTAB?'on':''}">${m[1]}</button>`).join('');
-  document.querySelectorAll('#k-tabs button').forEach(b=>b.onclick=()=>{ KTAB = b.dataset.k; renderK(); });
+  document.querySelectorAll('#k-tabs button').forEach(b=>b.onclick=()=>{ KTAB = b.dataset.k; uiSet('ktab', KTAB); renderK(); });
   const months = [...new Set(Object.entries(KT.series).flatMap(([k,v])=>v.map(p=>p[0])))].sort();
   const m = name[KTAB], cols = ['--s1','--s2','--s3'];
   const ds = (KT.years||[]).map((y,i)=>{ const map = Object.fromEntries((KT.series[`${y}:${KTAB}`]||[]).map(p=>[p[0], p]));
@@ -1602,7 +1614,7 @@ function pClassify(row, use, th, factor){
   const tier = [0,1,2].find(i=>fair[i] > row.price);
   return {status:'통과', tier: tier===undefined ? null : tier, fair, margin: fair.map(v=>v/row.price-1), cheap: fair.map(v=>v>row.price)};
 }
-let PTAB = 't1';
+let PTAB = uiGet('ptab', 't1');
 function renderP(){
   if (PV.error){ $('#p-note').textContent = '계산하지 못했습니다: ' + PV.error; return; }
   const Y = PV.years, use = [...document.querySelectorAll('.p-use')].filter(c=>c.checked).map(c=>c.value);
@@ -1617,7 +1629,7 @@ function renderP(){
   const tabs = [['t1', `1차 분류 (${Y[3]}E 기준)`, up.filter(x=>inTier(x,'t1')).length], ['t2', `2차 분류 (${Y[2]}E 기준)`, up.filter(x=>inTier(x,'t2')).length],
     ['t3', `3차 분류 (${Y[1]}E 기준)`, up.filter(x=>inTier(x,'t3')).length], ['up', '우상향 통과 전체', up.length], ['all', '전체(탈락·제외 포함)', res.length]];
   $('#p-tabs').innerHTML = tabs.map(([k,n,c])=>`<button data-k="${k}" class="${PTAB===k?'on':''}">${n} <span class="muted">${c}</span></button>`).join('');
-  document.querySelectorAll('#p-tabs button').forEach(b=>b.onclick=()=>{ PTAB = b.dataset.k; renderP(); });
+  document.querySelectorAll('#p-tabs button').forEach(b=>b.onclick=()=>{ PTAB = b.dataset.k; uiSet('ptab', PTAB); renderP(); });
   $('#p-count').innerHTML = `우상향 통과 <b>${up.length}</b>곳 · 우상향 아님 ${no.length}곳 · 컨센서스 부족 제외 ${ex.length}곳` +
     (T[PTAB] ? ` &nbsp;|&nbsp; <b>${T[PTAB].name}</b>: 우상향 통과 기업 중 ${T[PTAB].y}E 적정가가 현재 주가보다 높은 기업` : '');
   let rows = T[PTAB] ? up.filter(x=>inTier(x, PTAB)) : PTAB==='up' ? up : res;
@@ -1806,6 +1818,24 @@ $('#uall').onclick = async () => {
 };
 if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } }).catch(()=>{});
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
+const UI_KEEP = ['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show',
+  '#smkt','#smin','#sshow','#srisk',
+  '#o-ke','#o-wacc','#o-omega','#o-r-cash','#o-r-recv','#o-r-inv','#o-r-land','#o-r-bldg',
+  '#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps'];
+const UI_GROUPS = ['.j-per', '.p-use'];   // 같은 이름의 체크 상자 묶음(값으로 구분)
+function uiEls(){ const out = [];
+  UI_KEEP.forEach(sel=>{ const el = document.querySelector(sel); if (el) out.push([sel, el]); });
+  UI_GROUPS.forEach(g=>document.querySelectorAll(g).forEach(el=>out.push([g + ':' + el.value, el])));
+  return out; }
+function uiSave(key, el){ uiSet('in:' + key, el.type==='checkbox' ? (el.checked?'1':'0') : el.value); }
+function uiSaveAll(){ uiEls().forEach(([k, el])=>uiSave(k, el)); }
+uiEls().forEach(([k, el])=>{
+  const v = uiGet('in:' + k, null);
+  if (v !== null){ if (el.type==='checkbox') el.checked = v==='1'; else el.value = v; }
+  ['input','change'].forEach(ev=>el.addEventListener(ev, ()=>uiSave(k, el)));
+});
+$('#o-reset').addEventListener('click', ()=>setTimeout(uiSaveAll, 0));   // 기본값으로 되돌리면 그것도 기억
+
 renderAll();
 </script>
 </body>
