@@ -71,7 +71,7 @@ function Stop-Server {
 
 function Get-LocalVersion {
     $f = Join-Path $Root 'analyzer\__init__.py'
-    if (Test-Path $f) { if ((Get-Content $f -Raw) -match '"([^"]+)"') { return $Matches[1] } }
+    if (Test-Path $f) { if ((Get-Content $f -Raw -Encoding UTF8) -match '"([^"]+)"') { return $Matches[1] } }
     return '?'
 }
 

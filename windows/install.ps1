@@ -38,7 +38,13 @@ $settingsDir = Join-Path $env:APPDATA 'corp-analyzer'
 $settingsFile = Join-Path $settingsDir 'settings.json'
 $DataDir = Join-Path $env:LOCALAPPDATA 'CorpAnalyzer\data'
 if (Test-Path $settingsFile) {
-    try { $cur = (Get-Content $settingsFile -Raw | ConvertFrom-Json).data_dir; if ($cur) { $DataDir = $cur } } catch { }
+    # settings.json은 UTF-8로 저장되어 있다. PowerShell 5.1은 인코딩을 안 주면 한국어 윈도우 기본(CP949)으로 읽어
+    # 한글 사용자 이름(예: C:\Users\김희진)이 깨지므로 반드시 UTF-8로 읽는다.
+    try {
+        $cur = (Get-Content $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json).data_dir
+        if ($cur -and ($cur.IndexOfAny([IO.Path]::GetInvalidPathChars()) -lt 0) -and ($cur -notmatch '\?') -and (Test-Path (Split-Path $cur -Qualifier))) { $DataDir = $cur }
+        elseif ($cur) { Write-Host "      설정 파일의 데이터 폴더 경로가 올바르지 않아 기본 위치를 씁니다: $cur" -ForegroundColor Yellow }
+    } catch { }
 }
 if (-not (Test-Path (Join-Path $DataDir 'analyzer.db'))) {
     $src = Join-Path $Root 'data'
@@ -50,7 +56,8 @@ if (-not (Test-Path (Join-Path $DataDir 'analyzer.db'))) {
             Write-Host "      이전 설치 폴더($oldRoot)의 데이터를 옮깁니다." -ForegroundColor Yellow
         }
     }
-    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    try { New-Item -ItemType Directory -Force -Path $DataDir | Out-Null }
+    catch { Write-Host "      데이터 폴더를 만들지 못했습니다: $DataDir ($($_.Exception.Message))" -ForegroundColor Red; throw }
     Copy-Item -Path (Join-Path $src '*') -Destination $DataDir -Recurse -Force
     Write-Host "      데이터 복사: $src → $DataDir"
 }
@@ -61,7 +68,7 @@ Write-Host "      데이터 폴더: $DataDir" -ForegroundColor Green
 # 2) DART 인증키 (저장 위치: %APPDATA%\corp-analyzer\dart_api_key.txt, 프로그램 폴더 밖)
 $keyDir = Join-Path $env:APPDATA 'corp-analyzer'
 $keyFile = Join-Path $keyDir 'dart_api_key.txt'
-$old = if (Test-Path $keyFile) { "$(Get-Content $keyFile -Raw)".Trim() } else { '' }
+$old = if (Test-Path $keyFile) { "$(Get-Content $keyFile -Raw -Encoding UTF8)".Trim() } else { '' }
 $envKey = [Environment]::GetEnvironmentVariable('DART_API_KEY', 'User')
 if (-not $envKey) { $envKey = [Environment]::GetEnvironmentVariable('DART_API_KEY', 'Machine') }
 if ($envKey -and -not $old) { $old = $envKey.Trim(); Write-Host "[2/5] 환경변수 DART_API_KEY를 사용합니다(끝 4자리 ...$($old.Substring([Math]::Max(0,$old.Length-4))))." -ForegroundColor Green }
@@ -122,10 +129,10 @@ $desk = [Environment]::GetFolderPath('Desktop')
 # '열기'는 서버가 꺼져 있으면 켜고 여는 .bat 으로 만든다(예전 .url 바로가기는 지움)
 Remove-Item (Join-Path $desk '재무분석 열기.url') -ErrorAction SilentlyContinue
 $utf8 = New-Object System.Text.UTF8Encoding($false)
-$openTxt = (Get-Content (Join-Path $PSScriptRoot 'open.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
+$openTxt = (Get-Content (Join-Path $PSScriptRoot 'open.bat') -Raw -Encoding UTF8).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 열기.bat'), $openTxt, $utf8)
 # 바탕화면 '지금 갱신' 파일(BOM 없는 UTF-8로 써야 cmd가 첫 줄을 읽음)
-$batTxt = (Get-Content (Join-Path $PSScriptRoot 'run_now.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
+$batTxt = (Get-Content (Join-Path $PSScriptRoot 'run_now.bat') -Raw -Encoding UTF8).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 지금 갱신.bat'), $batTxt, (New-Object System.Text.UTF8Encoding($false)))
 
 # 5) 첫 수집과 화면 열기
