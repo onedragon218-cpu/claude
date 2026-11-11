@@ -575,8 +575,9 @@ class T(unittest.TestCase):
         os.environ["APPDATA"] = tempfile.mkdtemp()
         try:
             self.assertFalse(lan.enabled())
-            with self.assertRaises(ValueError):
-                lan.enable("12345")                        # 6자 미만
+            for weak in ("12345", "12345678", "abcdefgh", "aaaaaaa1", "password1"):
+                with self.assertRaises(ValueError):
+                    lan.enable(weak)                       # 8자 미만·한 종류·너무 쉬움
             lan.enable("tablet123")
             self.assertTrue(lan.enabled())
             txt = open(lan.path(), encoding="utf-8").read()
@@ -599,7 +600,38 @@ class T(unittest.TestCase):
         for ip in ("8.8.8.8", "211.234.1.1", "2001:4860::8888"):
             self.assertFalse(lan.is_home_network(ip), ip)   # 인터넷 쪽 주소는 비밀번호가 맞아도 받지 않음
         self.assertTrue(lan.is_local("127.0.0.1"))
-        self.assertEqual(lan.cookie_token("a=1; ca_session=xyz; b=2"), "xyz")
+        self.assertEqual(lan.cookie_token("a=1; __Host-ca_session=xyz; b=2"), "xyz")
+        self.assertFalse(lan.allow_write())
+
+    def test_lan_global_lockout(self):
+        from analyzer import lan
+        lan._global_fails[:] = []
+        import time as _t
+        lan._global_fails.extend([_t.time()] * lan.GLOBAL_MAX_FAIL)
+        self.assertEqual(lan.locked_out("192.168.0.99"), "모든 기기")     # 기기를 바꿔 가며 시도해도 막힘
+        lan._global_fails[:] = []
+        self.assertIsNone(lan.locked_out("192.168.0.99"))
+
+    def test_tls_cert_is_valid(self):
+        import ssl
+        from analyzer import tlscert
+        old = os.environ.get("APPDATA")
+        os.environ["APPDATA"] = tempfile.mkdtemp()
+        try:
+            cp, kp, new = tlscert.ensure(["192.168.0.10"])
+            self.assertTrue(new)
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(cp, kp)                    # 키와 인증서가 짝이 맞고 형식이 올바름
+            der = ssl.PEM_cert_to_DER_cert(open(cp).read())
+            self.assertIn(bytes([0x03, 0x02, 0x02, 0xA4]), der)   # 키 용도 BIT STRING: 남는 비트 2(엄격한 브라우저 규격)
+            self.assertIn(bytes([0x87, 0x04, 192, 168, 0, 10]), der)  # 주소(SAN)에 PC IP
+            self.assertEqual(len(tlscert.fingerprint().split(":")), 32)
+            self.assertFalse(tlscert.ensure(["192.168.0.10"])[2])     # 있으면 다시 만들지 않음
+        finally:
+            if old is None:
+                os.environ.pop("APPDATA", None)
+            else:
+                os.environ["APPDATA"] = old
 
 
 if __name__ == "__main__":

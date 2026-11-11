@@ -117,7 +117,8 @@ def main(argv=None):
     sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=8765)
     dc = sub.add_parser("doctor"); dc.add_argument("--port", type=int, default=8765)
     sub.add_parser("calibrate")
-    ln = sub.add_parser("lan"); ln.add_argument("action", choices=["on", "off", "status"]); ln.add_argument("--password-stdin", action="store_true")
+    ln = sub.add_parser("lan"); ln.add_argument("action", choices=["on", "off", "status", "check", "renew-cert"])
+    ln.add_argument("--password-stdin", action="store_true"); ln.add_argument("--allow-write", action="store_true")
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
@@ -172,27 +173,44 @@ def main(argv=None):
         r = calibration.build(progress=lambda i, n: print(f"{i}/{n}", flush=True) if i % 20 == 0 else None)
         print(f"완료: 기업 {r['companies']}곳, 실패 {len(r['failed'])}곳 → {calibration.CACHE()}")
     elif args.cmd == "lan":
-        from . import lan
-        if args.action == "on":
+        from . import lan, tlscert
+        if args.action in ("on", "check"):
             if args.password_stdin:
                 pw = sys.stdin.readline().rstrip("\r\n")
             else:
                 import getpass
-                pw = getpass.getpass("태블릿 접속 비밀번호(6자 이상): ")
-                if getpass.getpass("한 번 더: ") != pw:
+                pw = getpass.getpass("태블릿 접속 비밀번호(8자 이상, 영문·숫자·기호 중 두 가지 이상): ")
+                if args.action == "on" and getpass.getpass("한 번 더: ") != pw:
                     raise SystemExit("두 번 넣은 비밀번호가 다릅니다.")
-            try:
-                lan.enable(pw)
-            except ValueError as e:
-                raise SystemExit(str(e))
-            print("같은 와이파이 기기 접속을 켰습니다. 화면 서버를 다시 켜야 적용됩니다.")
+            why = lan.password_problem(pw)
+            if why:
+                raise SystemExit("비밀번호 문제: " + why)
+            if args.action == "check":
+                print("비밀번호 괜찮음")
+                return
+            lan.enable(pw, allow_write=args.allow_write)
+            pw = None
+            tlscert.ensure(lan.local_addresses())
+            print("태블릿 접속을 켰습니다. 화면 서버를 다시 켜야 적용됩니다.")
         elif args.action == "off":
             lan.disable()
-            print("같은 와이파이 기기 접속을 껐습니다(이 PC에서만 접속). 화면 서버를 다시 켜야 적용됩니다.")
-        print(f"상태: {'켜짐' if lan.enabled() else '꺼짐'} · 설정 파일 {lan.path()}")
+            print("태블릿 접속을 껐습니다(이 PC에서만 접속). 화면 서버를 다시 켜야 적용됩니다.")
+        elif args.action == "renew-cert":
+            tlscert.ensure(lan.local_addresses(), force=True)
+            print("인증서를 새로 만들었습니다. 태블릿에서 처음 접속할 때 경고가 다시 나옵니다.")
+        d = lan.load()
+        print(f"상태: {'켜짐' if lan.enabled() else '꺼짐'}" + (f" · {'조작 허용' if d.get('allow_write') else '보기 전용'} · 비밀번호 설정 {d.get('set_at', '-')}" if lan.enabled() else ""))
         if lan.enabled():
             for ip in lan.local_addresses():
-                print(f"태블릿에서 열 주소: http://{ip}:8765")
+                print(f"태블릿에서 열 주소: https://{ip}:{lan.HTTPS_PORT}")
+            cp, _ = tlscert.paths()
+            if os.path.exists(cp):
+                print(f"인증서 지문(SHA-256): {tlscert.fingerprint()}")
+        log = lan.recent_log(10)
+        if log:
+            print("최근 접속 기록:")
+            for line in log:
+                print("  " + line.replace("\t", "  "))
     elif args.cmd == "doctor":
         doctor(args.port)
     elif args.cmd == "serve":

@@ -121,8 +121,22 @@ Remove-Item (Join-Path $desk '재무분석 열기.url') -ErrorAction SilentlyCon
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $openTxt = (Get-Content (Join-Path $PSScriptRoot 'open.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 열기.bat'), $openTxt, $utf8)
-$lanTxt = (Get-Content (Join-Path $PSScriptRoot 'lan.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
-[IO.File]::WriteAllText((Join-Path $desk '재무분석 태블릿 접속 설정.bat'), $lanTxt, $utf8)
+# '태블릿 접속 설정' 바로가기: 바탕화면이 원드라이브로 옮겨진 PC도 있어 두 곳 모두 확인하고, 만든 위치를 보여 준다
+try {
+    $lanTxt = (Get-Content (Join-Path $PSScriptRoot 'lan.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
+    $made = @()
+    $cand = @($desk, (Join-Path $env:USERPROFILE 'Desktop'))
+    if ($env:OneDrive) { $cand += (Join-Path $env:OneDrive 'Desktop'); $cand += (Join-Path $env:OneDrive '바탕 화면') }
+    foreach ($d in @($cand | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)) {
+        $f = Join-Path $d '재무분석 태블릿 접속 설정.bat'
+        [IO.File]::WriteAllText($f, $lanTxt, $utf8)
+        if (Test-Path $f) { $made += $f }
+    }
+    if ($made) { $made | ForEach-Object { Write-Host "      바로가기: $_" } }
+    else { Write-Host "      바탕화면을 찾지 못했습니다. 태블릿 접속 설정은 $PSScriptRoot\lan.bat 을 직접 실행하세요." -ForegroundColor Yellow }
+} catch {
+    Write-Host "      '태블릿 접속 설정' 바로가기를 만들지 못했습니다: $($_.Exception.Message). $PSScriptRoot\lan.bat 을 직접 실행하세요." -ForegroundColor Yellow
+}
 # 바탕화면 '지금 갱신' 파일(BOM 없는 UTF-8로 써야 cmd가 첫 줄을 읽음)
 $batTxt = (Get-Content (Join-Path $PSScriptRoot 'run_now.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 지금 갱신.bat'), $batTxt, (New-Object System.Text.UTF8Encoding($false)))

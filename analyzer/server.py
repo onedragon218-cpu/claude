@@ -43,66 +43,108 @@ def _update_all(codes, base_year, fresh):
 
 
 class H(BaseHTTPRequestHandler):
+    timeout = 60          # 아무것도 보내지 않고 연결만 붙잡는 기기는 60초 뒤 끊음
+
     def _send(self, code, body, ctype="text/html; charset=utf-8"):
         b = body.encode("utf-8") if isinstance(body, str) else body
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Cache-Control", "no-store")   # 새 버전 화면이 바로 보이도록 브라우저 저장본을 쓰지 않음
+        self._sec_headers()
         self.end_headers()
         self.wfile.write(b)
 
+    def _sec_headers(self):
+        # 다른 사이트가 이 화면을 틀 안에 넣거나(클릭 가로채기) 파일 종류를 바꿔 읽지 못하게
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")   # 같은 사이트 안에서만 출처를 보냄(로그인 출처 확인에 필요)
+
+    def _redirect(self, loc, cookie=None):
+        self.send_response(303)
+        self.send_header("Location", loc)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self._sec_headers()
+        self.end_headers()
+
     def _gate(self, method, u):
-        """이 PC 접속은 그대로, 다른 기기는 집 안 네트워크 + 로그인일 때만. 막았으면 False(응답은 이미 보냄)."""
+        """이 PC(127.0.0.1)는 그대로. 다른 기기는 https 포트 + 집 안 네트워크 + 로그인 + (보기 전용이면 읽기만).
+        막았으면 False(응답은 이미 보냄)."""
         from . import lan
         ip = self.client_address[0]
-        if lan.is_local(ip):
+        tls = getattr(self.server, "is_tls", False)
+        if lan.is_local(ip) and not tls:
             return True
-        if not lan.enabled() or not lan.is_home_network(ip):
+        if not tls or not lan.enabled() or not lan.is_home_network(ip):
+            if method == "POST":
+                self._drain()
             self._send(403, "<p>이 PC 밖에서의 접속은 허용되지 않았습니다.</p>")
+            return False
+        if method == "POST" and not self._same_origin():
+            lan.log_access(ip, f"다른 출처의 요청 거부 {u.path}")
+            self._drain()
+            self._send(403, json.dumps({"error": "다른 사이트에서 온 요청은 받지 않습니다"}, ensure_ascii=False), "application/json")
             return False
         if u.path == "/login":
             if method == "GET":
-                nxt = (urllib.parse.parse_qs(u.query).get("next") or ["/"])[0]
-                self._login_page(nxt)
+                self._login_page((urllib.parse.parse_qs(u.query).get("next") or ["/"])[0])
                 return False
             n = int(self.headers.get("Content-Length") or 0)
-            form = urllib.parse.parse_qs(self.rfile.read(min(n, 4096)).decode("utf-8")) if n else {}
+            form = urllib.parse.parse_qs(self.rfile.read(min(n, 4096)).decode("utf-8", "replace")) if n else {}
             nxt = (form.get("next") or ["/"])[0]
-            if not nxt.startswith("/") or nxt.startswith("//"):
-                nxt = "/"
-            if lan.locked_out(ip):
-                self._login_page(nxt, "비밀번호를 여러 번 틀려 10분 동안 막았습니다.")
+            who = lan.locked_out(ip)
+            if who:
+                self._login_page(nxt, f"비밀번호를 여러 번 틀려 {who}의 로그인을 10분 동안 막았습니다.")
                 return False
             tok = lan.login(ip, (form.get("pw") or [""])[0])
             if not tok:
                 self._login_page(nxt, "비밀번호가 맞지 않습니다.")
                 return False
-            self.send_response(303)
-            self.send_header("Location", nxt)
-            self.send_header("Set-Cookie", f"{lan.COOKIE}={tok}; Path=/; Max-Age={lan.SESSION_DAYS * 86400}; HttpOnly; SameSite=Strict")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            self._redirect(self._safe_next(nxt), f"{lan.COOKIE}={tok}; Path=/; Max-Age={lan.SESSION_DAYS * 86400}; Secure; HttpOnly; SameSite=Strict")
             return False
         tok = lan.cookie_token(self.headers.get("Cookie"))
         if u.path == "/logout":
             lan.logout(tok)
-            self.send_response(303)
-            self.send_header("Location", "/login")
-            self.send_header("Set-Cookie", f"{lan.COOKIE}=; Path=/; Max-Age=0")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            lan.log_access(ip, "로그아웃")
+            self._redirect("/login", f"{lan.COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict")
             return False
-        if lan.valid(tok):
-            return True
-        if method == "GET" and not u.path.startswith("/api/"):
-            self.send_response(303)
-            self.send_header("Location", "/login?next=" + urllib.parse.quote(u.path + (("?" + u.query) if u.query else "")))
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-        else:
-            self._send(401, json.dumps({"error": "로그인이 필요합니다(화면을 새로 고치세요)"}, ensure_ascii=False), "application/json")
-        return False
+        if not lan.valid(tok):
+            if method == "GET" and not u.path.startswith("/api/"):
+                self._redirect("/login?next=" + urllib.parse.quote(u.path + (("?" + u.query) if u.query else "")))
+            else:
+                self._drain()
+                self._send(401, json.dumps({"error": "로그인이 필요합니다(화면을 새로 고치세요)"}, ensure_ascii=False), "application/json")
+            return False
+        if method == "POST" and not lan.allow_write():
+            self._drain()
+            self._send(403, json.dumps({"error": "태블릿 접속은 보기 전용으로 설정되어 있습니다(PC에서 하세요)"}, ensure_ascii=False), "application/json")
+            return False
+        return True
+
+    def _drain(self):
+        """거부하기 전에 남은 요청 본문을 버린다(안 읽고 닫으면 브라우저에 안내 대신 연결 오류가 보임)"""
+        n = int(self.headers.get("Content-Length") or 0)
+        if 0 < n <= 1_000_000:
+            try:
+                self.rfile.read(n)
+            except OSError:
+                pass
+
+    def _same_origin(self):
+        host = self.headers.get("Host") or ""
+        org = self.headers.get("Origin")
+        if org:
+            return org == f"https://{host}"
+        ref = self.headers.get("Referer") or ""
+        return ref.startswith(f"https://{host}/")
+
+    @staticmethod
+    def _safe_next(nxt):
+        return nxt if nxt.startswith("/") and not nxt.startswith("//") and "\\" not in nxt else "/"
 
     def _login_page(self, nxt, err=None):
         from . import lan
@@ -119,6 +161,11 @@ class H(BaseHTTPRequestHandler):
         by = int(q["base_year"][0]) if q.get("base_year") else None
         conn = db.connect()
         try:
+            if u.path == "/api/whoami":
+                from . import lan
+                remote = getattr(self.server, "is_tls", False) and not lan.is_local(self.client_address[0])
+                return self._send(200, json.dumps({"remote": bool(remote), "readonly": bool(remote and not lan.allow_write())}),
+                                  "application/json")
             if u.path == "/api/version":
                 from . import __version__
                 return self._send(200, json.dumps({"version": __version__, "root": config.ROOT, "data": config.DATA_DIR},
@@ -268,16 +315,46 @@ class Server(ThreadingHTTPServer):
     allow_reuse_address = False   # 윈도우에서 같은 포트를 두 프로그램이 함께 잡지 않도록
 
 
+class TLSServer(Server):
+    """암호화 연결 맺기(핸드셰이크)를 접속마다 따로 처리해, 느린 기기 하나가 다른 접속을 막지 못하게 한다."""
+    is_tls = True
+
+    def __init__(self, addr, handler, ctx):
+        super().__init__(addr, handler)
+        self.ctx = ctx
+
+    def finish_request(self, request, client_address):
+        import ssl
+        request.settimeout(15)
+        try:
+            tls = self.ctx.wrap_socket(request, server_side=True)
+        except (ssl.SSLError, OSError):
+            request.close()
+            return
+        self.RequestHandlerClass(tls, client_address, self)
+
+
+def _https_server(port):
+    """태블릿용 https 서버(0.0.0.0:8766). 인증서가 없으면 만든다."""
+    import ssl
+    from . import lan, tlscert
+    cert, key, _ = tlscert.ensure(lan.local_addresses())
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(cert, key)
+    return TLSServer(("0.0.0.0", port), H, ctx)
+
+
 def serve(port=8765):
-    """포트가 잠깐 잡혀 있으면(이전 서버 종료 중) 최대 15초 동안 다시 시도한다."""
+    """PC용 http(127.0.0.1만)와, 태블릿 접속을 켰으면 https(8766)를 함께 연다.
+    포트가 잠깐 잡혀 있으면(이전 서버 종료 중) 최대 15초 동안 다시 시도한다."""
     import time
     from . import __version__
     from . import lan
-    host = "0.0.0.0" if lan.enabled() else "127.0.0.1"
     last = None
     for _ in range(15):
         try:
-            httpd = Server((host, port), H)
+            httpd = Server(("127.0.0.1", port), H)
             break
         except OSError as e:
             last = e
@@ -286,6 +363,22 @@ def serve(port=8765):
         print(f"[오류] {port} 포트를 열 수 없습니다: {last}. 다른 프로그램이 이 포트를 쓰고 있는지 확인하세요.")
         raise SystemExit(2)
     print(f"화면 서버 시작: http://localhost:{port}  버전 {__version__}  데이터 {config.DATA_DIR}  (종료: Ctrl+C)", flush=True)
-    if host != "127.0.0.1":
-        print("같은 와이파이 기기 접속 켜짐(비밀번호 필요): " + ", ".join(f"http://{ip}:{port}" for ip in lan.local_addresses()), flush=True)
+    if lan.enabled():
+        tport = port + 1 if port != 8765 else lan.HTTPS_PORT
+        try:
+            hs = None
+            for _ in range(15):
+                try:
+                    hs = _https_server(tport)
+                    break
+                except OSError as e:
+                    last = e
+                    time.sleep(1)
+            if hs is None:
+                raise last
+            threading.Thread(target=hs.serve_forever, daemon=True).start()
+            print("태블릿 접속 켜짐(https, 비밀번호 필요" + ("" if lan.allow_write() else ", 보기 전용") + "): " +
+                  ", ".join(f"https://{ip}:{tport}" for ip in lan.local_addresses()), flush=True)
+        except Exception as e:      # noqa: BLE001  태블릿 쪽이 실패해도 PC 화면은 연다
+            print(f"[경고] 태블릿 접속(https {tport}) 서버를 열지 못했습니다: {e}", flush=True)
     httpd.serve_forever()
