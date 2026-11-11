@@ -52,8 +52,69 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _gate(self, method, u):
+        """이 PC 접속은 그대로, 다른 기기는 집 안 네트워크 + 로그인일 때만. 막았으면 False(응답은 이미 보냄)."""
+        from . import lan
+        ip = self.client_address[0]
+        if lan.is_local(ip):
+            return True
+        if not lan.enabled() or not lan.is_home_network(ip):
+            self._send(403, "<p>이 PC 밖에서의 접속은 허용되지 않았습니다.</p>")
+            return False
+        if u.path == "/login":
+            if method == "GET":
+                nxt = (urllib.parse.parse_qs(u.query).get("next") or ["/"])[0]
+                self._login_page(nxt)
+                return False
+            n = int(self.headers.get("Content-Length") or 0)
+            form = urllib.parse.parse_qs(self.rfile.read(min(n, 4096)).decode("utf-8")) if n else {}
+            nxt = (form.get("next") or ["/"])[0]
+            if not nxt.startswith("/") or nxt.startswith("//"):
+                nxt = "/"
+            if lan.locked_out(ip):
+                self._login_page(nxt, "비밀번호를 여러 번 틀려 10분 동안 막았습니다.")
+                return False
+            tok = lan.login(ip, (form.get("pw") or [""])[0])
+            if not tok:
+                self._login_page(nxt, "비밀번호가 맞지 않습니다.")
+                return False
+            self.send_response(303)
+            self.send_header("Location", nxt)
+            self.send_header("Set-Cookie", f"{lan.COOKIE}={tok}; Path=/; Max-Age={lan.SESSION_DAYS * 86400}; HttpOnly; SameSite=Strict")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+        tok = lan.cookie_token(self.headers.get("Cookie"))
+        if u.path == "/logout":
+            lan.logout(tok)
+            self.send_response(303)
+            self.send_header("Location", "/login")
+            self.send_header("Set-Cookie", f"{lan.COOKIE}=; Path=/; Max-Age=0")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+        if lan.valid(tok):
+            return True
+        if method == "GET" and not u.path.startswith("/api/"):
+            self.send_response(303)
+            self.send_header("Location", "/login?next=" + urllib.parse.quote(u.path + (("?" + u.query) if u.query else "")))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        else:
+            self._send(401, json.dumps({"error": "로그인이 필요합니다(화면을 새로 고치세요)"}, ensure_ascii=False), "application/json")
+        return False
+
+    def _login_page(self, nxt, err=None):
+        from . import lan
+        import html as _h
+        page = lan.LOGIN_PAGE.replace("__NEXT__", _h.escape(nxt, quote=True)).replace(
+            "__ERR__", f'<p class="err">{_h.escape(err)}</p>' if err else "")
+        self._send(200 if not err else 401, page)
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
+        if not self._gate("GET", u):
+            return
         q = urllib.parse.parse_qs(u.query)
         by = int(q["base_year"][0]) if q.get("base_year") else None
         conn = db.connect()
@@ -89,6 +150,8 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if not self._gate("POST", u):
+            return
         q = urllib.parse.parse_qs(u.query)
         if u.path == "/api/scan":
             from . import screener
@@ -126,6 +189,8 @@ class H(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
             return self._send(200, json.dumps({"saved": True}, ensure_ascii=False), "application/json")
+        if u.path == "/api/open-data" and not __import__("analyzer.lan", fromlist=["is_local"]).is_local(self.client_address[0]):
+            return self._send(403, json.dumps({"error": "PC에서만 열 수 있습니다", "path": config.DATA_DIR}, ensure_ascii=False), "application/json")
         if u.path == "/api/open-data":
             # 데이터 폴더를 윈도우 탐색기로 연다(이 PC에서만 동작)
             try:
@@ -207,10 +272,12 @@ def serve(port=8765):
     """포트가 잠깐 잡혀 있으면(이전 서버 종료 중) 최대 15초 동안 다시 시도한다."""
     import time
     from . import __version__
+    from . import lan
+    host = "0.0.0.0" if lan.enabled() else "127.0.0.1"
     last = None
     for _ in range(15):
         try:
-            httpd = Server(("127.0.0.1", port), H)
+            httpd = Server((host, port), H)
             break
         except OSError as e:
             last = e
@@ -219,4 +286,6 @@ def serve(port=8765):
         print(f"[오류] {port} 포트를 열 수 없습니다: {last}. 다른 프로그램이 이 포트를 쓰고 있는지 확인하세요.")
         raise SystemExit(2)
     print(f"화면 서버 시작: http://localhost:{port}  버전 {__version__}  데이터 {config.DATA_DIR}  (종료: Ctrl+C)", flush=True)
+    if host != "127.0.0.1":
+        print("같은 와이파이 기기 접속 켜짐(비밀번호 필요): " + ", ".join(f"http://{ip}:{port}" for ip in lan.local_addresses()), flush=True)
     httpd.serve_forever()

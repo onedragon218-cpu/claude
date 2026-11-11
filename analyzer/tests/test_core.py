@@ -569,6 +569,38 @@ class T(unittest.TestCase):
         self.assertEqual(upvalue.classify(row)["status"], "제외")
         self.assertEqual(upvalue.classify(row, use=("roe",))["status"], "통과")
 
+    def test_lan_password_and_network_rules(self):
+        from analyzer import lan
+        old = os.environ.get("APPDATA")
+        os.environ["APPDATA"] = tempfile.mkdtemp()
+        try:
+            self.assertFalse(lan.enabled())
+            with self.assertRaises(ValueError):
+                lan.enable("12345")                        # 6자 미만
+            lan.enable("tablet123")
+            self.assertTrue(lan.enabled())
+            txt = open(lan.path(), encoding="utf-8").read()
+            self.assertNotIn("tablet123", txt)             # 원문은 저장하지 않음
+            self.assertTrue(lan.check_password("tablet123"))
+            self.assertFalse(lan.check_password("tablet124"))
+            tok = lan.login("192.168.0.20", "tablet123")
+            self.assertTrue(lan.valid(tok))
+            lan.logout(tok)
+            self.assertFalse(lan.valid(tok))
+            lan.disable()
+            self.assertFalse(lan.enabled())
+        finally:
+            if old is None:
+                os.environ.pop("APPDATA", None)
+            else:
+                os.environ["APPDATA"] = old
+        for ip in ("192.168.0.20", "10.0.0.5", "172.20.1.1", "fe80::1"):
+            self.assertTrue(lan.is_home_network(ip), ip)
+        for ip in ("8.8.8.8", "211.234.1.1", "2001:4860::8888"):
+            self.assertFalse(lan.is_home_network(ip), ip)   # 인터넷 쪽 주소는 비밀번호가 맞아도 받지 않음
+        self.assertTrue(lan.is_local("127.0.0.1"))
+        self.assertEqual(lan.cookie_token("a=1; ca_session=xyz; b=2"), "xyz")
+
 
 if __name__ == "__main__":
     unittest.main()

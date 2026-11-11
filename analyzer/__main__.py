@@ -7,6 +7,7 @@
   python -m analyzer import-consensus 213500 파일.csv
   python -m analyzer reverify 213500 [--year 2024]   # 사용자 재검증 요청
   python -m analyzer serve [--port 8765]
+  python -m analyzer lan on|off|status        # 같은 와이파이 기기 접속(비밀번호)
 """
 import argparse
 import json
@@ -116,6 +117,7 @@ def main(argv=None):
     sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=8765)
     dc = sub.add_parser("doctor"); dc.add_argument("--port", type=int, default=8765)
     sub.add_parser("calibrate")
+    ln = sub.add_parser("lan"); ln.add_argument("action", choices=["on", "off", "status"]); ln.add_argument("--password-stdin", action="store_true")
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
@@ -169,6 +171,28 @@ def main(argv=None):
         from . import calibration
         r = calibration.build(progress=lambda i, n: print(f"{i}/{n}", flush=True) if i % 20 == 0 else None)
         print(f"완료: 기업 {r['companies']}곳, 실패 {len(r['failed'])}곳 → {calibration.CACHE()}")
+    elif args.cmd == "lan":
+        from . import lan
+        if args.action == "on":
+            if args.password_stdin:
+                pw = sys.stdin.readline().rstrip("\r\n")
+            else:
+                import getpass
+                pw = getpass.getpass("태블릿 접속 비밀번호(6자 이상): ")
+                if getpass.getpass("한 번 더: ") != pw:
+                    raise SystemExit("두 번 넣은 비밀번호가 다릅니다.")
+            try:
+                lan.enable(pw)
+            except ValueError as e:
+                raise SystemExit(str(e))
+            print("같은 와이파이 기기 접속을 켰습니다. 화면 서버를 다시 켜야 적용됩니다.")
+        elif args.action == "off":
+            lan.disable()
+            print("같은 와이파이 기기 접속을 껐습니다(이 PC에서만 접속). 화면 서버를 다시 켜야 적용됩니다.")
+        print(f"상태: {'켜짐' if lan.enabled() else '꺼짐'} · 설정 파일 {lan.path()}")
+        if lan.enabled():
+            for ip in lan.local_addresses():
+                print(f"태블릿에서 열 주소: http://{ip}:8765")
     elif args.cmd == "doctor":
         doctor(args.port)
     elif args.cmd == "serve":

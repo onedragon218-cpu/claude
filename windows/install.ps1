@@ -111,7 +111,7 @@ $sSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGo
 $sAction = New-ScheduledTaskAction -Execute $pyw -Argument "-m analyzer serve --port $Port" -WorkingDirectory $Root
 $sTrigger = New-ScheduledTaskTrigger -AtLogOn -User $me
 Register-ScheduledTask -TaskName $TaskServer -Action $sAction -Trigger $sTrigger -Settings $sSettings -Principal $principal `
-    -Description '상장기업 재무분석 화면 서버(이 PC에서만 접속 가능)' -Force | Out-Null
+    -Description '상장기업 재무분석 화면 서버(이 PC, 또는 태블릿 접속을 켠 경우 같은 와이파이 기기)' -Force | Out-Null
 Write-Host "[4/5] 화면 서버 등록: 로그인할 때 자동 시작 ($TaskServer)" -ForegroundColor Green
 
 # 바탕화면 바로가기
@@ -121,6 +121,8 @@ Remove-Item (Join-Path $desk '재무분석 열기.url') -ErrorAction SilentlyCon
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $openTxt = (Get-Content (Join-Path $PSScriptRoot 'open.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 열기.bat'), $openTxt, $utf8)
+$lanTxt = (Get-Content (Join-Path $PSScriptRoot 'lan.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
+[IO.File]::WriteAllText((Join-Path $desk '재무분석 태블릿 접속 설정.bat'), $lanTxt, $utf8)
 # 바탕화면 '지금 갱신' 파일(BOM 없는 UTF-8로 써야 cmd가 첫 줄을 읽음)
 $batTxt = (Get-Content (Join-Path $PSScriptRoot 'run_now.bat') -Raw).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 지금 갱신.bat'), $batTxt, (New-Object System.Text.UTF8Encoding($false)))
