@@ -1,4 +1,4 @@
-﻿# 설치: 파이썬 확인 → DART 인증키 저장 → 작업 스케줄러 등록 → 첫 수집 → 화면 열기
+﻿# 설치: 파이썬 확인 → DART 인증키 저장 → 작업 스케줄러 등록 → 화면 서버 재시작 → 바로가기 → 첫 수집(화면 뒤) → 화면 열기
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 # 설치 기록: 화면에 나온 글을 그대로 %LOCALAPPDATA%\CorpAnalyzer\install_log.txt 에 남긴다(문제가 생기면 이 파일을 보내 주세요)
@@ -107,7 +107,7 @@ if ($nid) {
 $me = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
+    -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew   # 기업이 많으면 오래 걸림(끊겨도 다음에 이어서 받음)
 $action = New-ScheduledTaskAction -Execute $pyw -Argument '-m analyzer update-all' -WorkingDirectory $Root
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At '07:13'
 Register-ScheduledTask -TaskName $TaskUpdate -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
@@ -135,10 +135,8 @@ $openTxt = (Get-Content (Join-Path $PSScriptRoot 'open.bat') -Raw -Encoding UTF8
 $batTxt = (Get-Content (Join-Path $PSScriptRoot 'run_now.bat') -Raw -Encoding UTF8).Replace('%~dp0', "$PSScriptRoot\")
 [IO.File]::WriteAllText((Join-Path $desk '재무분석 지금 갱신.bat'), $batTxt, (New-Object System.Text.UTF8Encoding($false)))
 
-# 5) 첫 수집과 화면 열기
-Write-Host '[5/5] 첫 수집을 실행합니다(빠진 값만 받습니다)...' -ForegroundColor Cyan
-Push-Location $Root
-try { & $py -m analyzer update-all } finally { Pop-Location }
+# 5) 화면 서버를 새 코드로 다시 켜기(수집보다 먼저 — 설치 창을 일찍 닫아도 새 버전이 뜨도록)
+Write-Host '[5/5] 화면 서버를 새 버전으로 다시 켭니다...' -ForegroundColor Cyan
 Stop-Server            # 이전 버전 서버가 떠 있으면 끄고 새 코드로 다시 시작
 $started = Start-Server $py
 $v = Test-ServerVersion
@@ -147,10 +145,6 @@ else {
     Write-Host "      경고: 화면 서버 버전이 맞지 않습니다. 실행 중 $($v.running), 이 폴더 $(Get-LocalVersion)" -ForegroundColor Red
     Write-Host "      바탕화면 '재무분석 열기.bat'을 실행하면 원인을 진단해 보여 줍니다." -ForegroundColor Red
 }
-Start-Process $Url
-Write-Host ''
-Write-Host "설치 완료. 화면: $Url  (바탕화면 '재무분석 열기.bat')" -ForegroundColor Green
-Write-Host "데이터·기록: $DataDir  ·  제거: windows\uninstall.bat"
 
 # 바로가기 확인과 '태블릿 접속 설정' 바로가기: 맨 마지막에 만들고 결과를 요약해 보여 준다
 function New-Lnk([string]$path, [string]$target, [string]$desc) {
@@ -192,5 +186,27 @@ if (-not $okLan) {
     Write-Host "  바탕화면에 '태블릿 접속 설정'을 만들지 못했습니다. 아래 파일을 직접 실행하세요:" -ForegroundColor Yellow
     Write-Host "    $lanBat" -ForegroundColor Yellow
 }
+
+# 첫 수집: 설치 창에서 기다리지 않고 화면 뒤에서 돌린다(자동 수집과 같은 작업). 도는 동안에도 화면을 그대로 쓸 수 있다.
+Write-Host ''
+Write-Host '=== 첫 수집(빠진 값만) ===' -ForegroundColor Cyan
+$bgOk = $false
+try { Start-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop; $bgOk = $true } catch { }
+if (-not $bgOk) {
+    try { Start-Process -FilePath $pyw -ArgumentList '-m analyzer update-all' -WorkingDirectory $Root -WindowStyle Hidden; $bgOk = $true } catch { }
+}
+$runLog = Join-Path $DataDir ("logs\run_{0:yyyyMMdd}.log" -f (Get-Date))
+if ($bgOk) {
+    Write-Host '  화면 뒤에서 수집을 시작했습니다. 기다리지 않고 바로 화면을 쓰셔도 됩니다.' -ForegroundColor Green
+    Write-Host '  기업이 많으면 몇십 분 걸릴 수 있고, 끝난 기업부터 화면에 반영됩니다(새로 고침).'
+    Write-Host "  진행 기록: $runLog"
+} else {
+    Write-Host "  화면 뒤 수집을 시작하지 못했습니다. 바탕화면 '재무분석 지금 갱신.bat'을 실행하세요." -ForegroundColor Yellow
+}
+
+Start-Process $Url
+Write-Host ''
+Write-Host "설치 완료. 화면: $Url  (바탕화면 '재무분석 열기.bat')" -ForegroundColor Green
+Write-Host "데이터·기록: $DataDir  ·  제거: windows\uninstall.bat"
 Write-Host "설치 기록: $InstallLog"
 try { Stop-Transcript | Out-Null } catch { }
