@@ -103,6 +103,17 @@ if ($nid) {
     }
 }
 
+# 2-2) 한국은행 ECOS 인증키(선택). 있으면 국고채 10년 금리(할인율의 바탕)를 1주일마다 자동으로 받는다.
+#      저장 위치: %APPDATA%\corp-analyzer\ecos_api_key.txt  · 발급: ecos.bok.or.kr → 인증키 신청(무료)
+$ecFile = Join-Path $keyDir 'ecos_api_key.txt'
+if (Test-Path $ecFile) { Write-Host '      저장된 한국은행 ECOS 인증키가 있습니다.' }
+$ek = "$(Read-Host '      (선택) 한국은행 ECOS 인증키 - 국고채 금리 자동 갱신용 (없으면 그냥 Enter)')".Trim()
+if ($ek) {
+    New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+    Set-Content -Path $ecFile -Value $ek -Encoding ASCII -NoNewline
+    Write-Host "      저장: $ecFile" -ForegroundColor Green
+}
+
 # 3) 작업 스케줄러: 평일 07:13 자동 수집(꺼져 있던 날은 켜진 뒤 바로 실행)
 $me = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited

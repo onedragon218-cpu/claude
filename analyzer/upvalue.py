@@ -4,7 +4,7 @@
    - 작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로.
    - 최소 증가폭은 선택 입력(매출·EPS는 %, 영업이익률·ROE는 %p). 비우면 조금이라도 오르면 통과.
    - 작년이 적자(0 이하)였다가 오른 경우도 우상향(턴어라운드)으로 본다. 이때 %로 재는 문턱은 적용하지 않는다.
-   - 고른 지표의 컨센서스가 하나라도 없으면 제외.
+   - 고른 지표의 작년 실적이나 컨센서스가 하나라도 없으면 '자료 부족'으로 따로 모아 보여 준다(2026-11-13 변경, 예전에는 제외).
 2) 가격 판정: 적정가 = ROE(%) × 1/10 × 보정(앱 공통 규칙 ×0.83, 급하향 ×0.73, 기본 켬) × BPS(컨센서스 그해 값) > 현재 주가
    1차 = 내후년 기준, 2차 = 내년 기준, 3차 = 올해 기준. 화면에는 '몇 년 뒤 기준부터 싼가' 한 칸과 안전 여유(적정가 ÷ 주가 − 1)를 함께 보여 준다.
 리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님
@@ -13,6 +13,7 @@ from . import db
 
 METRICS = {"op_margin": ("영업이익률", "%p"), "roe": ("ROE", "%p"), "revenue": ("매출액", "%"), "eps": ("EPS", "%")}
 FACTOR = 0.83
+SLOTS = ["작년 실적", "올해 컨센서스", "내년 컨센서스", "내후년 컨센서스"]
 TIERS = [(2, "1차", "내후년"), (1, "2차", "내년"), (0, "3차", "올해")]   # (올해로부터 몇 년 뒤, 이름, 기준)
 
 
@@ -51,8 +52,9 @@ def rows(conn, P):
 
 def rising(vals, kind, th=None):
     """vals = [작년, 올해, 내년, 내후년]. kind '%'면 증가율, '%p'면 증가폭으로 문턱 비교. 반환: (통과?, 사유)"""
-    if any(v is None for v in vals):
-        return None, "컨센서스 없음"
+    miss = [n for n, v in zip(SLOTS, vals) if v is None]
+    if miss:
+        return None, "·".join(miss) + " 없음"
     for a, b in zip(vals, vals[1:]):
         if not b > a:
             return False, "우상향 아님"
@@ -72,17 +74,21 @@ def fair_prices(row, factor=True):
 
 
 def classify(row, use=("op_margin", "roe", "revenue", "eps"), th=None, factor=True):
-    """반환: {'status': '통과'|'우상향 아님'|'제외', 'tier': 0(올해부터)|1|2|None, 'fair': [...], 'margin': [...]}"""
+    """반환: {'status': '통과'|'우상향 아님'|'자료 부족', 'tier': 0(올해부터)|1|2|None, 'fair': [...], 'margin': [...]}"""
     th = th or {}
-    for m in use:
+    lack = []
+    for m in use:          # 자료가 있는 지표에서 '우상향 아님'이 나오면 그것이 먼저(빈칸을 채워도 탈락이므로)
         ok, why = rising(row["series"][m], METRICS[m][1], th.get(m))
         if ok is None:
-            return {"status": "제외", "why": f"{METRICS[m][0]} {why}"}
-        if not ok:
+            lack.append(f"{METRICS[m][0]} {why}")
+        elif not ok:
             return {"status": "우상향 아님", "why": f"{METRICS[m][0]} {why}"}
+    if lack:
+        whys = {w.split(" ", 1)[1] for w in lack}
+        return {"status": "자료 부족", "why": ("고른 지표 모두 " + whys.pop()) if len(whys) == 1 and len(lack) > 1 else " / ".join(lack)}
     fair = fair_prices(row, factor)
     if row.get("price") is None or any(v is None for v in fair):
-        return {"status": "제외", "why": "주가 또는 ROE·BPS 컨센서스 없음"}
+        return {"status": "자료 부족", "why": "주가 또는 ROE·BPS 컨센서스 없음"}
     margin = [v / row["price"] - 1 for v in fair]
     tier = next((i for i in (0, 1, 2) if fair[i] > row["price"]), None)
     return {"status": "통과", "tier": tier, "fair": fair, "margin": margin, "cheap": [v > row["price"] for v in fair]}

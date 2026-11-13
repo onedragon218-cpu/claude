@@ -771,7 +771,8 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
     validate.validate_accounts(conn, code, P)
     compute(conn, code, P, stats)
     report = validate.run(conn, code, P)
-    from . import valuation
+    from . import valuation, rates
+    rates.maybe_fetch(conn, offline=offline)
     val = valuation.run(conn, code, P)
     report["items"] += val["checks"]
     for c in val["checks"]:

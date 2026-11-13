@@ -246,8 +246,8 @@ def _g():
 
 def _rf_table():
     from .valuation import load_assumptions
-    t = load_assumptions().get("무위험수익률_국고채10년", {})
-    return {int(k): v / 100 for k, v in t.items() if str(k).isdigit()}
+    from . import rates
+    return {k: v / 100 for k, v in rates.table(load_assumptions())[0].items()}
 
 
 def inputs(conn, code, P, vrows=None):

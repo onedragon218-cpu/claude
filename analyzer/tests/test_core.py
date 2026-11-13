@@ -568,8 +568,35 @@ class T(unittest.TestCase):
         self.assertEqual(c["tier"], 2)                   # 내후년 기준에서야 쌈 → 1차
         self.assertEqual(upvalue.classify(row, factor=False)["tier"], 1)   # 보정 끄면 내년 기준 11,000 > 10,000 → 2차
         row["series"]["eps"] = [1, 2, None, 4]
-        self.assertEqual(upvalue.classify(row)["status"], "제외")
+        self.assertEqual(upvalue.classify(row)["status"], "자료 부족")
+        self.assertIn("내년 컨센서스", upvalue.classify(row)["why"])
+        row["series"]["roe"] = [9, 8, 7, 6]                 # 있는 값으로 이미 우상향이 깨지면 자료 부족보다 탈락이 먼저
+        self.assertEqual(upvalue.classify(row)["status"], "우상향 아님")
+        row["series"]["roe"] = [10, 11, 12, 13]
         self.assertEqual(upvalue.classify(row, use=("roe",))["status"], "통과")
+
+    def test_year_rollover_and_rf_override(self):
+        import datetime as _d, json as _j, tempfile
+        from unittest import mock
+        from analyzer import config, rates
+        class D(_d.date):
+            pass
+        for today, by in ((_d.date(2027, 3, 31), 2026), (_d.date(2027, 4, 1), 2027), (_d.date(2026, 11, 13), 2026)):
+            D.today = classmethod(lambda cls, t=today: t)
+            with mock.patch.object(config._dt, "date", D):
+                self.assertEqual(config.periods()["base_year"], by)
+        self.assertEqual(config.periods(2030)["base_year"], 2030)          # 화면에서 고른 기준 연도는 그대로
+        A = {"무위험수익률_국고채10년": {"_설명": "x", "2025": 2.8, "2026": 3.1}}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            self.assertFalse(rates.info(A, 2027)["ok"])
+            self.assertEqual(rates.info(A, 2027)["used"], 2026)
+            with open(os.path.join(d, "rates.json"), "w", encoding="utf-8") as f:
+                _j.dump({"kr10y": {"2026": 3.2, "2027": 3.4}}, f)
+            t, src = rates.table(A)
+            self.assertEqual((t[2025], t[2026], t[2027]), (2.8, 3.2, 3.4))   # ECOS 값이 설정 파일 값을 덮어씀
+            self.assertEqual(src[2027], "ECOS 자동")
+            from analyzer import valuation
+            self.assertEqual(valuation._rf(A, 2027), (0.034, None))
 
     def test_lan_password_and_network_rules(self):
         from analyzer import lan

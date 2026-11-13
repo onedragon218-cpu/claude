@@ -45,9 +45,17 @@ TTL_DAYS = {
 }
 
 
+SWITCH_MD = (4, 1)   # 기준 연도가 바뀌는 날(월, 일)
+
+
 def periods(base_year=None):
-    """기준 연도로 분석 기간을 계산한다. 기본값은 실행 시점의 연도."""
-    by = int(base_year or _dt.date.today().year)
+    """기준 연도로 분석 기간을 계산한다.
+    기본값: 4월 1일부터는 올해, 1~3월은 작년(작년 사업보고서가 3월 말에 나오기 전이라 '작년 실적'이 비기 때문)."""
+    if base_year:
+        by = int(base_year)
+    else:
+        t = _dt.date.today()
+        by = t.year if (t.month, t.day) >= SWITCH_MD else t.year - 1
     return {
         "base_year": by,
         "past": list(range(by - 10, by)),

@@ -27,7 +27,8 @@ def load_assumptions():
 
 
 def _rf(A, y):
-    t = {int(k): v / 100 for k, v in A["무위험수익률_국고채10년"].items() if not k.startswith("_")}
+    from . import rates
+    t = {k: v / 100 for k, v in rates.table(A)[0].items()}   # 설정 파일 표 + ECOS 자동 값
     if y in t:
         return t[y], None
     past = [k for k in t if k <= y]
