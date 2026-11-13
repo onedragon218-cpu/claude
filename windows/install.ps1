@@ -109,6 +109,21 @@ if ($ek) {
     Write-Host "      저장: $ecFile" -ForegroundColor Green
 }
 
+# 2-3) LG EXAONE API 키(선택). 있으면 화면 Q「AI 리서치」에서 질문·연도별 요약을 쓸 수 있다.
+#      저장 위치: %APPDATA%\corp-analyzer\exaone_api_key.txt
+$exFile = Join-Path $keyDir 'exaone_api_key.txt'
+if (Test-Path $exFile) { Write-Host '      저장된 LG EXAONE API 키가 있습니다.' }
+$xk = Read-Secret '      (선택) LG EXAONE API 키 - AI 리서치(Q 탭)용 (입력은 *로 보임, 없으면 그냥 Enter)'
+if ($xk) {
+    if ($xk -match '\s') { Write-Host '      키 중간에 빈칸이 있어 저장하지 않았습니다. 나중에 「재무분석 인증키 설정」에서 넣어 주세요.' -ForegroundColor Yellow }
+    else {
+        Write-Host "      키 확인: $(Test-Exaone $xk)"
+        Save-Secret $exFile $xk
+        Write-Host "      저장: $exFile" -ForegroundColor Green
+    }
+    $xk = $null
+}
+
 Repair-Secrets      # 인증키·태블릿 인증서 파일 권한 바로잡기(예전 버전에서 잠겨 못 읽던 경우)
 # 예전 설치 기록은 이번 설치가 시작될 때 새 기록으로 덮어써졌다(키 입력은 이제 기록에 남지 않음)
 
@@ -180,12 +195,19 @@ foreach ($d in $desks) {
         else { Write-Host "  [실패] $f (만든 뒤 파일이 없음 — 백신 프로그램이 지웠을 수 있음)" -ForegroundColor Yellow }
     } catch { Write-Host "  [실패] $f : $($_.Exception.Message)" -ForegroundColor Yellow }
 }
+foreach ($d in $desks) {      # 인증키 넣기·바꾸기 바로가기(바탕화면)
+    $f = Join-Path $d '재무분석 인증키 설정.lnk'
+    try {
+        New-Lnk $f (Join-Path $PSScriptRoot 'keys.bat') 'DART·ECOS·네이버·EXAONE 인증키 넣기·바꾸기(입력은 *로 보임)'
+        if (Test-Path $f) { Write-Host "  [만듦] $f" -ForegroundColor Green }
+    } catch { Write-Host "  [실패] $f : $($_.Exception.Message)" -ForegroundColor Yellow }
+}
 try {
     $sm = Join-Path ([Environment]::GetFolderPath('Programs')) '재무분석'
     New-Item -ItemType Directory -Force -Path $sm | Out-Null
     New-Lnk (Join-Path $sm '재무분석 태블릿 접속 설정.lnk') $lanBat '같은 와이파이 태블릿에서 화면 보기 켜기·끄기'
     New-Lnk (Join-Path $sm '재무분석 열기.lnk') (Join-Path $PSScriptRoot 'open.bat') '재무분석 화면 열기'
-    New-Lnk (Join-Path $sm '재무분석 인증키 설정.lnk') (Join-Path $PSScriptRoot 'keys.bat') 'DART·ECOS·네이버 인증키 넣기·바꾸기(입력은 *로 보임)'
+    New-Lnk (Join-Path $sm '재무분석 인증키 설정.lnk') (Join-Path $PSScriptRoot 'keys.bat') 'DART·ECOS·네이버·EXAONE 인증키 넣기·바꾸기(입력은 *로 보임)'
     Write-Host "  [만듦] 시작 메뉴 → 재무분석 폴더" -ForegroundColor Green
 } catch { Write-Host "  [실패] 시작 메뉴: $($_.Exception.Message)" -ForegroundColor Yellow }
 foreach ($n in @('재무분석 열기.bat', '재무분석 지금 갱신.bat')) {
