@@ -276,6 +276,13 @@ class H(BaseHTTPRequestHandler):
                              conn.execute("SELECT stock_code, name FROM companies ORDER BY name")]
                     conn.close()
                     kind = "전체 갱신"
+                    pick = body.get("codes")          # 'DB에 있는 기업'에서 체크한 곳만 갱신(2026-11-13)
+                    if pick is not None:
+                        want = {str(c).strip().upper() for c in pick}
+                        codes = [(c, nm) for c, nm in codes if c in want]
+                        kind = "선택 갱신"
+                        if not codes:
+                            return self._send(400, json.dumps({"error": "고른 기업이 DB에 없습니다"}, ensure_ascii=False), "application/json")
                 by = int(q["base_year"][0]) if q.get("base_year") else None
                 fresh = q.get("fresh", ["0"])[0] == "1"
                 JOB.update(running=True, total=len(codes), done=0, current=None, results=[], started_at=db.now(),

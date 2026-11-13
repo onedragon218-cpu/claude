@@ -598,6 +598,39 @@ class T(unittest.TestCase):
             from analyzer import valuation
             self.assertEqual(valuation._rf(A, 2027), (0.034, None))
 
+    def test_update_selected_companies_only(self):
+        import http.client, threading, time
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+        from analyzer import server
+        got = []
+        def fake(codes, by, fresh):
+            got.append((codes, fresh))
+            with server.JOB_LOCK:
+                server.JOB["running"] = False
+        conn = db.connect(); names = {r["stock_code"]: r["name"] for r in conn.execute("SELECT stock_code, name FROM companies")}; conn.close()
+        pick = sorted(names)[:1]
+        with mock.patch.object(server, "_update_all", fake):
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), server.H)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                def post(body):
+                    c = http.client.HTTPConnection("127.0.0.1", srv.server_port, timeout=10)
+                    b = json.dumps(body).encode()
+                    c.request("POST", "/api/update-all?fresh=1", body=b, headers={"Content-Type": "application/json", "Content-Length": str(len(b)), "Origin": f"http://127.0.0.1:{srv.server_port}"})
+                    r = c.getresponse(); d = json.loads(r.read() or b"{}"); c.close(); return r.status, d
+                st, d = post({"codes": pick + ["999999"]})
+                self.assertEqual((st, d.get("kind")), (200, "선택 갱신"))
+                for _ in range(50):
+                    if got: break
+                    time.sleep(0.05)
+                self.assertEqual([c for c, _ in got[0][0]], pick)       # DB에 없는 코드는 빠지고 고른 기업만
+                self.assertTrue(got[0][1])
+                st, d = post({"codes": ["999999"]})
+                self.assertEqual(st, 400)
+            finally:
+                srv.shutdown(); srv.server_close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")
