@@ -72,7 +72,7 @@ def _hide(text):
 
 
 # ---------------------------------------------------------------- 호출
-def chat(messages, max_tokens=2500, temperature=0.2, timeout=180, stream=True, max_total=900):
+def chat(messages, max_tokens=4000, temperature=0.2, timeout=180, stream=True, max_total=900, _retry=0):
     """반환: (답 글, 모델 이름). 실패하면 AIUnavailable(키는 메시지에 넣지 않음)
     stream=True: 글이 만들어지는 대로 조금씩 받는다(오래 걸리는 답에서 '읽기 시간 초과'를 피함).
     timeout = 다음 조각을 기다리는 최대 초, max_total = 전체 최대 초."""
@@ -88,11 +88,12 @@ def chat(messages, max_tokens=2500, temperature=0.2, timeout=180, stream=True, m
                                  headers={"Authorization": "Bearer " + k, "Content-Type": "application/json", "User-Agent": UA,
                                           "Accept": "text/event-stream" if stream else "application/json"})
     t0 = time.time()
+    _throttle()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             ctype = r.headers.get("Content-Type", "")
             if stream and "event-stream" in ctype:
-                parts, model = [], None
+                parts, think, model, fin = [], [], None, None
                 for raw in r:                                   # 줄 단위: 'data: {...}'
                     if time.time() - t0 > max_total:
                         raise AIUnavailable(f"EXAONE 답이 {max_total}초 안에 끝나지 않았습니다(자료를 줄여 다시)")
@@ -108,8 +109,12 @@ def chat(messages, max_tokens=2500, temperature=0.2, timeout=180, stream=True, m
                         continue
                     model = ch.get("model") or model
                     for c in ch.get("choices") or []:
-                        parts.append(((c.get("delta") or {}).get("content")) or "")
-                d = {"model": model, "choices": [{"message": {"content": "".join(parts)}}]}
+                        dl = c.get("delta") or {}
+                        parts.append(dl.get("content") or "")
+                        think.append(dl.get("reasoning_content") or dl.get("reasoning") or "")
+                        fin = c.get("finish_reason") or fin
+                d = {"model": model, "choices": [{"message": {"content": "".join(parts), "reasoning_content": "".join(think)},
+                                                  "finish_reason": fin}]}
             else:
                 d = json.loads(r.read().decode("utf-8"))
     except AIUnavailable:
@@ -122,6 +127,13 @@ def chat(messages, max_tokens=2500, temperature=0.2, timeout=180, stream=True, m
             msg = ""
         if stream and e.code in (400, 422) and "stream" in str(msg).lower():      # 조금씩 받기를 지원하지 않으면 한 번에 받기로
             return chat(messages, max_tokens, temperature, max(timeout, 300), stream=False)
+        if e.code == 429 and _retry < 3:          # 호출 한도(초당 1회 등): 잠깐 쉬고 다시
+            try:
+                wait = float(e.headers.get("Retry-After") or 0)
+            except (TypeError, ValueError):
+                wait = 0
+            time.sleep(max(wait, 1.5 * (_retry + 1)))
+            return chat(messages, max_tokens, temperature, timeout, stream, max_total, _retry + 1)
         hint = {401: "인증키가 틀렸거나 만료됨", 403: "권한 없음(키 사용 범위 확인)", 404: "주소나 모델 이름이 다름(exaone.json 확인)",
                 429: "호출 한도 초과 — 잠시 뒤 다시"}.get(e.code, "")
         raise AIUnavailable(_hide(f"EXAONE 오류 {e.code} {hint} {msg}".strip())[:300]) from None
@@ -129,11 +141,33 @@ def chat(messages, max_tokens=2500, temperature=0.2, timeout=180, stream=True, m
         sec = round(time.time() - t0)
         raise AIUnavailable(_hide(f"EXAONE 접속 실패({sec}초 뒤): {e}")[:300]) from None
     try:
-        text = d["choices"][0]["message"]["content"] or ""
-    except (KeyError, IndexError, TypeError):
+        c0 = d["choices"][0]
+        msg = c0.get("message") or {}
+        raw_text = msg.get("content") or ""
+    except (KeyError, IndexError, TypeError, AttributeError):
         raise AIUnavailable("EXAONE 응답 형식을 읽지 못했습니다") from None
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()     # 추론 모드의 생각 과정은 버림
+    think_n = len(msg.get("reasoning_content") or msg.get("reasoning") or "") + sum(len(x) for x in re.findall(r"<think>.*?(?:</think>|$)", raw_text, flags=re.S))
+    text = re.sub(r"<think>.*?(?:</think>|$)", "", raw_text, flags=re.S).strip()     # 추론 모드의 생각 과정은 버림
+    LAST.update(finish=c0.get("finish_reason"), think_chars=think_n, sec=round(time.time() - t0, 1), usage=d.get("usage"))
+    if not text and c0.get("finish_reason") == "length":
+        raise AIUnavailable(f"답이 비었습니다: 모델이 생각 과정(약 {think_n}자)에 글자 한도({max_tokens})를 다 썼습니다")
     return text, d.get("model") or s["model"]
+
+
+LAST = {}                 # 마지막 호출 정보(연결 시험 표시용)
+_GAP = 1.2                # 호출 사이 최소 간격(초). EXAONE 무료 API '초당 1회' 한도(2026-11-13 PC에서 429로 확인)
+_T = {"last": 0.0}
+
+
+def _throttle():
+    import threading
+    import time
+    lock = _T.setdefault("lock", threading.Lock())
+    with lock:
+        wait = _T["last"] + _GAP - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        _T["last"] = time.time()
 
 
 def diagnose(full=True):
@@ -166,13 +200,16 @@ def diagnose(full=True):
         return {"ok": False, "steps": steps, "settings": s}
     if not step(f"③ 서버 연결({host}:{port})", lambda: socket.create_connection((host, port), timeout=10).close() or "연결됨"):
         return {"ok": False, "steps": steps, "settings": s}
+    def info():
+        return f" · 생각 과정 {LAST.get('think_chars', 0)}자 · 끝난 이유 {LAST.get('finish') or '-'}" + \
+            (f" · 토큰 {LAST['usage'].get('total_tokens')}" if isinstance(LAST.get("usage"), dict) and LAST["usage"].get("total_tokens") else "")
     ok = step("④ 아주 짧은 질문(답 몇 글자)", lambda: "답: " + chat([{"role": "user", "content": "숫자 1만 답하세요."}],
-                                                                  max_tokens=16, timeout=90, max_total=120)[0][:40])
+                                                                  max_tokens=1000, timeout=90, max_total=150)[0][:40] + info())
     if ok and full:
         ctx = "\n".join(f"{2016 + i}년 매출 {1000 + i * 37}억원" for i in range(10))
         ok = step("⑤ 짧은 자료 질문(실제 질문의 축소판)", lambda: "답: " + chat(
             [{"role": "system", "content": "한국어로 한 문장만 답하세요."}, {"role": "user", "content": ctx + "\n매출이 가장 큰 해는?"}],
-            max_tokens=120, timeout=120, max_total=180)[0][:80])
+            max_tokens=1500, timeout=120, max_total=240)[0][:80] + info())
     return {"ok": ok, "steps": steps, "settings": s}
 
 
