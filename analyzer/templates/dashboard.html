@@ -172,6 +172,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 
 <section id="B">
   <div class="tiles" id="tiles"></div>
+  <div class="card" style="margin-top:16px" id="rfcard"></div>
   <div class="card" style="margin-top:16px">
     <h2>지표별 확보 현황</h2>
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
@@ -840,6 +841,13 @@ function renderStatic(){
   const stale = sc.STALE||0;
   $('#tiles').innerHTML = [['저장된 값(현재 버전)',tot],['검증 완료',sc.VERIFIED||0],['미검증',sc.UNVERIFIED||0],['불일치',sc.CONFLICT||0],['갱신 필요(STALE)',stale],['미확보 칸',missN],['마지막 수집일',D.last_collect||'–'],['마지막 검증일',(D.last_verify||'–').slice(0,10)]]
     .map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v" style="${typeof v==='string'?'font-size:17px':''}">${v}</div></div>`).join('');
+  { const ri = D.rf_info || {}, L = ri.last, M = ri.meta || {};   // 국고채 10년(ECOS) 자동 갱신 상태
+    const st = !ri.has_key ? '<span class="badge b-WARN">키 없음</span> 인증키 설정에서 ECOS 키를 넣으면 자동으로 받습니다.'
+      : !L ? '<span class="muted">키 있음 · 아직 받기 전</span> — 「분석 실행」이나 「전체 갱신」을 한 번 하면 받습니다(1주일에 한 번).'
+      : L.ok ? `<span class="badge b-OK">성공</span> ${esc(L.fetched_at)}에 ${L.n_items}개 연도 받음${M.current_note?' · '+esc(M.current_note):''}`
+      : `<span class="badge b-ERROR">실패</span> ${esc(L.fetched_at)} · ${esc(L.note||'')} (하루 뒤 다시 시도. 'INFO-100'이면 키가 틀린 것)`;
+    $('#rfcard').innerHTML = `<h2 style="margin:0 0 6px">국고채 10년 금리 자동 갱신(한국은행 ECOS)</h2><div>${st}</div>` +
+      (ri.error ? '' : `<div class="muted" style="margin-top:4px">${ri.year}년 할인율에 쓰는 값: ${ri.value??'–'}% (출처: ${esc(ri.ok ? ri.source : (ri.used+'년 '+ri.source+', 올해 값 없음'))})</div>`); }
   const ys = yearsFor(BY);
   $('#coverage').innerHTML = '<tr><th class="l">지표</th>' + ys.map(y=>`<th>${y>BY?y+'E':y}</th>`).join('') + '</tr>' + MET.map(m=>'<tr><td class="l">'+m.name+'</td>'+ys.map(y=>{
     const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};

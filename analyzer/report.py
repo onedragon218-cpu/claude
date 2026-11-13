@@ -124,8 +124,10 @@ def payload(conn, code, base_year=None, last_run=None):
         "stability": stability(conn, code, P, vres["rows"], comp),
         "app_version": __import__("analyzer").__version__,
         "data_dir": config.DATA_DIR,
-        "rf_info": _safe(lambda: __import__("analyzer.rates", fromlist=["info"]).info(
-            __import__("analyzer.valuation", fromlist=["load_assumptions"]).load_assumptions(), P["current"])),
+        "rf_info": _safe(lambda: dict(__import__("analyzer.rates", fromlist=["info"]).info(
+            __import__("analyzer.valuation", fromlist=["load_assumptions"]).load_assumptions(), P["current"]),
+            last=(lambda r: dict(r) if r else None)(db.last_fetch(conn, "ecos_rf", "kr10y")),
+            meta=__import__("analyzer.rates", fromlist=["load"]).load()[1])),
         "valuation": {"rows": vres["rows"], "assumptions": vres["assumptions"], "base_year": P["base_year"]},
         "total_facts": len(cur), "total_versions": len(allf),
     }
