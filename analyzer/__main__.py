@@ -115,6 +115,7 @@ def main(argv=None):
     c = sub.add_parser("import-consensus"); c.add_argument("code"); c.add_argument("csv")
     v = sub.add_parser("reverify"); v.add_argument("code"); v.add_argument("--year", type=int)
     sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=8765)
+    sub.add_parser("ai-test")
     dc = sub.add_parser("doctor"); dc.add_argument("--port", type=int, default=8765)
     sub.add_parser("calibrate")
     ln = sub.add_parser("lan"); ln.add_argument("action", choices=["on", "off", "status", "check", "renew-cert"])
@@ -217,6 +218,12 @@ def main(argv=None):
                 print("  " + line.replace("\t", "  "))
     elif args.cmd == "doctor":
         doctor(args.port)
+    elif args.cmd == "ai-test":
+        from . import ai
+        res = ai.diagnose(full=True)
+        for st in res["steps"]:
+            print(f"{'성공' if st['ok'] else '실패'}  {st['name']}  ({st['sec']}초)  {st['detail']}")
+        print("결과: " + ("연결 정상" if res["ok"] else "연결 문제 — 위 실패 줄을 확인하세요"))
     elif args.cmd == "serve":
         from . import server
         server.serve(args.port)

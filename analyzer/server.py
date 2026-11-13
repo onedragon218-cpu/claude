@@ -213,6 +213,11 @@ class H(BaseHTTPRequestHandler):
             added = universe.add([(c, nm) for c, nm in items])
             return self._send(200, json.dumps({"added": added, "total": len(universe.load())}, ensure_ascii=False),
                               "application/json")
+        if u.path == "/api/ai/test":
+            from . import ai
+            self._drain()
+            full = q.get("full", ["1"])[0] == "1"
+            return self._send(200, json.dumps(ai.diagnose(full=full), ensure_ascii=False), "application/json")
         if u.path in ("/api/ai/ask", "/api/ai/year"):
             # 화면 Q「AI 리서치」: EXAONE 호출(수십 초 걸릴 수 있음). 같은 입력은 저장된 답을 돌려줌
             from . import ai

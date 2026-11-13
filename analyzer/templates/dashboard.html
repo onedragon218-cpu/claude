@@ -470,6 +470,9 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · AI 답은 틀릴 수 있으니 근거 링크로 확인하세요</p>
     <h2 style="margin:0">AI 리서치 <span class="muted" style="font-size:14px;font-weight:400" id="q-model"></span></h2>
     <p class="muted" id="q-status" style="margin:6px 0"></p>
+    <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><button id="q-test">연결 시험</button>
+      <span class="muted">인증키 → 서버 연결 → 아주 짧은 질문 → 짧은 자료 질문 순서로 확인합니다(1분 안팎). 질문·요약을 처음 누를 때도 짧은 시험을 먼저 합니다.</span></div>
+    <div id="q-testres" style="margin-top:6px"></div>
   </div>
   <div class="card">
     <h2 style="margin:0 0 6px">① 질문하기</h2>
@@ -1686,6 +1689,26 @@ function aiBox(r){
   const meta = `<div class="muted" style="font-size:12px;margin-top:6px">${esc(r.model||'')} · ${esc(r.created_at||'')}${r.cached?' · 저장된 답(같은 질문·같은 자료)':''}${r.web?' · 인터넷 조사 포함':''}${(r.unverified||[]).length?` · 출처 확인 안 된 숫자 ${r.unverified.length}개`:''}</div>`;
   return `<div class="warnbox" style="border-left-color:var(--accent);background:transparent">${aiFmt(r.answer, r.sources, r.unverified)}${aiSrcList(r.sources)}${meta}${(r.notes||[]).length?`<div class="muted" style="font-size:12px">${(r.notes||[]).map(esc).join(' · ')}</div>`:''}</div>`;
 }
+let AI_OK = false;
+function aiTestHtml(r){
+  return `<table style="margin-top:4px"><tr><th class="l">단계</th><th>결과</th><th>걸린 시간</th><th class="l">내용</th></tr>` +
+    r.steps.map(st=>`<tr><td class="l">${esc(st.name)}</td><td>${st.ok?'<span class="badge b-OK">성공</span>':'<span class="badge b-ERROR">실패</span>'}</td><td>${st.sec}초</td><td class="l">${esc(st.detail||'')}</td></tr>`).join('') + '</table>' +
+    (r.ok ? '' : `<p class="muted">${aiAdvice(r)}</p>`); }
+function aiAdvice(r){ const bad = (r.steps.find(s=>!s.ok)||{}); const d = (bad.detail||'');
+  if (/인증키/.test(bad.name)) return '키를 넣은 뒤 다시 시험하세요.';
+  if (/주소 찾기/.test(bad.name)) return '서버 이름을 찾지 못했습니다. 회사망·보안 프로그램이 막았거나 주소가 다릅니다(docs.exaone.ai 예시의 주소 확인).';
+  if (/서버 연결/.test(bad.name)) return '서버에 연결하지 못했습니다. 회사망 방화벽·프록시가 막았을 수 있습니다. 집 인터넷이나 휴대폰 핫스팟에서 한 번 시험해 보세요.';
+  if (/404/.test(d)) return '주소나 모델 이름이 다릅니다. docs.exaone.ai 예시 코드의 주소와 model 값을 알려 주세요.';
+  if (/401|403/.test(d)) return '키가 틀렸거나 권한이 없습니다. 「재무분석 인증키 설정」 4번에서 다시 넣어 주세요.';
+  if (/timed out|시간|초 안에/.test(d)) return '서버가 답을 늦게 줍니다(무료 공개 직후라 몰렸을 수 있음). 잠시 뒤 다시 시험하세요. 짧은 질문도 늦으면 서버 쪽 문제입니다.';
+  return '위 내용을 알려 주시면 원인을 찾겠습니다.'; }
+async function aiPreflight(target){   // 큰 요청 전에 짧은 시험(이 화면에서 한 번 성공하면 다시 안 함)
+  if (AI_OK) return true;
+  target.innerHTML = '<p class="muted">먼저 짧은 연결 시험을 합니다…</p>';
+  try { const r = await (await fetch('/api/ai/test?full=0', {method:'POST'})).json();
+    if (r.ok){ AI_OK = true; return true; }
+    target.innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)"><b>연결 시험 실패 — 본 질문은 보내지 않았습니다.</b>${aiTestHtml(r)}</div>`; return false;
+  } catch(e){ target.innerHTML = `<div class="warnbox">연결 시험을 하지 못했습니다: ${esc(e.message)}</div>`; return false; } }
 async function aiPost(path, body){
   const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({code: D.company.code, base_year: BY}, body))});
   const j = await r.json().catch(()=>({error:'응답을 읽지 못했습니다('+r.status+')'})); if (j.error) throw new Error(j.error); return j; }
@@ -1705,18 +1728,29 @@ function renderQ(){
       <div id="q-y-${y}">${r ? aiBox(r) : '<p class="muted">아직 만들지 않았습니다.</p>'}</div></div>`; }).join('');
   document.querySelectorAll('.q-ybtn').forEach(b=>b.onclick = async ()=>{
     if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
-    const y = +b.dataset.y; b.disabled = true; $('#q-yw-'+y).textContent = '자료를 모으고 요약하는 중… (1~3분)';
+    const y = +b.dataset.y; b.disabled = true;
+    if (!(await aiPreflight($('#q-y-'+y)))){ b.disabled = false; return; }
+    $('#q-yw-'+y).textContent = '자료를 모으고 요약하는 중… (1~3분)';
     try { const r = await aiPost('/api/ai/year', {year: y, refresh: b.dataset.r==='1'});
       $('#q-y-'+y).innerHTML = r.answer ? aiBox(r) : `<p class="muted">${esc((r.notes||[]).join(' · ')||'자료가 없습니다.')}</p>`;
       $('#q-yw-'+y).textContent = r.n_events!=null ? `공시 ${r.n_events}건 · 뉴스 ${r.n_news}건 사용` : ''; b.dataset.r = '1'; b.textContent = '다시 만들기';
     } catch(e){ $('#q-yw-'+y).textContent = '실패: ' + e.message; }
     b.disabled = false; });
 }
+$('#q-test').onclick = async () => {
+  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#q-test').disabled = true; const t0 = Date.now(); const tick = setInterval(()=>{ $('#q-testres').innerHTML = `<p class="muted">시험 중… ${Math.round((Date.now()-t0)/1000)}초</p>`; }, 500);
+  try { const r = await (await fetch('/api/ai/test?full=1', {method:'POST'})).json(); clearInterval(tick);
+    AI_OK = !!r.ok; $('#q-testres').innerHTML = `<div class="warnbox" style="${r.ok?'':'border-left-color:var(--bad);background:var(--bad-bg)'}"><b>${r.ok?'연결 정상':'연결 문제'}</b>${aiTestHtml(r)}</div>`;
+  } catch(e){ clearInterval(tick); $('#q-testres').textContent = '시험 실패: ' + e.message; }
+  $('#q-test').disabled = false; };
 $('#q-ask').onclick = async () => {
   if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
   const q = $('#q-text').value.trim(); if (!q) { $('#q-text').focus(); return; }
   const include = [...document.querySelectorAll('.q-inc')].filter(c=>c.checked).map(c=>c.value);
-  $('#q-ask').disabled = true; const t0 = Date.now(); const tick = setInterval(()=>{ $('#q-wait').textContent = `답을 만드는 중… ${Math.round((Date.now()-t0)/1000)}초`; }, 500);
+  $('#q-ask').disabled = true;
+  if (!(await aiPreflight($('#q-answer')))){ $('#q-ask').disabled = false; return; }
+  const t0 = Date.now(); const tick = setInterval(()=>{ $('#q-wait').textContent = `답을 만드는 중… ${Math.round((Date.now()-t0)/1000)}초`; }, 500);
   try { const r = await aiPost('/api/ai/ask', {question: q, web: $('#q-web').checked, include});
     $('#q-answer').innerHTML = `<div><b>Q.</b> ${esc(q)}</div>` + aiBox(r) + (r.cached ? '<button id="q-again" style="margin-top:6px">저장된 답 말고 새로 묻기</button>' : '');
     const again = $('#q-again'); if (again) again.onclick = async ()=>{ again.disabled = true;
@@ -1878,7 +1912,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#q-ask'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#q-ask','#q-test'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

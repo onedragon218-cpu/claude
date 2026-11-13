@@ -24,7 +24,7 @@ from . import config, db
 DEFAULT_BASE = "https://api.exaone.ai/v1"
 DEFAULT_MODEL = "k-exaone_v2.5"
 YEARS_SUMMARY = 3                     # 연도별 요약: 최근 3년(사용자 선택 2026-11-13)
-MAX_CONTEXT_CHARS = 60000             # 한 번에 보내는 근거 자료 상한(호출 한도·속도 고려)
+MAX_CONTEXT_CHARS = 30000             # 한 번에 보내는 근거 자료 상한(속도 고려, 2026-11-13 60000→30000)
 UA = "corp-analyzer/1.0 (personal research)"
 
 
@@ -72,36 +72,108 @@ def _hide(text):
 
 
 # ---------------------------------------------------------------- 호출
-def chat(messages, max_tokens=2500, temperature=0.2, timeout=240):
-    """반환: (답 글, 모델 이름). 실패하면 AIUnavailable(키는 메시지에 넣지 않음)"""
+def chat(messages, max_tokens=2500, temperature=0.2, timeout=180, stream=True, max_total=900):
+    """반환: (답 글, 모델 이름). 실패하면 AIUnavailable(키는 메시지에 넣지 않음)
+    stream=True: 글이 만들어지는 대로 조금씩 받는다(오래 걸리는 답에서 '읽기 시간 초과'를 피함).
+    timeout = 다음 조각을 기다리는 최대 초, max_total = 전체 최대 초."""
+    import time
     k = api_key()
     if not k:
-        raise AIUnavailable("EXAONE 인증키가 없습니다. 시작 메뉴 → 재무분석 → 재무분석 인증키 설정 → 4번에서 넣어 주세요.")
+        raise AIUnavailable("EXAONE 인증키가 없습니다. 바탕화면 「재무분석 인증키 설정」 → 4번에서 넣어 주세요.")
     s = settings()
-    body = json.dumps({"model": s["model"], "messages": messages, "max_tokens": max_tokens,
-                       "temperature": temperature}).encode("utf-8")
-    req = urllib.request.Request(s["base_url"] + "/chat/completions", data=body, method="POST",
-                                 headers={"Authorization": "Bearer " + k, "Content-Type": "application/json", "User-Agent": UA})
+    payload = {"model": s["model"], "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+    if stream:
+        payload["stream"] = True
+    req = urllib.request.Request(s["base_url"] + "/chat/completions", data=json.dumps(payload).encode("utf-8"), method="POST",
+                                 headers={"Authorization": "Bearer " + k, "Content-Type": "application/json", "User-Agent": UA,
+                                          "Accept": "text/event-stream" if stream else "application/json"})
+    t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            d = json.loads(r.read().decode("utf-8"))
+            ctype = r.headers.get("Content-Type", "")
+            if stream and "event-stream" in ctype:
+                parts, model = [], None
+                for raw in r:                                   # 줄 단위: 'data: {...}'
+                    if time.time() - t0 > max_total:
+                        raise AIUnavailable(f"EXAONE 답이 {max_total}초 안에 끝나지 않았습니다(자료를 줄여 다시)")
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        ch = json.loads(data)
+                    except ValueError:
+                        continue
+                    model = ch.get("model") or model
+                    for c in ch.get("choices") or []:
+                        parts.append(((c.get("delta") or {}).get("content")) or "")
+                d = {"model": model, "choices": [{"message": {"content": "".join(parts)}}]}
+            else:
+                d = json.loads(r.read().decode("utf-8"))
+    except AIUnavailable:
+        raise
     except urllib.error.HTTPError as e:
         try:
             msg = json.loads(e.read().decode("utf-8", "replace"))
             msg = (msg.get("error") or {}).get("message") if isinstance(msg.get("error"), dict) else (msg.get("error") or msg.get("message") or msg)
         except Exception:      # noqa: BLE001
             msg = ""
+        if stream and e.code in (400, 422) and "stream" in str(msg).lower():      # 조금씩 받기를 지원하지 않으면 한 번에 받기로
+            return chat(messages, max_tokens, temperature, max(timeout, 300), stream=False)
         hint = {401: "인증키가 틀렸거나 만료됨", 403: "권한 없음(키 사용 범위 확인)", 404: "주소나 모델 이름이 다름(exaone.json 확인)",
                 429: "호출 한도 초과 — 잠시 뒤 다시"}.get(e.code, "")
         raise AIUnavailable(_hide(f"EXAONE 오류 {e.code} {hint} {msg}".strip())[:300]) from None
     except Exception as e:     # noqa: BLE001  네트워크
-        raise AIUnavailable(_hide(f"EXAONE 접속 실패: {e}")[:300]) from None
+        sec = round(time.time() - t0)
+        raise AIUnavailable(_hide(f"EXAONE 접속 실패({sec}초 뒤): {e}")[:300]) from None
     try:
         text = d["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError):
         raise AIUnavailable("EXAONE 응답 형식을 읽지 못했습니다") from None
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()     # 추론 모드의 생각 과정은 버림
     return text, d.get("model") or s["model"]
+
+
+def diagnose(full=True):
+    """연결 시험(사용자 요청 2026-11-13: 큰 질문 전에 작은 시험부터). 반환: {'ok', 'steps': [{name, ok, sec, detail}]}"""
+    import socket
+    import time
+    steps = []
+
+    def step(name, fn):
+        t = time.time()
+        try:
+            detail = fn()
+            steps.append({"name": name, "ok": True, "sec": round(time.time() - t, 1), "detail": detail})
+            return True
+        except Exception as e:     # noqa: BLE001
+            steps.append({"name": name, "ok": False, "sec": round(time.time() - t, 1), "detail": _hide(str(e))[:300]})
+            return False
+
+    s = settings()
+    host = urllib.parse.urlparse(s["base_url"]).hostname or ""
+    port = urllib.parse.urlparse(s["base_url"]).port or 443
+    def key_ok():
+        k = api_key()
+        if not k:
+            raise AIUnavailable("없음 — 바탕화면 「재무분석 인증키 설정」 4번에서 넣어 주세요")
+        return f"있음({len(k)}자) · 주소 {s['base_url']} · 모델 {s['model']}"
+    if not step("① 인증키", key_ok):
+        return {"ok": False, "steps": steps, "settings": s}
+    if not step(f"② 서버 주소 찾기({host})", lambda: ", ".join(sorted({a[4][0] for a in socket.getaddrinfo(host, port)}))[:80]):
+        return {"ok": False, "steps": steps, "settings": s}
+    if not step(f"③ 서버 연결({host}:{port})", lambda: socket.create_connection((host, port), timeout=10).close() or "연결됨"):
+        return {"ok": False, "steps": steps, "settings": s}
+    ok = step("④ 아주 짧은 질문(답 몇 글자)", lambda: "답: " + chat([{"role": "user", "content": "숫자 1만 답하세요."}],
+                                                                  max_tokens=16, timeout=90, max_total=120)[0][:40])
+    if ok and full:
+        ctx = "\n".join(f"{2016 + i}년 매출 {1000 + i * 37}억원" for i in range(10))
+        ok = step("⑤ 짧은 자료 질문(실제 질문의 축소판)", lambda: "답: " + chat(
+            [{"role": "system", "content": "한국어로 한 문장만 답하세요."}, {"role": "user", "content": ctx + "\n매출이 가장 큰 해는?"}],
+            max_tokens=120, timeout=120, max_total=180)[0][:80])
+    return {"ok": ok, "steps": steps, "settings": s}
 
 
 # ---------------------------------------------------------------- 저장(같은 질문은 다시 묻지 않음)
@@ -206,7 +278,7 @@ def company_context(conn, code, P, include=("fin", "val", "seg", "news", "events
     if "events" in include:
         since = (dt.date.today() - dt.timedelta(days=365 * YEARS_SUMMARY)).strftime("%Y%m%d")
         evs = conn.execute("SELECT rcept_dt, title, link, kind FROM events WHERE stock_code=? AND rcept_dt>=? "
-                           "ORDER BY rcept_dt DESC LIMIT 120", (code, since)).fetchall()
+                           "ORDER BY rcept_dt DESC LIMIT 60", (code, since)).fetchall()
         if evs:
             lines.append(f"\n## [공시] DART 공시 제목(최근 {YEARS_SUMMARY}년, 최신순)")
             for i, e in enumerate(evs, 1):
@@ -215,7 +287,7 @@ def company_context(conn, code, P, include=("fin", "val", "seg", "news", "events
     if "news" in include:
         since = (dt.date.today() - dt.timedelta(days=365)).isoformat()
         ns = conn.execute("SELECT published, title, link, press, description FROM news WHERE stock_code=? AND published>=? "
-                          "ORDER BY published DESC LIMIT 150", (code, since)).fetchall()
+                          "ORDER BY published DESC LIMIT 80", (code, since)).fetchall()
         if ns:
             lines.append("\n## [뉴스] 최근 1년 기사 제목(최신순)")
             for i, n in enumerate(ns, 1):
@@ -329,7 +401,10 @@ def ask(conn, code, P, question, web=False, include=None, refresh=False):
             return dict(c, cached=True, notes=notes)
     msgs = [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": f"[근거 자료]\n{ctx}\n\n[질문]\n{question}"}]
+    import time
+    t0 = time.time()
     ans, model = chat(msgs)
+    model = f"{model} · {round(time.time() - t0)}초"
     bad = unverified_numbers(ans, ctx)
     used = sorted(set(re.findall(r"\[((?:[DNW]\d+)|재무|가치평가|사업부)\]", ans)))
     src_used = [s for s in src if s["id"] in used] or src[:0]
@@ -393,9 +468,9 @@ def year_summary(conn, code, year, refresh=False):
                        (code, str(year))).fetchall()
     ns = conn.execute("SELECT published, title, link FROM news WHERE stock_code=? AND substr(published,1,4)=? ORDER BY published",
                       (code, str(year))).fetchall()
-    if len(ns) > 300:                       # 너무 많으면 고르게 줄임(월별 분포 유지)
-        step = len(ns) / 300
-        ns = [ns[int(i * step)] for i in range(300)]
+    if len(ns) > 200:                       # 너무 많으면 고르게 줄임(월별 분포 유지)
+        step = len(ns) / 200
+        ns = [ns[int(i * step)] for i in range(200)]
     if not evs and not ns:
         return {"year": year, "answer": None, "notes": notes + ["그해 공시·뉴스 자료가 없습니다."], "sources": [], "unverified": []}
     name = (conn.execute("SELECT name FROM companies WHERE stock_code=?", (code,)).fetchone() or {"name": code})["name"]

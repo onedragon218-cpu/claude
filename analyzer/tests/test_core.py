@@ -644,9 +644,14 @@ class T(unittest.TestCase):
                 seen["auth"], seen["body"] = self.headers.get("Authorization"), body
                 if self.headers.get("Authorization") != "Bearer SECRET-KEY-123":
                     b = json.dumps({"error": {"message": "bad key SECRET-KEY-123"}}).encode(); self.send_response(401)
-                else:
+                elif body.get("stream"):           # 조금씩 보내기(SSE)
                     txt = "<think>생각</think>매출은 22,900억원입니다 [재무]. 영업이익률은 99.9%로 추정 [N1]."
-                    b = json.dumps({"model": "k-exaone_v2.5", "choices": [{"message": {"content": txt}}]}).encode(); self.send_response(200)
+                    self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+                    for i in range(0, len(txt), 7):
+                        self.wfile.write(("data: " + json.dumps({"model": "k-exaone_v2.5", "choices": [{"delta": {"content": txt[i:i + 7]}}]}) + "\n\n").encode())
+                    self.wfile.write(b"data: [DONE]\n\n"); return
+                else:
+                    b = json.dumps({"model": "k-exaone_v2.5", "choices": [{"message": {"content": "1"}}]}).encode(); self.send_response(200)
                 self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
         srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake); threading.Thread(target=srv.serve_forever, daemon=True).start()
         old = os.environ.get("APPDATA")
@@ -679,6 +684,10 @@ class T(unittest.TestCase):
                     self.assertIn("22,900", seen["body"]["messages"][1]["content"])   # DB 숫자가 근거로 들어감
                     self.assertNotIn("SECRET", json.dumps(seen["body"]))             # 키는 본문에 없음
                     self.assertTrue(ai.ask(conn, "213500", P, "매출은?", include=("fin", "news"))["cached"])
+                    self.assertEqual(ai.chat([{"role": "user", "content": "x"}], stream=False)[0], "1")    # 한 번에 받기도 됨
+                    dg = ai.diagnose(full=True)
+                    self.assertTrue(dg["ok"], dg)
+                    self.assertEqual([x["ok"] for x in dg["steps"]], [True] * 5)
                     st = ai.state(conn, "213500", P)
                     self.assertEqual(len(st["history"]), 1)
                     self.assertEqual(st["year_list"], [2024, 2025, 2026])
