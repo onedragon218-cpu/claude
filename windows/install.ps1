@@ -109,6 +109,9 @@ if ($ek) {
     Write-Host "      저장: $ecFile" -ForegroundColor Green
 }
 
+Repair-Secrets      # 인증키·태블릿 인증서 파일 권한 바로잡기(예전 버전에서 잠겨 못 읽던 경우)
+# 예전 설치 기록은 이번 설치가 시작될 때 새 기록으로 덮어써졌다(키 입력은 이제 기록에 남지 않음)
+
 # 3) 작업 스케줄러: 평일 07:13 자동 수집(꺼져 있던 날은 켜진 뒤 바로 실행)
 $me = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited

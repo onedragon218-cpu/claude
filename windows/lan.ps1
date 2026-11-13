@@ -34,11 +34,9 @@ function Plain($sec) {
     try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
 }
 function Lock-Files {
-    # 설정·인증서 키 파일을 이 PC 사용자만 읽게(다른 사용자 계정·프로그램이 못 읽도록)
-    $f = Join-Path $CfgDir 'lan.json'
-    if (Test-Path $f) { & icacls $f /inheritance:r /grant:r "$($env:USERNAME):F" /grant:r 'SYSTEM:F' /Q | Out-Null }
-    $d = Join-Path $CfgDir 'tls'
-    if (Test-Path $d) { & icacls $d /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" /grant:r 'SYSTEM:(OI)(CI)F' /T /Q | Out-Null }
+    # 설정·인증서 키 파일을 이 PC 사용자만 읽게(공통 함수 Protect-Path: 계정 고유번호로 지정)
+    Protect-Path (Join-Path $CfgDir 'lan.json')
+    Protect-Path (Join-Path $CfgDir 'tls')
 }
 function Ensure-DesktopShortcut {
     $target = Join-Path $PSScriptRoot 'lan.bat'
@@ -54,6 +52,7 @@ function Ensure-DesktopShortcut {
 }
 
 Write-Host '=== 재무분석 태블릿 접속 설정 ===' -ForegroundColor Cyan
+Repair-Secrets      # 예전 버전이 잠가 버린 인증서·설정 파일 권한 바로잡기
 $null = Py-Lan @('status')
 Write-Host ''
 Write-Host '1) 켜기 / 비밀번호 새로 정하기   2) 끄기   3) 인증서 새로 만들기   4) 그대로 두고 닫기'

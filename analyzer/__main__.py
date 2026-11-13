@@ -205,7 +205,11 @@ def main(argv=None):
                 print(f"태블릿에서 열 주소: https://{ip}:{lan.HTTPS_PORT}")
             cp, _ = tlscert.paths()
             if os.path.exists(cp):
-                print(f"인증서 지문(SHA-256): {tlscert.fingerprint()}")
+                try:
+                    print(f"인증서 지문(SHA-256): {tlscert.fingerprint()}")
+                except PermissionError:
+                    print("[문제] 인증서 파일을 읽을 권한이 없어 태블릿 접속 서버가 켜지지 않습니다. "
+                          "「재무분석 태블릿 접속 설정」을 다시 열면 권한을 바로잡습니다.")
         log = lan.recent_log(10)
         if log:
             print("최근 접속 기록:")

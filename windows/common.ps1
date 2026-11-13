@@ -95,7 +95,29 @@ function Read-Secret([string]$prompt) {
 function Save-Secret([string]$file, [string]$value) {
     New-Item -ItemType Directory -Force -Path (Split-Path $file) | Out-Null
     [IO.File]::WriteAllText($file, $value, (New-Object System.Text.ASCIIEncoding))
-    & icacls $file /inheritance:r /grant:r "$($env:USERNAME):F" /grant:r 'SYSTEM:F' /Q | Out-Null   # 다른 사용자 계정은 못 읽게
+    Protect-Path $file
+}
+function Protect-Path([string]$p) {
+    # 이 PC 사용자 + SYSTEM만 읽고 쓰게. 사용자 이름(한글 등) 대신 계정 고유번호(SID)로 지정하고 .NET으로 설정한다.
+    # (예전 icacls 방식은 한글 사용자 이름이 깨져 '허용'은 빠지고 '차단'만 걸려 본인도 못 읽는 문제가 있었다 — 2026-11-13)
+    if (-not (Test-Path $p)) { return }
+    try {
+        $me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $sys = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+        $dir = Test-Path $p -PathType Container
+        $inh = if ($dir) { 'ContainerInherit,ObjectInherit' } else { 'None' }
+        $item = Get-Item -LiteralPath $p -Force
+        $acl = $item.GetAccessControl('Access')          # 접근 목록만 다룬다(파일 주인은 건드리지 않음)
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($r in @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))) { [void]$acl.RemoveAccessRuleSpecific($r) }
+        foreach ($id in @($me, $sys)) { $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($id, 'FullControl', $inh, 'None', 'Allow'))) }
+        $item.SetAccessControl($acl)
+        if ($dir) { Get-ChildItem -LiteralPath $p -Force | ForEach-Object { Protect-Path $_.FullName } }
+    } catch { Write-Host "      파일 권한 제한을 하지 못했습니다(파일은 그대로 쓸 수 있음): $p" -ForegroundColor Yellow }
+}
+function Repair-Secrets {
+    # 설정·인증서·인증키 파일 권한을 '이 사용자 + SYSTEM'으로 다시 맞춘다(예전 방식으로 잠겨 못 읽던 파일도 풀림. 파일 주인은 권한을 바꿀 수 있음)
+    foreach ($n in @('lan.json', 'tls', 'dart_api_key.txt', 'naver_api_key.txt', 'ecos_api_key.txt')) { Protect-Path (Join-Path $KeyDir $n) }
 }
 function Clear-OldInstallLog {
     # 예전 버전 설치 기록에 인증키가 그대로 적혔을 수 있다 → 저장된 키가 기록에 보이면 기록 파일을 지운다(키 값은 화면에 내지 않음)

@@ -33,6 +33,7 @@ function Test-Dart([string]$v) {
 
 Write-Host '=== 재무분석 인증키 설정 ===' -ForegroundColor Cyan
 Write-Host "  저장 위치: $KeyDir (이 PC 사용자 계정만 읽기 가능)"
+Repair-Secrets
 Clear-OldInstallLog
 while ($true) {
     Write-Host ''
