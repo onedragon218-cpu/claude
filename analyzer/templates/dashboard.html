@@ -818,7 +818,7 @@ function renderStatic(){
     if (ri && !ri.error && !ri.ok){ $('#rfbar').style.display='';
       $('#rfbar').innerHTML = `<div class="warnbox" style="margin:0"><b>국고채 금리 갱신 필요</b> — ${ri.year}년 국고채 10년 금리가 없어 ${ri.used??'?'}년 값(${ri.value??'–'}%, ${esc(ri.source||'')})으로 할인율을 계산했습니다. ` +
         (ri.has_key ? '한국은행 ECOS 키는 있으니 다음 「분석 실행」·「지금 갱신」 때 자동으로 받습니다(실패하면 하루 뒤 다시 시도).' :
-          '한국은행 ECOS 인증키(무료)를 <code>%APPDATA%\\corp-analyzer\\ecos_api_key.txt</code>에 넣으면 1주일마다 자동으로 받습니다. 키가 없으면 새 버전의 설정 파일 표를 기다려야 합니다.') + '</div>'; } }
+          '한국은행 ECOS 인증키(무료)를 PC의 <b>시작 메뉴 → 재무분석 → 재무분석 인증키 설정</b>(또는 프로그램 폴더 <code>windows\\keys.bat</code>)에서 넣으면 1주일마다 자동으로 받습니다. 키가 없으면 새 버전의 설정 파일 표를 기다려야 합니다.') + '</div>'; } }
   $('#subtitle').textContent = `프로그램 버전 ${D.app_version||'?'} · 기준 연도 ${BY} · 화면 생성 ${D.generated_at} · 마지막 수집 ${D.last_collect||'–'} · 마지막 검증 ${D.last_verify||'–'}`;
   $('#by').value = BY;
   $('#complist').innerHTML = D.companies.map(c=>`<option value="${esc(c.name||c.stock_code)}">${esc(c.stock_code)}</option>`).join('');

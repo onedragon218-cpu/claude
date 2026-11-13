@@ -73,16 +73,14 @@ $envKey = [Environment]::GetEnvironmentVariable('DART_API_KEY', 'User')
 if (-not $envKey) { $envKey = [Environment]::GetEnvironmentVariable('DART_API_KEY', 'Machine') }
 if ($envKey -and -not $old) { $old = $envKey.Trim(); Write-Host "[2/5] 환경변수 DART_API_KEY를 사용합니다(끝 4자리 ...$($old.Substring([Math]::Max(0,$old.Length-4))))." -ForegroundColor Green }
 elseif ($old) { Write-Host "[2/5] 저장된 DART 인증키가 있습니다(끝 4자리 ...$($old.Substring([Math]::Max(0,$old.Length-4))))." }
-$k = Read-Host '[2/5] DART 인증키 40자리를 붙여 넣으세요(바꾸지 않으려면 그냥 Enter, 나중에 넣으려면 Enter)'
-$k = "$k".Trim()
+$k = Read-Secret '[2/5] DART 인증키 40자리를 붙여 넣으세요(입력은 *로 보임. 바꾸지 않으려면 그냥 Enter)'
 if ($k) {
     try {
         $r = Invoke-RestMethod -Uri "https://opendart.fss.or.kr/api/company.json?crtfc_key=$k&corp_code=01060744" -TimeoutSec 20
         if ($r.status -eq '000') { Write-Host '      인증키 확인 완료' -ForegroundColor Green }
         else { Write-Host "      DART 응답: $($r.status) $($r.message) (키를 확인하세요. 일단 저장합니다)" -ForegroundColor Yellow }
     } catch { Write-Host "      DART 접속 확인 실패: $($_.Exception.Message) (일단 저장합니다)" -ForegroundColor Yellow }
-    New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
-    Set-Content -Path $keyFile -Value $k -Encoding ASCII -NoNewline
+    Save-Secret $keyFile $k
     Write-Host "      저장: $keyFile"
 } elseif (-not $old) {
     Write-Host '      인증키 없이 설치합니다. 이 경우 주식 수·새 공시는 수집되지 않습니다. 나중에 install.bat을 다시 실행해 넣으세요.' -ForegroundColor Yellow
@@ -92,13 +90,11 @@ if ($k) {
 #      저장 위치: %APPDATA%\corp-analyzer\naver_api_key.txt (1줄 Client ID, 2줄 Client Secret)
 $nvFile = Join-Path $keyDir 'naver_api_key.txt'
 if (Test-Path $nvFile) { Write-Host '      저장된 네이버 뉴스 API 키가 있습니다.' }
-$nid = Read-Host '[2/5] (선택) 네이버 뉴스 API Client ID (없으면 그냥 Enter)'
-$nid = "$nid".Trim()
+$nid = Read-Secret '[2/5] (선택) 네이버 뉴스 API Client ID (입력은 *로 보임, 없으면 그냥 Enter)'
 if ($nid) {
-    $nsec = "$(Read-Host '      네이버 뉴스 API Client Secret')".Trim()
+    $nsec = Read-Secret '      네이버 뉴스 API Client Secret'
     if ($nsec) {
-        New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
-        Set-Content -Path $nvFile -Value "$nid`r`n$nsec" -Encoding ASCII
+        Save-Secret $nvFile "$nid`r`n$nsec"
         Write-Host "      저장: $nvFile" -ForegroundColor Green
     }
 }
@@ -107,10 +103,9 @@ if ($nid) {
 #      저장 위치: %APPDATA%\corp-analyzer\ecos_api_key.txt  · 발급: ecos.bok.or.kr → 인증키 신청(무료)
 $ecFile = Join-Path $keyDir 'ecos_api_key.txt'
 if (Test-Path $ecFile) { Write-Host '      저장된 한국은행 ECOS 인증키가 있습니다.' }
-$ek = "$(Read-Host '      (선택) 한국은행 ECOS 인증키 - 국고채 금리 자동 갱신용 (없으면 그냥 Enter)')".Trim()
+$ek = Read-Secret '      (선택) 한국은행 ECOS 인증키 - 국고채 금리 자동 갱신용 (입력은 *로 보임, 없으면 그냥 Enter)'
 if ($ek) {
-    New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
-    Set-Content -Path $ecFile -Value $ek -Encoding ASCII -NoNewline
+    Save-Secret $ecFile $ek
     Write-Host "      저장: $ecFile" -ForegroundColor Green
 }
 
@@ -187,6 +182,7 @@ try {
     New-Item -ItemType Directory -Force -Path $sm | Out-Null
     New-Lnk (Join-Path $sm '재무분석 태블릿 접속 설정.lnk') $lanBat '같은 와이파이 태블릿에서 화면 보기 켜기·끄기'
     New-Lnk (Join-Path $sm '재무분석 열기.lnk') (Join-Path $PSScriptRoot 'open.bat') '재무분석 화면 열기'
+    New-Lnk (Join-Path $sm '재무분석 인증키 설정.lnk') (Join-Path $PSScriptRoot 'keys.bat') 'DART·ECOS·네이버 인증키 넣기·바꾸기(입력은 *로 보임)'
     Write-Host "  [만듦] 시작 메뉴 → 재무분석 폴더" -ForegroundColor Green
 } catch { Write-Host "  [실패] 시작 메뉴: $($_.Exception.Message)" -ForegroundColor Yellow }
 foreach ($n in @('재무분석 열기.bat', '재무분석 지금 갱신.bat')) {

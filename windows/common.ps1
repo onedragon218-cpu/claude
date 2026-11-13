@@ -82,3 +82,36 @@ function Test-ServerVersion {
         return @{ ok = ($r.version -eq (Get-LocalVersion)); running = $r.version; root = $r.root }
     } catch { return @{ ok = $false; running = '(응답 없음)'; root = '' } }
 }
+
+
+# ---- 인증키: 화면·설치 기록(install_log.txt)에 남지 않게 받고, 이 PC 사용자만 읽게 저장 ----
+$KeyDir = Join-Path $env:APPDATA 'corp-analyzer'
+function Read-Secret([string]$prompt) {
+    # -AsSecureString: 입력이 *로 보이고 설치 기록(Transcript)에도 남지 않는다. 붙여 넣기는 Ctrl+V 또는 마우스 오른쪽 클릭
+    $sec = Read-Host $prompt -AsSecureString
+    $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+    try { return "$([Runtime.InteropServices.Marshal]::PtrToStringBSTR($b))".Trim() } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
+}
+function Save-Secret([string]$file, [string]$value) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $file) | Out-Null
+    [IO.File]::WriteAllText($file, $value, (New-Object System.Text.ASCIIEncoding))
+    & icacls $file /inheritance:r /grant:r "$($env:USERNAME):F" /grant:r 'SYSTEM:F' /Q | Out-Null   # 다른 사용자 계정은 못 읽게
+}
+function Clear-OldInstallLog {
+    # 예전 버전 설치 기록에 인증키가 그대로 적혔을 수 있다 → 저장된 키가 기록에 보이면 기록 파일을 지운다(키 값은 화면에 내지 않음)
+    $log = Join-Path $env:LOCALAPPDATA 'CorpAnalyzer\install_log.txt'
+    if (-not (Test-Path $log)) { return }
+    $txt = Get-Content $log -Raw -ErrorAction SilentlyContinue
+    foreach ($n in @('dart_api_key.txt', 'naver_api_key.txt', 'ecos_api_key.txt')) {
+        $f = Join-Path $KeyDir $n
+        if (-not (Test-Path $f)) { continue }
+        foreach ($line in (Get-Content $f -ErrorAction SilentlyContinue)) {
+            $v = "$line".Trim()
+            if ($v.Length -ge 8 -and $txt -and $txt.Contains($v)) {
+                Remove-Item $log -Force -ErrorAction SilentlyContinue
+                Write-Host '      예전 설치 기록(install_log.txt)에 인증키가 적혀 있어 그 기록 파일을 지웠습니다.' -ForegroundColor Yellow
+                return
+            }
+        }
+    }
+}

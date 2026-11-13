@@ -50,6 +50,10 @@ def load():
 def _rows(url):
     with urllib.request.urlopen(url, timeout=30) as r:
         d = json.loads(r.read().decode("utf-8"))
+    if "RESULT" in d and "StatisticSearch" not in d:        # 키 오류 등. INFO-200(자료 없음)은 빈 목록
+        code = d["RESULT"].get("CODE", "")
+        if code != "INFO-200":
+            raise RuntimeError(f"ECOS {code} {d['RESULT'].get('MESSAGE', '')}")   # 주소(키)는 넣지 않음
     return (d.get("StatisticSearch") or {}).get("row") or []
 
 
@@ -110,6 +114,6 @@ def maybe_fetch(conn, offline=False):
         out = fetch()
         db.log_fetch(conn, "ecos_rf", "kr10y", None, bool(out), len(out or {}), None if out else "빈 응답")
         return out
-    except Exception as e:       # 네트워크·키 오류
-        db.log_fetch(conn, "ecos_rf", "kr10y", None, False, 0, str(e)[:200])
+    except Exception as e:       # 네트워크·키 오류. 기록에는 키가 들어가지 않게 지움
+        db.log_fetch(conn, "ecos_rf", "kr10y", None, False, 0, str(e).replace(api_key(), "***")[:200])
         return None
