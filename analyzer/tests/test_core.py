@@ -631,6 +631,62 @@ class T(unittest.TestCase):
             finally:
                 srv.shutdown(); srv.server_close()
 
+    def test_ai_exaone_client_and_guards(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from unittest import mock
+        from analyzer import ai
+        seen = {}
+        class Fake(BaseHTTPRequestHandler):
+            def log_message(self, *a): pass
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                seen["auth"], seen["body"] = self.headers.get("Authorization"), body
+                if self.headers.get("Authorization") != "Bearer SECRET-KEY-123":
+                    b = json.dumps({"error": {"message": "bad key SECRET-KEY-123"}}).encode(); self.send_response(401)
+                else:
+                    txt = "<think>생각</think>매출은 22,900억원입니다 [재무]. 영업이익률은 99.9%로 추정 [N1]."
+                    b = json.dumps({"model": "k-exaone_v2.5", "choices": [{"message": {"content": txt}}]}).encode(); self.send_response(200)
+                self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake); threading.Thread(target=srv.serve_forever, daemon=True).start()
+        old = os.environ.get("APPDATA")
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["APPDATA"] = d
+            try:
+                os.makedirs(os.path.join(d, "corp-analyzer"))
+                with open(os.path.join(d, "corp-analyzer", "exaone.json"), "w", encoding="utf-8") as f:
+                    json.dump({"base_url": f"http://127.0.0.1:{srv.server_port}/v1"}, f)
+                with mock.patch.dict(os.environ, {"EXAONE_API_KEY": ""}):
+                    with self.assertRaises(ai.AIUnavailable):       # 키 없음
+                        ai.chat([{"role": "user", "content": "x"}])
+                with mock.patch.dict(os.environ, {"EXAONE_API_KEY": "WRONG"}):
+                    with self.assertRaises(ai.AIUnavailable) as cm:
+                        ai.chat([{"role": "user", "content": "x"}])
+                    self.assertIn("401", str(cm.exception))
+                with mock.patch.dict(os.environ, {"EXAONE_API_KEY": "SECRET-KEY-123"}):
+                    conn = db.connect(os.path.join(d, "t.db"))
+                    db.ensure_company(conn, "213500", "한솔제지")
+                    conn.execute("INSERT INTO facts(stock_code, fiscal_year, period, metric, value, is_current, status, version) "
+                                 "VALUES ('213500', 2025, 'FY', 'revenue', 22900, 1, 'VERIFIED', 1)")
+                    conn.execute("INSERT INTO news(stock_code, published, title, link) VALUES ('213500', ?, '한솔제지 3분기 적자', 'https://n.example/1')",
+                                 (__import__("datetime").date.today().isoformat(),))
+                    conn.commit()
+                    P = config.periods(2026)
+                    r = ai.ask(conn, "213500", P, "매출은?", include=("fin", "news"))
+                    self.assertNotIn("<think>", r["answer"])
+                    self.assertEqual(r["unverified"], ["99.9"])             # 근거에 없는 숫자만 표시
+                    self.assertEqual({x["id"] for x in r["sources"]}, {"재무", "N1"})
+                    self.assertIn("22,900", seen["body"]["messages"][1]["content"])   # DB 숫자가 근거로 들어감
+                    self.assertNotIn("SECRET", json.dumps(seen["body"]))             # 키는 본문에 없음
+                    self.assertTrue(ai.ask(conn, "213500", P, "매출은?", include=("fin", "news"))["cached"])
+                    st = ai.state(conn, "213500", P)
+                    self.assertEqual(len(st["history"]), 1)
+                    self.assertEqual(st["year_list"], [2024, 2025, 2026])
+            finally:
+                srv.shutdown(); srv.server_close()
+                if old is None: os.environ.pop("APPDATA", None)
+                else: os.environ["APPDATA"] = old
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

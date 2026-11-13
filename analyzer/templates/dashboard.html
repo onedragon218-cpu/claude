@@ -125,6 +125,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="N">N. 숫자 모양</button>
   <button data-s="O">O. 가치 5방법</button>
   <button data-s="P">P. 우상향 저평가</button>
+  <button data-s="Q">Q. AI 리서치</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -462,6 +463,36 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p id="p-count" style="margin:8px 0"></p>
     <div class="tablewrap"><table id="p-table"></table></div>
     <p class="muted" id="p-rules"></p>
+  </div>
+</section>
+<section id="Q">
+  <div class="card">
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · AI 답은 틀릴 수 있으니 근거 링크로 확인하세요</p>
+    <h2 style="margin:0">AI 리서치 <span class="muted" style="font-size:14px;font-weight:400" id="q-model"></span></h2>
+    <p class="muted" id="q-status" style="margin:6px 0"></p>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">① 질문하기</h2>
+    <p class="muted" style="margin:0 0 8px">이 기업의 앱 자료(재무·가치평가·사업부·뉴스·공시)를 근거로 답합니다. 문장 끝 [재무] [D3] [N5] [W2]는 근거 표시이며 누르면 원문이 열립니다. 답 속 <mark>노란 숫자</mark>는 근거 자료에서 찾지 못한 값(계산값이거나 출처 확인 안 됨)입니다.</p>
+    <textarea id="q-text" rows="3" style="width:100%;box-sizing:border-box" placeholder="예) 최근 3년 영업이익률이 떨어진 이유는? / 부채 부담은 어느 정도인가? / 컨센서스대로라면 지금 주가는 싼 편인가?"></textarea>
+    <div class="row" style="gap:14px;align-items:center;flex-wrap:wrap;margin-top:6px">
+      <span class="muted">참고 자료:</span>
+      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="fin" checked> 재무·컨센서스</label>
+      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="val" checked> 가치평가</label>
+      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="seg" checked> 사업부</label>
+      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="news" checked> 뉴스(1년)</label>
+      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="events" checked> 공시(3년)</label>
+      <label style="flex-direction:row;gap:4px;align-items:center" title="네이버 웹문서·뉴스 검색(키 없으면 구글 뉴스). 검색 결과의 제목·요약만 씁니다."><input type="checkbox" id="q-web"> <b>인터넷 조사 포함</b></label>
+      <button class="primary" id="q-ask">질문하기</button>
+      <span class="muted" id="q-wait"></span>
+    </div>
+    <div id="q-answer" style="margin-top:10px"></div>
+    <details style="margin-top:10px"><summary>이전 질문 <span class="muted" id="q-hcount"></span></summary><div id="q-history"></div></details>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">④ 연도별 뉴스·공시 요약 <span class="muted" style="font-size:14px;font-weight:400">최근 3년</span></h2>
+    <p class="muted" style="margin:0 0 8px">그해 DART 공시(정기·주요사항·거래소)와 뉴스 제목만 보고 주제별로 요약합니다. 자료가 부족한 해는 처음 누를 때 공시·뉴스를 더 받습니다(1~3분). 올해는 자료가 늘면 다시 만들 수 있습니다.</p>
+    <div id="q-years"></div>
   </div>
 </section>
 
@@ -1635,6 +1666,64 @@ function pClassify(row, use, th, factor){
   const tier = [0,1,2].find(i=>fair[i] > row.price);
   return {status:'통과', tier: tier===undefined ? null : tier, fair, margin: fair.map(v=>v/row.price-1), cheap: fair.map(v=>v>row.price)};
 }
+// ---------------- Q. AI 리서치(EXAONE) ----------------
+const QA = D.ai || {};
+function aiFmt(text, srcs, bad){
+  const S = {}; (srcs||[]).forEach(x=>S[x.id]=x);
+  let h = esc(text||'');
+  (bad||[]).forEach(n=>{ const e = esc(n); h = h.split(e).join(`\u0001${e}\u0002`); });
+  h = h.replace(/\u0001/g,'<mark title="근거 자료에서 찾지 못한 숫자(계산값이거나 출처 확인 안 됨)">').replace(/\u0002/g,'</mark>');
+  h = h.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
+  h = h.replace(/\[((?:[DNW]\d+)|재무|가치평가|사업부)\]/g, (m, id)=>{ const x = S[id];
+    const t = x ? esc((x.date?x.date+' ':'') + x.title) : '근거 목록에 없음';
+    return x && x.link && /^https?:\/\//.test(x.link) ? `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer" title="${t}"><sup>[${esc(id)}]</sup></a>` : `<sup title="${t}" class="muted">[${esc(id)}]</sup>`; });
+  return h.split('\n').map(l=> /^\s*[-•*]\s+/.test(l) ? `<div style="padding-left:14px">• ${l.replace(/^\s*[-•*]\s+/,'')}</div>` : (l.trim() ? `<div>${l}</div>` : '<div style="height:6px"></div>')).join('');
+}
+function aiSrcList(srcs){ if (!srcs || !srcs.length) return '';
+  return `<details style="margin-top:6px"><summary class="muted">답에 쓰인 근거 ${srcs.length}개</summary><ul class="muted" style="margin:4px 0">` +
+    srcs.map(x=>`<li>[${esc(x.id)}] ${x.date?esc(x.date)+' ':''}${x.link && /^https?:\/\//.test(x.link) ? `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>` : esc(x.title)}</li>`).join('') + '</ul></details>'; }
+function aiBox(r){
+  const meta = `<div class="muted" style="font-size:12px;margin-top:6px">${esc(r.model||'')} · ${esc(r.created_at||'')}${r.cached?' · 저장된 답(같은 질문·같은 자료)':''}${r.web?' · 인터넷 조사 포함':''}${(r.unverified||[]).length?` · 출처 확인 안 된 숫자 ${r.unverified.length}개`:''}</div>`;
+  return `<div class="warnbox" style="border-left-color:var(--accent);background:transparent">${aiFmt(r.answer, r.sources, r.unverified)}${aiSrcList(r.sources)}${meta}${(r.notes||[]).length?`<div class="muted" style="font-size:12px">${(r.notes||[]).map(esc).join(' · ')}</div>`:''}</div>`;
+}
+async function aiPost(path, body){
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({code: D.company.code, base_year: BY}, body))});
+  const j = await r.json().catch(()=>({error:'응답을 읽지 못했습니다('+r.status+')'})); if (j.error) throw new Error(j.error); return j; }
+function renderQ(){
+  if (QA.error){ $('#q-status').textContent = 'AI 화면을 준비하지 못했습니다: ' + QA.error; return; }
+  $('#q-model').textContent = QA.model ? `· ${QA.model}` : '';
+  $('#q-status').innerHTML = !SERVED ? '저장된 화면 파일에서는 AI를 쓸 수 없습니다. 바탕화면 「재무분석 열기」로 연 화면에서 쓰세요.'
+    : QA.has_key ? 'EXAONE 인증키 있음. 보내는 자료는 공개 자료(재무 숫자·공시·뉴스 제목·검색 요약)뿐이며 인증키·파일 경로는 보내지 않습니다.'
+    : '<b>EXAONE 인증키가 없습니다.</b> 시작 메뉴 → 재무분석 → 「재무분석 인증키 설정」 → <b>4</b>번에서 넣어 주세요(입력은 *로 보임).';
+  const H = QA.history || [];
+  $('#q-hcount').textContent = H.length ? `(${H.length})` : '(없음)';
+  $('#q-history').innerHTML = H.map(r=>`<div style="margin:8px 0"><div><b>Q.</b> ${esc(r.question)}</div>${aiBox(r)}</div>`).join('');
+  const Y = QA.year_list || [];
+  $('#q-years').innerHTML = Y.map(y=>{ const r = (QA.years||{})[y];
+    return `<div style="margin:10px 0"><div class="row" style="align-items:center;gap:8px"><h3 style="margin:0">${y}년${y===BY?' (올해, 진행 중)':''}</h3>
+      <button class="q-ybtn" data-y="${y}" data-r="${r?1:0}">${r?'다시 만들기':'요약 만들기'}</button><span class="muted" id="q-yw-${y}"></span></div>
+      <div id="q-y-${y}">${r ? aiBox(r) : '<p class="muted">아직 만들지 않았습니다.</p>'}</div></div>`; }).join('');
+  document.querySelectorAll('.q-ybtn').forEach(b=>b.onclick = async ()=>{
+    if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+    const y = +b.dataset.y; b.disabled = true; $('#q-yw-'+y).textContent = '자료를 모으고 요약하는 중… (1~3분)';
+    try { const r = await aiPost('/api/ai/year', {year: y, refresh: b.dataset.r==='1'});
+      $('#q-y-'+y).innerHTML = r.answer ? aiBox(r) : `<p class="muted">${esc((r.notes||[]).join(' · ')||'자료가 없습니다.')}</p>`;
+      $('#q-yw-'+y).textContent = r.n_events!=null ? `공시 ${r.n_events}건 · 뉴스 ${r.n_news}건 사용` : ''; b.dataset.r = '1'; b.textContent = '다시 만들기';
+    } catch(e){ $('#q-yw-'+y).textContent = '실패: ' + e.message; }
+    b.disabled = false; });
+}
+$('#q-ask').onclick = async () => {
+  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  const q = $('#q-text').value.trim(); if (!q) { $('#q-text').focus(); return; }
+  const include = [...document.querySelectorAll('.q-inc')].filter(c=>c.checked).map(c=>c.value);
+  $('#q-ask').disabled = true; const t0 = Date.now(); const tick = setInterval(()=>{ $('#q-wait').textContent = `답을 만드는 중… ${Math.round((Date.now()-t0)/1000)}초`; }, 500);
+  try { const r = await aiPost('/api/ai/ask', {question: q, web: $('#q-web').checked, include});
+    $('#q-answer').innerHTML = `<div><b>Q.</b> ${esc(q)}</div>` + aiBox(r) + (r.cached ? '<button id="q-again" style="margin-top:6px">저장된 답 말고 새로 묻기</button>' : '');
+    const again = $('#q-again'); if (again) again.onclick = async ()=>{ again.disabled = true;
+      try { const r2 = await aiPost('/api/ai/ask', {question: q, web: $('#q-web').checked, include, refresh: true}); $('#q-answer').innerHTML = `<div><b>Q.</b> ${esc(q)}</div>` + aiBox(r2); } catch(e){ alert(e.message); } };
+  } catch(e){ $('#q-answer').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)">실패: ${esc(e.message)}</div>`; }
+  clearInterval(tick); $('#q-wait').textContent = ''; $('#q-ask').disabled = false;
+};
 let PTAB = uiGet('ptab', 't1');
 function renderP(){
   if (PV.error){ $('#p-note').textContent = '계산하지 못했습니다: ' + PV.error; return; }
@@ -1679,7 +1768,7 @@ function renderP(){
 document.querySelectorAll('.p-use').forEach(c=>c.addEventListener('change', renderP));
 ['#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps'].forEach(id=>$(id).addEventListener('input', renderP));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
@@ -1789,7 +1878,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#q-ask'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

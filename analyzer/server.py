@@ -213,6 +213,34 @@ class H(BaseHTTPRequestHandler):
             added = universe.add([(c, nm) for c, nm in items])
             return self._send(200, json.dumps({"added": added, "total": len(universe.load())}, ensure_ascii=False),
                               "application/json")
+        if u.path in ("/api/ai/ask", "/api/ai/year"):
+            # 화면 Q「AI 리서치」: EXAONE 호출(수십 초 걸릴 수 있음). 같은 입력은 저장된 답을 돌려줌
+            from . import ai
+            n = int(self.headers.get("Content-Length") or 0)
+            d = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
+            code = str(d.get("code") or "")
+            if not (code.isdigit() and len(code) == 6):
+                return self._send(400, json.dumps({"error": "종목코드 오류"}, ensure_ascii=False), "application/json")
+            P = config.periods(int(d["base_year"]) if str(d.get("base_year") or "").isdigit() else None)
+            conn = db.connect()
+            try:
+                if u.path == "/api/ai/ask":
+                    inc = [x for x in (d.get("include") or []) if x in ("fin", "val", "seg", "news", "events")]
+                    res = ai.ask(conn, code, P, str(d.get("question") or ""), web=bool(d.get("web")), include=inc or None,
+                                 refresh=bool(d.get("refresh")))
+                else:
+                    y = int(d.get("year") or 0)
+                    if not (P["current"] - ai.YEARS_SUMMARY < y <= P["current"]):
+                        return self._send(400, json.dumps({"error": "요약 연도 범위 밖"}, ensure_ascii=False), "application/json")
+                    res = ai.year_summary(conn, code, y, refresh=bool(d.get("refresh")))
+                return self._send(200, json.dumps(res, ensure_ascii=False), "application/json")
+            except (ai.AIUnavailable, ValueError) as e:
+                return self._send(200, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+            except Exception as e:      # noqa: BLE001  예상 못 한 오류도 화면에 알림(키는 ai._hide로 가림)
+                traceback.print_exc()
+                return self._send(200, json.dumps({"error": ai._hide(f"{type(e).__name__}: {e}")[:300]}, ensure_ascii=False), "application/json")
+            finally:
+                conn.close()
         if u.path == "/api/segments/keywords":
             from . import segments
             n = int(self.headers.get("Content-Length") or 0)

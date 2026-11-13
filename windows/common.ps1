@@ -117,14 +117,14 @@ function Protect-Path([string]$p) {
 }
 function Repair-Secrets {
     # 설정·인증서·인증키 파일 권한을 '이 사용자 + SYSTEM'으로 다시 맞춘다(예전 방식으로 잠겨 못 읽던 파일도 풀림. 파일 주인은 권한을 바꿀 수 있음)
-    foreach ($n in @('lan.json', 'tls', 'dart_api_key.txt', 'naver_api_key.txt', 'ecos_api_key.txt')) { Protect-Path (Join-Path $KeyDir $n) }
+    foreach ($n in @('lan.json', 'tls', 'dart_api_key.txt', 'naver_api_key.txt', 'ecos_api_key.txt', 'exaone_api_key.txt')) { Protect-Path (Join-Path $KeyDir $n) }
 }
 function Clear-OldInstallLog {
     # 예전 버전 설치 기록에 인증키가 그대로 적혔을 수 있다 → 저장된 키가 기록에 보이면 기록 파일을 지운다(키 값은 화면에 내지 않음)
     $log = Join-Path $env:LOCALAPPDATA 'CorpAnalyzer\install_log.txt'
     if (-not (Test-Path $log)) { return }
     $txt = Get-Content $log -Raw -ErrorAction SilentlyContinue
-    foreach ($n in @('dart_api_key.txt', 'naver_api_key.txt', 'ecos_api_key.txt')) {
+    foreach ($n in @('dart_api_key.txt', 'naver_api_key.txt', 'ecos_api_key.txt', 'exaone_api_key.txt')) {
         $f = Join-Path $KeyDir $n
         if (-not (Test-Path $f)) { continue }
         foreach ($line in (Get-Content $f -ErrorAction SilentlyContinue)) {
