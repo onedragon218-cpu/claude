@@ -85,6 +85,9 @@ a.plain{color:inherit;text-decoration:none} a.plain:hover{text-decoration:underl
 .subtabs{display:flex;gap:0;flex-wrap:wrap;border-bottom:1px solid var(--border);margin:10px 0 4px}
 .subtabs button{font:inherit;font-size:14px;background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .subtabs button.on{color:var(--text-primary);border-bottom-color:var(--text-primary);font-weight:600}
+.rchip{font:inherit;font-size:13px;padding:3px 4px 3px 10px;border-radius:14px;border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);display:inline-flex;align-items:center;gap:2px;text-decoration:none}
+.rchip:hover{border-color:var(--accent)} .rchip.cur{border-color:var(--accent);font-weight:600}
+.rchip .x{border:0;background:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0 4px;line-height:1}
 .subtabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .rawsum{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 10px;font-size:13.5px;color:var(--text-secondary)}
 .rawsum b{color:var(--text-primary);font-variant-numeric:tabular-nums}
@@ -105,6 +108,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     </div>
   </div>
   <div class="sub" id="subtitle"></div>
+  <div id="recent" class="row" style="gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px"></div>
 </header>
 <div id="riskbar" style="max-width:1200px;margin:10px auto 0;padding:0 16px;display:none"></div>
 <div id="rfbar" style="max-width:1200px;margin:10px auto 0;padding:0 16px;display:none"></div>
@@ -1867,6 +1871,24 @@ document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('main section').forEach(s=>s.classList.toggle('on', s.id===b.dataset.s));
   Object.values(charts).forEach(c=>c.resize());
 });
+// 최근 본 기업(2026-11-14): 이 브라우저에만 기억(최대 12곳). 누르면 지금 보던 탭 그대로 그 기업으로 이동
+const RECENT_MAX = 12;
+function recentGet(){ try { const a = JSON.parse(uiGet('recent', '[]')); return Array.isArray(a) ? a.filter(x=>x && /^[0-9A-Z]{6}$/.test(x.code)) : []; } catch(e){ return []; } }
+function recentPut(a){ uiSet('recent', JSON.stringify(a.slice(0, RECENT_MAX))); }
+function renderRecent(){
+  const a = recentGet();
+  $('#recent').innerHTML = a.length < 2 ? '' : '<span class="muted" style="font-size:13px">최근 본 기업</span>' +
+    a.map(x=>`<a class="rchip ${x.code===D.company.code?'cur':''}" href="${companyUrl(x.code)}" title="${esc(x.code)} · 마지막으로 본 때 ${esc(x.at||'')}">${esc(x.name||x.code)}<button class="x" data-code="${esc(x.code)}" title="목록에서 빼기" aria-label="${esc(x.name||x.code)} 목록에서 빼기">×</button></a>`).join('') +
+    '<button class="rchip x" id="recent-clear" style="padding:3px 10px" title="최근 본 기업 목록 비우기">모두 지우기</button>';
+  document.querySelectorAll('#recent .x[data-code]').forEach(b=>b.onclick = e => { e.preventDefault(); e.stopPropagation(); recentPut(recentGet().filter(x=>x.code!==b.dataset.code)); renderRecent(); });
+  const clr = $('#recent-clear'); if (clr) clr.onclick = () => { recentPut(recentGet().filter(x=>x.code===D.company.code)); renderRecent(); };
+}
+(function(){ const c = D.company; if (!c || !c.code) return;
+  const now = new Date(); const at = `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  recentPut([{code:c.code, name:c.name, at}].concat(recentGet().filter(x=>x.code!==c.code))); renderRecent(); })();
+// 고른 큰 탭을 기억해 다른 기업으로 옮겨도 같은 탭이 열리게
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click', ()=>uiSet('sec', b.dataset.s)));
+{ const sec = uiGet('sec', null), b = sec && document.querySelector(`#tabs button[data-s="${sec}"]`); if (b && sec !== 'A') setTimeout(()=>b.click(), 0); }
 $('#ffilter').onchange = renderFacts;
 $('#by').onchange = () => { const v = parseInt($('#by').value); if (v>1990 && v<2100){ BY=v; renderAll(); } };
 // ---- 기업 검색: 종목코드·종목명 모두 받음 ----
