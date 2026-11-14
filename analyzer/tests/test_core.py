@@ -631,70 +631,40 @@ class T(unittest.TestCase):
             finally:
                 srv.shutdown(); srv.server_close()
 
-    def test_ai_exaone_client_and_guards(self):
-        import threading
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        from unittest import mock
-        from analyzer import ai
-        seen = {}
-        class Fake(BaseHTTPRequestHandler):
-            def log_message(self, *a): pass
-            def do_POST(self):
-                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                seen["auth"], seen["body"] = self.headers.get("Authorization"), body
-                if self.headers.get("Authorization") != "Bearer SECRET-KEY-123":
-                    b = json.dumps({"error": {"message": "bad key SECRET-KEY-123"}}).encode(); self.send_response(401)
-                elif body.get("stream"):           # 조금씩 보내기(SSE)
-                    txt = "<think>생각</think>매출은 22,900억원입니다 [재무]. 영업이익률은 99.9%로 추정 [N1]."
-                    self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
-                    for i in range(0, len(txt), 7):
-                        self.wfile.write(("data: " + json.dumps({"model": "k-exaone_v2.5", "choices": [{"delta": {"content": txt[i:i + 7]}}]}) + "\n\n").encode())
-                    self.wfile.write(b"data: [DONE]\n\n"); return
-                else:
-                    b = json.dumps({"model": "k-exaone_v2.5", "choices": [{"message": {"content": "1"}}]}).encode(); self.send_response(200)
-                self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake); threading.Thread(target=srv.serve_forever, daemon=True).start()
-        old = os.environ.get("APPDATA")
-        with tempfile.TemporaryDirectory() as d:
-            os.environ["APPDATA"] = d
-            try:
-                os.makedirs(os.path.join(d, "corp-analyzer"))
-                with open(os.path.join(d, "corp-analyzer", "exaone.json"), "w", encoding="utf-8") as f:
-                    json.dump({"base_url": f"http://127.0.0.1:{srv.server_port}/v1"}, f)
-                with mock.patch.dict(os.environ, {"EXAONE_API_KEY": ""}):
-                    with self.assertRaises(ai.AIUnavailable):       # 키 없음
-                        ai.chat([{"role": "user", "content": "x"}])
-                with mock.patch.dict(os.environ, {"EXAONE_API_KEY": "WRONG"}):
-                    with self.assertRaises(ai.AIUnavailable) as cm:
-                        ai.chat([{"role": "user", "content": "x"}])
-                    self.assertIn("401", str(cm.exception))
-                with mock.patch.dict(os.environ, {"EXAONE_API_KEY": "SECRET-KEY-123"}):
-                    conn = db.connect(os.path.join(d, "t.db"))
-                    db.ensure_company(conn, "213500", "한솔제지")
-                    conn.execute("INSERT INTO facts(stock_code, fiscal_year, period, metric, value, is_current, status, version) "
-                                 "VALUES ('213500', 2025, 'FY', 'revenue', 22900, 1, 'VERIFIED', 1)")
-                    conn.execute("INSERT INTO news(stock_code, published, title, link) VALUES ('213500', ?, '한솔제지 3분기 적자', 'https://n.example/1')",
-                                 (__import__("datetime").date.today().isoformat(),))
-                    conn.commit()
-                    P = config.periods(2026)
-                    r = ai.ask(conn, "213500", P, "매출은?", include=("fin", "news"))
-                    self.assertNotIn("<think>", r["answer"])
-                    self.assertEqual(r["unverified"], ["99.9"])             # 근거에 없는 숫자만 표시
-                    self.assertEqual({x["id"] for x in r["sources"]}, {"재무", "N1"})
-                    self.assertIn("22,900", seen["body"]["messages"][1]["content"])   # DB 숫자가 근거로 들어감
-                    self.assertNotIn("SECRET", json.dumps(seen["body"]))             # 키는 본문에 없음
-                    self.assertTrue(ai.ask(conn, "213500", P, "매출은?", include=("fin", "news"))["cached"])
-                    self.assertEqual(ai.chat([{"role": "user", "content": "x"}], stream=False)[0], "1")    # 한 번에 받기도 됨
-                    dg = ai.diagnose(full=True)
-                    self.assertTrue(dg["ok"], dg)
-                    self.assertEqual([x["ok"] for x in dg["steps"]], [True] * 5)
-                    st = ai.state(conn, "213500", P)
-                    self.assertEqual(len(st["history"]), 1)
-                    self.assertEqual(st["year_list"], [2024, 2025, 2026])
-            finally:
-                srv.shutdown(); srv.server_close()
-                if old is None: os.environ.pop("APPDATA", None)
-                else: os.environ["APPDATA"] = old
+    def test_fairper_formula_guards_and_payload(self):
+        from analyzer import fairper
+        # 1) 공식 값
+        per, why = fairper.fair_per(0.12, 0.10, 0.03)
+        self.assertAlmostEqual(per, 10.714, places=3)
+        self.assertIsNone(why)
+        self.assertAlmostEqual(per * 1000 * 0.83, 8892.9, places=1)
+        # 2) 막는 조건
+        self.assertIn("ROE ≤ g", fairper.fair_per(0.03, 0.10, 0.03)[1])
+        self.assertIn("Ke − g", fairper.fair_per(0.10, 0.04, 0.03)[1])
+        # 3) ROE = Ke면 성장과 무관하게 1/Ke
+        for g in (0.0, 0.02, 0.04):
+            self.assertAlmostEqual(fairper.fair_per(0.10, 0.10, g)[0], 10.0, places=9)
+        # 4) 항등식: ROE = EPS/BPS 이면 PER × EPS = (ROE − g)/(Ke − g) × BPS
+        for roe, ke, g, bps in ((0.15, 0.09, 0.03, 20000.0), (0.08, 0.11, 0.02, 5000.0)):
+            eps = roe * bps
+            self.assertAlmostEqual(fairper.fair_per(roe, ke, g)[0] * eps, (roe - g) / (ke - g) * bps, delta=1e-9)
+        # 5) 시드 213500: 세 해 행, 예외 없음, 원천 1곳인 해에 '원천 대기'
+        conn = db.connect()
+        P = config.periods(2026)
+        pl = fairper.payload(conn, "213500", P)
+        cur = next(r for r in pl["rows"] if r["code"] == "213500")
+        self.assertIn("data", cur)
+        res = fairper.compute(cur["data"])
+        self.assertEqual([r["y"] for r in res["rows"]], [2026, 2027, 2028])
+        d = dict(cur["data"], years=[dict(y, n_est=1 if i == 1 else y["n_est"]) for i, y in enumerate(cur["data"]["years"])])
+        rows = fairper.compute(d)["rows"]
+        self.assertIn("판정 못 함(원천 대기)", rows[1]["tags"])
+        self.assertTrue(all(r["n_est"] is None or r["n_est"] > 1 or "판정 못 함(원천 대기)" in r["tags"] for r in res["rows"]))
+        # ROE 이월: 기말 자본 = 기초 + 보정 순이익 × (1 − d)
+        r0 = res["rows"][0]
+        self.assertAlmostEqual(r0["e_end"], r0["e_start"] + r0["ni"] * (1 - cur["data"]["d"]), places=6)
+        self.assertEqual(len(fairper.sensitivity(cur["data"])), 3)
+        conn.close()
 
     def test_lan_password_and_network_rules(self):
         from analyzer import lan

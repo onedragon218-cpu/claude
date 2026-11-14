@@ -125,7 +125,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="N">N. 숫자 모양</button>
   <button data-s="O">O. 가치 5방법</button>
   <button data-s="P">P. 우상향 저평가</button>
-  <button data-s="Q">Q. AI 리서치</button>
+  <button data-s="Q">Q. 적정 PER 주가</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -467,35 +467,43 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 </section>
 <section id="Q">
   <div class="card">
-    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · AI 답은 틀릴 수 있으니 근거 링크로 확인하세요</p>
-    <h2 style="margin:0">AI 리서치 <span class="muted" style="font-size:14px;font-weight:400" id="q-model"></span></h2>
-    <p class="muted" id="q-status" style="margin:6px 0"></p>
-    <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><button id="q-test">연결 시험</button>
-      <span class="muted">인증키 → 서버 연결 → 아주 짧은 질문 → 짧은 자료 질문 순서로 확인합니다(1분 안팎). 질문·요약을 처음 누를 때도 짧은 시험을 먼저 합니다.</span></div>
-    <div id="q-testres" style="margin-top:6px"></div>
-  </div>
-  <div class="card">
-    <h2 style="margin:0 0 6px">① 질문하기</h2>
-    <p class="muted" style="margin:0 0 8px">이 기업의 앱 자료(재무·가치평가·사업부·뉴스·공시)를 근거로 답합니다. 문장 끝 [재무] [D3] [N5] [W2]는 근거 표시이며 누르면 원문이 열립니다. 답 속 <mark>노란 숫자</mark>는 근거 자료에서 찾지 못한 값(계산값이거나 출처 확인 안 됨)입니다.</p>
-    <textarea id="q-text" rows="3" style="width:100%;box-sizing:border-box" placeholder="예) 최근 3년 영업이익률이 떨어진 이유는? / 부채 부담은 어느 정도인가? / 컨센서스대로라면 지금 주가는 싼 편인가?"></textarea>
-    <div class="row" style="gap:14px;align-items:center;flex-wrap:wrap;margin-top:6px">
-      <span class="muted">참고 자료:</span>
-      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="fin" checked> 재무·컨센서스</label>
-      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="val" checked> 가치평가</label>
-      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="seg" checked> 사업부</label>
-      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="news" checked> 뉴스(1년)</label>
-      <label style="flex-direction:row;gap:4px;align-items:center"><input type="checkbox" class="q-inc" value="events" checked> 공시(3년)</label>
-      <label style="flex-direction:row;gap:4px;align-items:center" title="네이버 웹문서·뉴스 검색(키 없으면 구글 뉴스). 검색 결과의 제목·요약만 씁니다."><input type="checkbox" id="q-web"> <b>인터넷 조사 포함</b></label>
-      <button class="primary" id="q-ask">질문하기</button>
-      <span class="muted" id="q-wait"></span>
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
+    <h2 style="margin:0">적정 PER 주가</h2>
+    <p class="muted" id="q-note" style="margin:6px 0"></p>
+    <div class="row" style="gap:16px;align-items:center;flex-wrap:wrap;margin-top:6px">
+      <span class="muted">우상향 지표(화면 P와 같음, 모두 끄면 거르지 않음)</span>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="op_margin" checked> 영업이익률</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="roe" checked> ROE</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="revenue" checked> 매출액</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="eps" checked> EPS</label>
     </div>
-    <div id="q-answer" style="margin-top:10px"></div>
-    <details style="margin-top:10px"><summary>이전 질문 <span class="muted" id="q-hcount"></span></summary><div id="q-history"></div></details>
+    <div class="row" style="gap:16px;align-items:center;flex-wrap:wrap;margin-top:8px">
+      <label style="flex-direction:row;align-items:center;gap:6px">영구성장률 g <select id="q-g"><option value="0.02">2%</option><option value="0.03" selected>3%</option><option value="0.04">4%</option></select></label>
+      <label style="flex-direction:row;align-items:center;gap:6px" title="Ke 대신 교과서 기준 10%로 고정(할인에도 10% 사용)"><input type="checkbox" id="q-r10"> r = 10% 고정</label>
+      <label style="flex-direction:row;align-items:center;gap:6px" title="공통 규칙(×0.83, 급하향 ×0.73) 대신 앱 실측 보정계수(지난해 컨센서스 대비 실제 중앙값)"><input type="checkbox" id="q-cal"> 앱 보정계수 쓰기</label>
+    </div>
+    <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:8px">
+      <span class="muted">최소 증가폭(선택, 비우면 조금이라도 오르면 통과)</span>
+      <label>영업이익률(%p)<input id="q-th-op_margin" type="number" step="0.1" style="width:80px"></label>
+      <label>ROE(%p)<input id="q-th-roe" type="number" step="0.1" style="width:80px"></label>
+      <label>매출액(%)<input id="q-th-revenue" type="number" step="0.5" style="width:80px"></label>
+      <label>EPS(%)<input id="q-th-eps" type="number" step="0.5" style="width:80px"></label>
+    </div>
+    <div class="subtabs" id="q-tabs" role="tablist" style="margin-top:12px"></div>
+    <p id="q-count" style="margin:8px 0"></p>
+    <div class="tablewrap"><table id="q-table"></table></div>
+    <p class="muted" id="q-rules"></p>
   </div>
   <div class="card">
-    <h2 style="margin:0 0 6px">④ 연도별 뉴스·공시 요약 <span class="muted" style="font-size:14px;font-weight:400">최근 3년</span></h2>
-    <p class="muted" style="margin:0 0 8px">그해 DART 공시(정기·주요사항·거래소)와 뉴스 제목만 보고 주제별로 요약합니다. 자료가 부족한 해는 처음 누를 때 공시·뉴스를 더 받습니다(1~3분). 올해는 자료가 늘면 다시 만들 수 있습니다.</p>
-    <div id="q-years"></div>
+    <h2 style="margin:0 0 8px">이 기업 자세히 <span class="muted" style="font-size:14px;font-weight:400" id="q-dname"></span></h2>
+    <div class="tiles" id="q-tiles"></div>
+    <div class="chartbox" style="height:320px;margin-top:12px"><canvas id="q-chart"></canvas></div>
+    <div class="tablewrap" style="margin-top:12px"><table id="q-dtable"></table></div>
+    <h3 style="margin:14px 0 6px">민감도 <span class="muted" style="font-size:13px;font-weight:400" id="q-sens-t"></span></h3>
+    <div class="tablewrap"><table id="q-sens"></table></div>
+    <details style="margin-top:10px"><summary>계산 근거</summary><div id="q-why" class="muted" style="margin-top:6px"></div></details>
+    <p class="muted" id="q-principle" style="margin-top:10px"></p>
+    <p class="muted" style="margin:4px 0 0">표시 칸 — 매수 조건 아님. 생존(H 화면)·자산 바닥이 먼저.</p>
   </div>
 </section>
 
@@ -1669,97 +1677,6 @@ function pClassify(row, use, th, factor){
   const tier = [0,1,2].find(i=>fair[i] > row.price);
   return {status:'통과', tier: tier===undefined ? null : tier, fair, margin: fair.map(v=>v/row.price-1), cheap: fair.map(v=>v>row.price)};
 }
-// ---------------- Q. AI 리서치(EXAONE) ----------------
-const QA = D.ai || {};
-function aiFmt(text, srcs, bad){
-  const S = {}; (srcs||[]).forEach(x=>S[x.id]=x);
-  let h = esc(text||'');
-  (bad||[]).forEach(n=>{ const e = esc(n); h = h.split(e).join(`\u0001${e}\u0002`); });
-  h = h.replace(/\u0001/g,'<mark title="근거 자료에서 찾지 못한 숫자(계산값이거나 출처 확인 안 됨)">').replace(/\u0002/g,'</mark>');
-  h = h.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
-  h = h.replace(/\[((?:[DNW]\d+)|재무|가치평가|사업부)\]/g, (m, id)=>{ const x = S[id];
-    const t = x ? esc((x.date?x.date+' ':'') + x.title) : '근거 목록에 없음';
-    return x && x.link && /^https?:\/\//.test(x.link) ? `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer" title="${t}"><sup>[${esc(id)}]</sup></a>` : `<sup title="${t}" class="muted">[${esc(id)}]</sup>`; });
-  return h.split('\n').map(l=> /^\s*[-•*]\s+/.test(l) ? `<div style="padding-left:14px">• ${l.replace(/^\s*[-•*]\s+/,'')}</div>` : (l.trim() ? `<div>${l}</div>` : '<div style="height:6px"></div>')).join('');
-}
-function aiSrcList(srcs){ if (!srcs || !srcs.length) return '';
-  return `<details style="margin-top:6px"><summary class="muted">답에 쓰인 근거 ${srcs.length}개</summary><ul class="muted" style="margin:4px 0">` +
-    srcs.map(x=>`<li>[${esc(x.id)}] ${x.date?esc(x.date)+' ':''}${x.link && /^https?:\/\//.test(x.link) ? `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>` : esc(x.title)}</li>`).join('') + '</ul></details>'; }
-function aiBox(r){
-  const meta = `<div class="muted" style="font-size:12px;margin-top:6px">${esc(r.model||'')} · ${esc(r.created_at||'')}${r.cached?' · 저장된 답(같은 질문·같은 자료)':''}${r.web?' · 인터넷 조사 포함':''}${(r.unverified||[]).length?` · 출처 확인 안 된 숫자 ${r.unverified.length}개`:''}</div>`;
-  return `<div class="warnbox" style="border-left-color:var(--accent);background:transparent">${aiFmt(r.answer, r.sources, r.unverified)}${aiSrcList(r.sources)}${meta}${(r.notes||[]).length?`<div class="muted" style="font-size:12px">${(r.notes||[]).map(esc).join(' · ')}</div>`:''}</div>`;
-}
-let AI_OK = false;
-function aiTestHtml(r){
-  return `<table style="margin-top:4px"><tr><th class="l">단계</th><th>결과</th><th>걸린 시간</th><th class="l">내용</th></tr>` +
-    r.steps.map(st=>`<tr><td class="l">${esc(st.name)}</td><td>${st.ok?'<span class="badge b-OK">성공</span>':'<span class="badge b-ERROR">실패</span>'}</td><td>${st.sec}초</td><td class="l">${esc(st.detail||'')}</td></tr>`).join('') + '</table>' +
-    (r.ok ? '' : `<p class="muted">${aiAdvice(r)}</p>`); }
-function aiAdvice(r){ const bad = (r.steps.find(s=>!s.ok)||{}); const d = (bad.detail||'');
-  if (/인증키/.test(bad.name)) return '키를 넣은 뒤 다시 시험하세요.';
-  if (/주소 찾기/.test(bad.name)) return '서버 이름을 찾지 못했습니다. 회사망·보안 프로그램이 막았거나 주소가 다릅니다(docs.exaone.ai 예시의 주소 확인).';
-  if (/서버 연결/.test(bad.name)) return '서버에 연결하지 못했습니다. 회사망 방화벽·프록시가 막았을 수 있습니다. 집 인터넷이나 휴대폰 핫스팟에서 한 번 시험해 보세요.';
-  if (/429/.test(d)) return '호출 한도(초당 1회 등)에 걸렸습니다. 이번 버전부터 호출 사이를 1.2초 띄우고 자동으로 다시 시도합니다. 잠시 뒤 다시 시험하세요.';
-  if (/생각 과정/.test(d)) return '모델이 생각만 하다가 글자 한도에 걸렸습니다. 결과를 알려 주시면 한도를 조정하겠습니다.';
-  if (/404/.test(d)) return '주소나 모델 이름이 다릅니다. docs.exaone.ai 예시 코드의 주소와 model 값을 알려 주세요.';
-  if (/401|403/.test(d)) return '키가 틀렸거나 권한이 없습니다. 「재무분석 인증키 설정」 4번에서 다시 넣어 주세요.';
-  if (/timed out|시간|초 안에/.test(d)) return '서버가 답을 늦게 줍니다(무료 공개 직후라 몰렸을 수 있음). 잠시 뒤 다시 시험하세요. 짧은 질문도 늦으면 서버 쪽 문제입니다.';
-  return '위 내용을 알려 주시면 원인을 찾겠습니다.'; }
-async function aiPreflight(target){   // 큰 요청 전에 짧은 시험(이 화면에서 한 번 성공하면 다시 안 함)
-  if (AI_OK) return true;
-  target.innerHTML = '<p class="muted">먼저 짧은 연결 시험을 합니다…</p>';
-  try { const r = await (await fetch('/api/ai/test?full=0', {method:'POST'})).json();
-    if (r.ok){ AI_OK = true; return true; }
-    target.innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)"><b>연결 시험 실패 — 본 질문은 보내지 않았습니다.</b>${aiTestHtml(r)}</div>`; return false;
-  } catch(e){ target.innerHTML = `<div class="warnbox">연결 시험을 하지 못했습니다: ${esc(e.message)}</div>`; return false; } }
-async function aiPost(path, body){
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({code: D.company.code, base_year: BY}, body))});
-  const j = await r.json().catch(()=>({error:'응답을 읽지 못했습니다('+r.status+')'})); if (j.error) throw new Error(j.error); return j; }
-function renderQ(){
-  if (QA.error){ $('#q-status').textContent = 'AI 화면을 준비하지 못했습니다: ' + QA.error; return; }
-  $('#q-model').textContent = QA.model ? `· ${QA.model}` : '';
-  $('#q-status').innerHTML = !SERVED ? '저장된 화면 파일에서는 AI를 쓸 수 없습니다. 바탕화면 「재무분석 열기」로 연 화면에서 쓰세요.'
-    : QA.has_key ? 'EXAONE 인증키 있음. 보내는 자료는 공개 자료(재무 숫자·공시·뉴스 제목·검색 요약)뿐이며 인증키·파일 경로는 보내지 않습니다.'
-    : '<b>EXAONE 인증키가 없습니다.</b> 시작 메뉴 → 재무분석 → 「재무분석 인증키 설정」 → <b>4</b>번에서 넣어 주세요(입력은 *로 보임).';
-  const H = QA.history || [];
-  $('#q-hcount').textContent = H.length ? `(${H.length})` : '(없음)';
-  $('#q-history').innerHTML = H.map(r=>`<div style="margin:8px 0"><div><b>Q.</b> ${esc(r.question)}</div>${aiBox(r)}</div>`).join('');
-  const Y = QA.year_list || [];
-  $('#q-years').innerHTML = Y.map(y=>{ const r = (QA.years||{})[y];
-    return `<div style="margin:10px 0"><div class="row" style="align-items:center;gap:8px"><h3 style="margin:0">${y}년${y===BY?' (올해, 진행 중)':''}</h3>
-      <button class="q-ybtn" data-y="${y}" data-r="${r?1:0}">${r?'다시 만들기':'요약 만들기'}</button><span class="muted" id="q-yw-${y}"></span></div>
-      <div id="q-y-${y}">${r ? aiBox(r) : '<p class="muted">아직 만들지 않았습니다.</p>'}</div></div>`; }).join('');
-  document.querySelectorAll('.q-ybtn').forEach(b=>b.onclick = async ()=>{
-    if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
-    const y = +b.dataset.y; b.disabled = true;
-    if (!(await aiPreflight($('#q-y-'+y)))){ b.disabled = false; return; }
-    $('#q-yw-'+y).textContent = '자료를 모으고 요약하는 중… (1~3분)';
-    try { const r = await aiPost('/api/ai/year', {year: y, refresh: b.dataset.r==='1'});
-      $('#q-y-'+y).innerHTML = r.answer ? aiBox(r) : `<p class="muted">${esc((r.notes||[]).join(' · ')||'자료가 없습니다.')}</p>`;
-      $('#q-yw-'+y).textContent = r.n_events!=null ? `공시 ${r.n_events}건 · 뉴스 ${r.n_news}건 사용` : ''; b.dataset.r = '1'; b.textContent = '다시 만들기';
-    } catch(e){ $('#q-yw-'+y).textContent = '실패: ' + e.message; }
-    b.disabled = false; });
-}
-$('#q-test').onclick = async () => {
-  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
-  $('#q-test').disabled = true; const t0 = Date.now(); const tick = setInterval(()=>{ $('#q-testres').innerHTML = `<p class="muted">시험 중… ${Math.round((Date.now()-t0)/1000)}초</p>`; }, 500);
-  try { const r = await (await fetch('/api/ai/test?full=1', {method:'POST'})).json(); clearInterval(tick);
-    AI_OK = !!r.ok; $('#q-testres').innerHTML = `<div class="warnbox" style="${r.ok?'':'border-left-color:var(--bad);background:var(--bad-bg)'}"><b>${r.ok?'연결 정상':'연결 문제'}</b>${aiTestHtml(r)}</div>`;
-  } catch(e){ clearInterval(tick); $('#q-testres').textContent = '시험 실패: ' + e.message; }
-  $('#q-test').disabled = false; };
-$('#q-ask').onclick = async () => {
-  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
-  const q = $('#q-text').value.trim(); if (!q) { $('#q-text').focus(); return; }
-  const include = [...document.querySelectorAll('.q-inc')].filter(c=>c.checked).map(c=>c.value);
-  $('#q-ask').disabled = true;
-  if (!(await aiPreflight($('#q-answer')))){ $('#q-ask').disabled = false; return; }
-  const t0 = Date.now(); const tick = setInterval(()=>{ $('#q-wait').textContent = `답을 만드는 중… ${Math.round((Date.now()-t0)/1000)}초`; }, 500);
-  try { const r = await aiPost('/api/ai/ask', {question: q, web: $('#q-web').checked, include});
-    $('#q-answer').innerHTML = `<div><b>Q.</b> ${esc(q)}</div>` + aiBox(r) + (r.cached ? '<button id="q-again" style="margin-top:6px">저장된 답 말고 새로 묻기</button>' : '');
-    const again = $('#q-again'); if (again) again.onclick = async ()=>{ again.disabled = true;
-      try { const r2 = await aiPost('/api/ai/ask', {question: q, web: $('#q-web').checked, include, refresh: true}); $('#q-answer').innerHTML = `<div><b>Q.</b> ${esc(q)}</div>` + aiBox(r2); } catch(e){ alert(e.message); } };
-  } catch(e){ $('#q-answer').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)">실패: ${esc(e.message)}</div>`; }
-  clearInterval(tick); $('#q-wait').textContent = ''; $('#q-ask').disabled = false;
-};
 let PTAB = uiGet('ptab', 't1');
 function renderP(){
   if (PV.error){ $('#p-note').textContent = '계산하지 못했습니다: ' + PV.error; return; }
@@ -1803,6 +1720,145 @@ function renderP(){
 }
 document.querySelectorAll('.p-use').forEach(c=>c.addEventListener('change', renderP));
 ['#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps'].forEach(id=>$(id).addEventListener('input', renderP));
+
+// ---------------- Q. 적정 PER 주가 (analyzer/fairper.py compute와 같은 식) ----------------
+const QV = D.fairper || {error:'자료 없음'};
+function qFairPer(roe, ke, g, gap, ni){
+  if (roe==null || ni==null || ni <= 0) return [null, '판정 못 함(적자 또는 순이익 컨센 없음)'];
+  if (ke - g < gap) return [null, `판정 못 함(Ke − g가 ${(gap*100).toFixed(0)}%p 미만 — 값이 폭발)`];
+  if (roe <= g) return [null, `판정 못 함(ROE ≤ g — 성장할수록 가치 감소) · 참고 1/Ke = ${(1/ke).toFixed(1)}`];
+  return [(1 - g/roe)/(ke - g), null]; }
+function qCompute(data, p){
+  const S = QV.settings, g = Math.min(Math.max(+p.g, 0), S['g_상한']);
+  const today = new Date(data.today + 'T00:00:00'), price = data.price, d = data.d;
+  let es = data.E0; const rows = [];
+  data.years.forEach(yd=>{
+    const y = yd.y, k = (p.use_cal && yd.k_cal!=null) ? yd.k_cal : yd.k, ke = p.fixed_r ? S['r_고정_참고'] : yd.ke;
+    const ni = yd.ni_c==null ? null : yd.ni_c*k; let roe = null, ee = null;
+    if (es!=null && ni!=null){ ee = es + ni*(1-d); const avg = (es+ee)/2; roe = avg > 0 ? ni/avg : null; }
+    let [per, why] = qFairPer(roe, ke, g, S['Ke_g_최소차'], ni);
+    const eps = yd.eps_c==null ? null : yd.eps_c*k; let fair = null, tv = null;
+    if (per!=null){ if (eps==null || eps<=0) why = eps!=null ? '판정 못 함(적자 EPS)' : '판정 못 함(EPS 컨센 없음)'; else fair = per*eps; }
+    const t = Math.max(0, (Date.UTC(y,0,1) - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))/864e5/365.25);
+    if (fair!=null) tv = fair/Math.pow(1+ke, t);
+    const tags = [], n = yd.n_est, wait = n!=null && n<=1;
+    if (wait) tags.push('판정 못 함(원천 대기)'); else if (n==null) tags.push('원천 수 미확인');
+    if (roe!=null && data.roe_hist_max!=null && roe*100 > data.roe_hist_max) tags.push('정점 넘음 — 사이클 정점이면 과대평가');
+    if (Math.abs(k-0.73) < 1e-9) tags.push('컨센 3개월 −5% 넘게 하향 — 깊은 보정');
+    if (data.financial) tags.push('금융: 적정 PBR 기준 권장');
+    rows.push({y, ke, g, k, ni, e_start: es, e_end: ee, roe, roe_c: yd.roe_c, payout: per!=null ? 1-g/roe : null, per, per0: 1/ke,
+      mkt_per: price && yd.eps_c>0 ? price/yd.eps_c : null, eps_c: yd.eps_c, eps, fair, t, tv, ratio: price && tv ? price/tv : null, n_est: n, wait, why, tags});
+    es = ee; });
+  const ok = {}; rows.forEach(r=>{ if (r.tv!=null && !r.wait) ok[r.y] = r.tv; });
+  const cy = data.years[0].y, th = S['가치경로_문턱'];
+  let path; const base = (cy in ok) ? cy : ((cy+1) in ok ? cy+1 : null);
+  if (base==null || !((cy+2) in ok) || base===cy+2) path = {label:'판정 못 함', why:'비교할 두 해의 오늘가치가 없음(적자·컨센 없음·원천 대기)'};
+  else { const r = ok[cy+2]/ok[base]; path = {label: r>=1+th ? '가치 상승' : (r>=1-th ? '평평' : '가치 하락'), r, why:`${cy+2}E 오늘가치 ÷ ${base}E 오늘가치 = ${r.toFixed(2)}`}; }
+  let pos;
+  if (!price) pos = {label:'판정 못 함', why:'지금 주가 없음'};
+  else if (!(cy in ok)) pos = {label:'판정 못 함', why:`${cy}E 오늘가치 없음`};
+  else { const x = price/ok[cy]; pos = {x, why:`지금 주가 ÷ ${cy}E 오늘가치 = ${x.toFixed(2)}`,
+    label: x<=0.8 ? '안전마진 20% 넘음' : x<=0.9 ? '안전마진 10~20%' : x<=1.0 ? '안전마진 10% 미만' : '올해 적정 위' + (((cy+2) in ok) && price > ok[cy+2] ? ' · 2년 뒤 적정까지 반영' : '')}; }
+  return {rows, path, position: pos, g}; }
+function qParams(){ return {g: +$('#q-g').value, fixed_r: $('#q-r10').checked, use_cal: $('#q-cal').checked}; }
+function qSens(data, p){ const S = QV.settings;
+  return [0.02,0.03,0.04].map(g=>[-0.01,0,0.01].map(dk=>{
+    const ys = data.years.map(y=>Object.assign({}, y, {ke: (p.fixed_r ? S['r_고정_참고'] : y.ke) + dk}));
+    return qCompute(Object.assign({}, data, {years: ys}), Object.assign({}, p, {g, fixed_r:false})).rows[1].tv; })); }
+let QTAB = uiGet('qtab', 't1');
+function renderQ(){
+  if (QV.error){ $('#q-note').textContent = '계산하지 못했습니다: ' + QV.error; return; }
+  const Y = QV.years, p = qParams(), use = [...document.querySelectorAll('.q-use')].filter(c=>c.checked).map(c=>c.value);
+  const th = {}; ['op_margin','roe','revenue','eps'].forEach(m=>{ const v = $('#q-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
+  $('#q-note').innerHTML = `<b>1단계 우상향</b>(화면 P와 같은 조건, 지표를 모두 끄면 거르지 않음). <b>2단계 가격</b>: 적정 PER = (1 − g ÷ ROE) ÷ (Ke − g), 적정 주가 = 적정 PER × EPS(컨센 × 보정), 오늘가치 = 적정 주가 ÷ (1 + Ke)^(그해 1월 1일까지 남은 해). 오늘가치 &gt; 현재 주가이면 그 분류. <b>1차 분류</b> = ${Y[2]}E(내후년) 기준, <b>2차</b> = ${Y[1]}E(내년), <b>3차</b> = ${Y[0]}E(올해). ROE는 실제 지배자본에 보정 순이익을 이어 쌓아 계산. 대상: DB에 있는 기업 ${QV.rows.length}곳.`;
+  const PVrow = Object.fromEntries((PV.rows||[]).map(r=>[r.code, r]));
+  const res = QV.rows.map(r=>{
+    if (r.error) return {r, st:'자료 부족', why:'계산 실패: ' + r.error};
+    const c = qCompute(r.data, p), price = r.data.price;
+    const cheapOf = () => c.rows.map(x=>x.tv!=null && !x.wait && price && x.tv > price);   // 탈락 기업도 값은 보여 줌(분류에는 안 넣음)
+    for (const m of use){ const pr = PVrow[r.code]; if (!pr) return {r, c, cheap: cheapOf(), st:'자료 부족', why:'우상향 자료 없음'};
+      const [ok, why] = pRising(pr.series[m], PV.metrics[m][1], th[m]);
+      if (ok===null) return {r, c, cheap: cheapOf(), st:'자료 부족', why:`${PV.metrics[m][0]} ${why}`};
+      if (!ok) return {r, c, cheap: cheapOf(), st:'우상향 아님', why:`${PV.metrics[m][0]} ${why}`}; }
+    if (!r.data.price) return {r, c, st:'자료 부족', why:'현재 주가 없음'};
+    const cheap = c.rows.map(x=>x.tv!=null && !x.wait && x.tv > r.data.price);
+    return {r, c, st:'통과', cheap, none: c.rows.every(x=>x.tv==null || x.wait)}; });
+  const up = res.filter(x=>x.st==='통과'), ex = res.filter(x=>x.st==='자료 부족'), no = res.filter(x=>x.st==='우상향 아님');
+  const T = {t1:{name:'1차 분류', i:2, y:Y[2]}, t2:{name:'2차 분류', i:1, y:Y[1]}, t3:{name:'3차 분류', i:0, y:Y[0]}};
+  const inT = (x, k) => x.st==='통과' && x.cheap[T[k].i];
+  const tabs = [['t1', `1차 분류 (${Y[2]}E 기준)`, up.filter(x=>inT(x,'t1')).length], ['t2', `2차 분류 (${Y[1]}E 기준)`, up.filter(x=>inT(x,'t2')).length],
+    ['t3', `3차 분류 (${Y[0]}E 기준)`, up.filter(x=>inT(x,'t3')).length], ['up', use.length ? '우상향 통과 전체' : '대상 전체', up.length], ['lack', '자료 부족', ex.length], ['all', '전체', res.length]];
+  $('#q-tabs').innerHTML = tabs.map(([k,n,c])=>`<button data-k="${k}" class="${QTAB===k?'on':''}">${n} <span class="muted">${c}</span></button>`).join('');
+  document.querySelectorAll('#q-tabs button').forEach(b=>b.onclick=()=>{ QTAB = b.dataset.k; uiSet('qtab', QTAB); renderQ(); });
+  const noneN = up.filter(x=>x.none).length;
+  $('#q-count').innerHTML = `${use.length?'우상향 통과':'대상'} <b>${up.length}</b>곳(그중 세 해 모두 판정 못 함 ${noneN}곳) · 우상향 아님 ${no.length}곳 · 자료 부족 ${ex.length}곳` +
+    (T[QTAB] ? ` &nbsp;|&nbsp; <b>${T[QTAB].name}</b>: ${T[QTAB].y}E 오늘가치가 현재 주가보다 높은 기업` : '');
+  let rows = T[QTAB] ? up.filter(x=>inT(x, QTAB)) : QTAB==='up' ? up : QTAB==='lack' ? ex : res;
+  const key = T[QTAB] ? T[QTAB].i : 2, mg = x => { const q = x.c && x.c.rows[key]; return q && q.ratio ? 1/q.ratio - 1 : -9; };
+  rows = rows.slice().sort((a,b)=> (a.st==='통과'?0:a.st==='우상향 아님'?1:2) - (b.st==='통과'?0:b.st==='우상향 아님'?1:2) || mg(b) - mg(a));
+  const n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
+  const cell = (x, i) => { if (!x.c || !x.r.data.price) return '<td class="muted">–</td>'; const q = x.c.rows[i], sel = T[QTAB] && T[QTAB].i===i;
+    if (q.tv==null) return `<td class="muted" title="${esc(q.why||'')}" style="${sel?'background:var(--info-bg)':''}">판정 못 함<br><span style="font-size:12px">${esc((q.why||'').replace('판정 못 함','').replace(/^\(|\).*$/g,''))}</span></td>`;
+    const pc = (q.tv/x.r.data.price - 1)*100, hit = x.cheap[i];
+    const tip = `적정 PER ${q.per.toFixed(2)} × EPS ${n0(q.eps_c)} × 보정 ${q.k.toFixed(2)} = ${n0(q.fair)}원 → ÷ (1 + ${(q.ke*100).toFixed(2)}%)^${q.t.toFixed(2)} = ${n0(q.tv)}원 · ROE ${(q.roe*100).toFixed(2)}% · g ${(q.g*100).toFixed(0)}%${q.wait?' · 원천 1곳(판정 제외)':''}`;
+    return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${q.wait?'color:var(--text-muted)':hit?'color:var(--good);font-weight:600':''}">${n0(q.tv)}원 ${hit?'✓':''}${q.wait?' <span class="badge b-WARN">원천 대기</span>':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
+  const tl = x => x.st!=='통과' ? '' : ['t1','t2','t3'].filter(k=>x.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
+  const pctv = v => v==null ? '–' : (v*100).toFixed(1);
+  $('#q-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th><th>1차 오늘가치<br><span class="muted" style="font-weight:400">${Y[2]}E(내후년)</span></th><th>2차 오늘가치<br><span class="muted" style="font-weight:400">${Y[1]}E(내년)</span></th><th>3차 오늘가치<br><span class="muted" style="font-weight:400">${Y[0]}E(올해)</span></th><th class="l">해당 분류</th><th class="l">가치 경로</th><th class="l">적정 PER<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l">ROE(이월, %)<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th></tr>` +
+    (rows.length ? rows.map(x=>`<tr><td class="l"><a href="${companyUrl(x.r.code)}">${esc(x.r.name)}</a> <span class="muted">${esc(x.r.code)}</span></td><td><b>${x.r.data ? n0(x.r.data.price)+'원' : '–'}</b></td>` +
+      cell(x,2) + cell(x,1) + cell(x,0) +
+      `<td class="l">${x.st==='통과' ? (tl(x)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tl(x)}</span>`) : `<span class="muted">${esc(x.st)} — ${esc(x.why||'')}</span>`}</td>` +
+      `<td class="l" title="${esc(x.c ? x.c.path.why : '')}">${x.c ? esc(x.c.path.label) : '–'}</td>` +
+      `<td class="l" style="white-space:nowrap">${x.c ? x.c.rows.map(q=>q.per==null?'–':q.per.toFixed(1)).join(' → ') : '–'}</td>` +
+      `<td class="l" style="white-space:nowrap">${x.c ? x.c.rows.map(q=>pctv(q.roe)).join(' → ') : '–'}</td></tr>`).join('')
+    : `<tr><td colspan="9" class="l">${T[QTAB] ? `${T[QTAB].name}에 해당하는 기업이 없습니다. '${use.length?'우상향 통과 전체':'대상 전체'}'를 눌러 각 기업의 연도별 오늘가치를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+  $('#q-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 오늘가치 칸: 위 = 오늘가치(✓ = 현재가보다 높음), 아래 = 현재가 대비 %. 칸에 마우스를 올리면 계산식이 보입니다. 원천(증권사) 1곳뿐인 해는 회색 '원천 대기'로 보여 주되 분류에서 뺍니다. ` +
+    `'판정 못 함'은 적자, ROE ≤ g(성장할수록 가치 감소), Ke − g < 2%p처럼 공식이 성립하지 않는 경우입니다. 보정: ${p.use_cal?'앱 실측 보정계수':'앱 공통 규칙(×0.83, 3개월 사이 5% 넘게 하향이면 ×0.73)'} · Ke: ${p.fixed_r?'10% 고정':'그해 국고채 10년 + β × ERP(화면 G·O와 같음)'} · g ${(p.g*100).toFixed(0)}%.`;
+  renderQDetail(p);
+}
+function renderQDetail(p){
+  const cur = QV.rows.find(r=>r.code===QV.code && r.data);
+  $('#q-principle').textContent = QV.principle || '';
+  if (!cur){ $('#q-dname').textContent = ''; $('#q-tiles').innerHTML = '<p class="muted">이 기업은 계산할 자료가 없습니다.</p>'; return; }
+  const d = cur.data, c = qCompute(d, p), n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR'), pc = v => v==null ? '–' : (v*100).toFixed(2)+'%';
+  $('#q-dname').textContent = `${cur.name} (${cur.code})`;
+  $('#q-tiles').innerHTML = [['가치 경로', c.path.label, c.path.why], ['가격 위치', c.position.label, c.position.why], ['지금 주가', d.price ? n0(d.price)+'원' : '없음', d.price_date ? `기준일 ${d.price_date}` : '']]
+    .map(([k,v,w])=>`<div class="tile" title="${esc(w)}"><div class="k">${k}</div><div class="v" style="font-size:17px">${esc(v)}</div><div class="muted" style="font-size:12px">${esc(w)}</div></div>`).join('');
+  const labels = c.rows.map(r=>`${r.y}E`), o = baseOpts();
+  o.plugins.priceLine = {price: d.price};
+  o.scales.y.ticks.callback = v => fmt(v,'원'); o.scales.y.beginAtZero = true;
+  if (d.price) o.scales.y.suggestedMax = Math.max(d.price, ...c.rows.map(r=>r.tv||0)) * 1.1;   // 지금 주가 선이 늘 보이게
+  o.scales.y2 = {position:'right', grid:{display:false}, ticks:{color:css('--text-secondary')}, title:{display:true, text:'적정 PER(배)', color:css('--text-muted')}};
+  o.plugins.legend = {display:true, labels:{color:css('--text-secondary'), boxWidth:14}};
+  o.plugins.tooltip.callbacks = {label: x => { const r = c.rows[x.dataIndex];
+    if (x.dataset.yAxisID==='y2') return r.per==null ? `적정 PER: ${r.why}` : `적정 PER: ${r.per.toFixed(2)}배`;
+    return r.tv==null ? `오늘가치: ${r.why}` : `오늘가치 ${n0(r.tv)}원 (할인 전 ${n0(r.fair)}원 · EPS ${n0(r.eps_c)} × ${r.k.toFixed(2)} = ${n0(r.eps)})${r.wait?' · 원천 대기':''}`; }};
+  const acc = css('--accent');
+  const ds = [{type:'bar', label:'오늘가치(원)', data: c.rows.map(r=>r.tv), yAxisID:'y', backgroundColor: c.rows.map(r=>r.wait ? acc+'55' : acc), borderRadius:4, maxBarThickness:70},
+              {type:'line', label:'적정 PER(배, 오른쪽)', data: c.rows.map(r=>r.per), yAxisID:'y2', borderColor: css('--text-secondary'), borderDash:[5,4], pointRadius:4, spanGaps:false}];
+  if (charts['q-chart']) charts['q-chart'].destroy();
+  charts['q-chart'] = new Chart($('#q-chart'), {data:{labels, datasets:ds}, options:o, plugins:[pricePlugin]});
+  $('#q-dtable').innerHTML = '<tr><th class="l">해</th><th>Ke</th><th>g</th><th>ROE(재무제표 이월)</th><th>ROE(컨센 참고)</th><th>공식 배당성향</th><th>적정 PER</th><th>무성장 PER(1/Ke)</th><th>시장 PER</th><th>EPS 원래 → 보정(k)</th><th>적정 주가(그 시점)</th><th>오늘가치</th><th>지금 주가 ÷ 오늘가치</th><th>원천 수</th><th class="l">꼬리표</th></tr>' +
+    c.rows.map(r=>`<tr style="${r.wait?'color:var(--text-muted)':''}"><td class="l">${r.y}E</td><td>${pc(r.ke)}</td><td>${(r.g*100).toFixed(0)}%</td><td>${pc(r.roe)}</td><td>${r.roe_c==null?'–':r.roe_c.toFixed(2)+'%'}</td><td>${pc(r.payout)}</td>` +
+      `<td title="${esc(r.why||'')}">${r.per==null?'<span class="muted">판정 못 함</span>':r.per.toFixed(2)}</td><td>${r.per0.toFixed(2)}</td><td>${r.mkt_per==null?'–':r.mkt_per.toFixed(2)+(r.per!=null&&r.mkt_per>r.per?' <span class="muted" title="시장이 이 해 이익보다 더 많이 믿음">▲</span>':'')}</td>` +
+      `<td>${n0(r.eps_c)} → ${n0(r.eps)} <span class="muted">(×${r.k.toFixed(2)})</span></td><td>${n0(r.fair)}</td><td><b>${n0(r.tv)}</b></td><td>${r.ratio==null?'–':r.ratio.toFixed(2)}</td><td>${r.n_est==null?'미확인':r.n_est}</td>` +
+      `<td class="l" style="white-space:normal;min-width:200px">${esc([r.why, ...r.tags].filter(Boolean).join(' · '))}</td></tr>`).join('');
+  const sv = qSens(d, p);
+  $('#q-sens-t').textContent = `${QV.years[1]}E 오늘가치(원) — 행 g, 열 Ke 변화`;
+  $('#q-sens').innerHTML = '<tr><th class="l">g \\ Ke</th><th>−1%p</th><th>기준</th><th>+1%p</th></tr>' +
+    sv.map((row, i)=>`<tr><td class="l">${[2,3,4][i]}%</td>${row.map((v,j)=>`<td style="${i===1&&j===1?'font-weight:700':''}">${v==null?'<span class="muted">판정 못 함</span>':n0(v)}</td>`).join('')}</tr>`).join('');
+  $('#q-why').innerHTML = `<ul style="margin:0;padding-left:18px">` +
+    `<li>시작 지배자본 E₀ = ${n0(d.E0)}억원 (${d.E0_year ?? '–'}년 사업보고서, DART)</li>` +
+    `<li>실제 배당성향 d = ${(d.d*100).toFixed(1)}% — ${esc(d.d_note)}</li>` +
+    `<li>Ke = 국고채 10년 + β ${d.beta} × ERP ${(d.erp*100).toFixed(1)}% : ` + d.years.map(y=>`${y.y}E ${(y.rf*100).toFixed(2)}% + ${(d.beta*d.erp*100).toFixed(1)}% = ${(y.ke*100).toFixed(2)}%${y.rf_note?' ('+esc(y.rf_note)+')':''}`).join(' · ') + (p.fixed_r?' — 지금은 r = 10% 고정 사용':'') + `</li>` +
+    `<li>보정 k: ` + d.years.map(y=>`${y.y}E ×${y.k.toFixed(2)} (${esc(y.k_why)})${y.k_cal!=null?` · 앱 실측 ×${y.k_cal.toFixed(2)}`:''}`).join(' · ') + `</li>` +
+    `<li>컨센 지배순이익(억원) · EPS(원): ` + d.years.map(y=>`${y.y}E ${y.ni_c==null?'–':n0(y.ni_c)} · ${y.eps_c==null?'–':n0(y.eps_c)}`).join(' / ') + ` (기준일 ${esc(d.cons_asof||'–')})</li>` +
+    `<li>ROE 이월: 순이익 = 컨센 × k, 기말 자본 = 기초 + 순이익 × (1 − d), ROE = 순이익 ÷ 평균 자본: ` + c.rows.map(r=>`${r.y}E ${n0(r.e_start)} → ${n0(r.e_end)}억, ROE ${pc(r.roe)}`).join(' · ') + `</li>` +
+    `<li>할인 기간 t(그해 1월 1일까지, ${esc(d.today)} 기준): ` + c.rows.map(r=>`${r.y}E ${r.t.toFixed(2)}년`).join(' · ') + `</li>` +
+    `<li>과거 10년 실제 ROE 최고 ${d.roe_hist_max==null?'–':d.roe_hist_max.toFixed(2)+'%'} (넘으면 정점 꼬리표) · 자사주 소각은 반영하지 않음</li></ul>`;
+}
+document.querySelectorAll('.q-use').forEach(c=>c.addEventListener('change', renderQ));
+['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
 function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
@@ -1914,7 +1970,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#q-ask','#q-test'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';
@@ -2008,8 +2064,9 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ren
 const UI_KEEP = ['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show',
   '#smkt','#smin','#sshow','#srisk',
   '#o-ke','#o-wacc','#o-omega','#o-r-cash','#o-r-recv','#o-r-inv','#o-r-land','#o-r-bldg',
-  '#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps'];
-const UI_GROUPS = ['.j-per', '.p-use'];   // 같은 이름의 체크 상자 묶음(값으로 구분)
+  '#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps',
+  '#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'];
+const UI_GROUPS = ['.j-per', '.p-use', '.q-use'];   // 같은 이름의 체크 상자 묶음(값으로 구분)
 function uiEls(){ const out = [];
   UI_KEEP.forEach(sel=>{ const el = document.querySelector(sel); if (el) out.push([sel, el]); });
   UI_GROUPS.forEach(g=>document.querySelectorAll(g).forEach(el=>out.push([g + ':' + el.value, el])));

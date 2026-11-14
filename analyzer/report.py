@@ -116,6 +116,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "ctrend": consensus_trend(conn, code, P),
         "good6": _safe(lambda: __import__("analyzer.goodco", fromlist=["good6"]).good6(conn, code, P)),
         "shape": _safe(lambda: __import__("analyzer.goodco", fromlist=["shape"]).shape(conn, code, P)),
+        "fairper": _safe(lambda: __import__("analyzer.fairper", fromlist=["payload"]).payload(conn, code, P)),
         "upvalue": _safe(lambda: __import__("analyzer.upvalue", fromlist=["rows"]).rows(conn, P)),
         "value5": _safe(lambda: __import__("analyzer.value5", fromlist=["payload"]).payload(conn, code, P, vres["rows"])),
         "biz": __import__("analyzer.segments", fromlist=["payload"]).payload(conn, code, comp["name"] if comp else code, P),
@@ -124,7 +125,6 @@ def payload(conn, code, base_year=None, last_run=None):
         "stability": stability(conn, code, P, vres["rows"], comp),
         "app_version": __import__("analyzer").__version__,
         "data_dir": config.DATA_DIR,
-        "ai": _safe(lambda: __import__("analyzer.ai", fromlist=["state"]).state(conn, code, P)),
         "rf_info": _safe(lambda: dict(__import__("analyzer.rates", fromlist=["info"]).info(
             __import__("analyzer.valuation", fromlist=["load_assumptions"]).load_assumptions(), P["current"]),
             last=(lambda r: dict(r) if r else None)(db.last_fetch(conn, "ecos_rf", "kr10y")),

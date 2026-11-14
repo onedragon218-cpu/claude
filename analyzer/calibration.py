@@ -93,17 +93,17 @@ def load():
     return None
 
 
-def factor(metric, target_year, today=None, cal=None):
-    """(계수, 설명) — 보정 정보가 없으면 (1.0, '보정 없음')"""
+def factor(metric, target_year, today=None, cal=None, measured=False):
+    """(계수, 설명) — 보정 정보가 없으면 (1.0, '보정 없음'). measured=True면 설정과 무관하게 실측 보정계수(화면 Q 토글용)"""
     from . import valuation
     A = valuation.load_assumptions().get("컨센서스_보정", {})
-    if not A.get("사용", True):
+    if not A.get("사용", True) and not measured:
         return 1.0, "보정 끔(설정)"
     key0 = {"net_income": "eps"}.get(metric, metric)
     manual = (A.get("직접입력") or {}).get(key0)
-    if manual:
+    if manual and not measured:
         return float(manual), "직접 입력한 계수"
-    if A.get("방식", "고정") == "고정":
+    if A.get("방식", "고정") == "고정" and not measured:
         v = (A.get("고정계수") or {}).get(key0)
         if v is not None:
             return float(v), f"고정 보정계수 {float(v):.2f}(설정 '고정계수', 실무 경험칙)"

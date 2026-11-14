@@ -137,21 +137,3 @@ function Clear-OldInstallLog {
         }
     }
 }
-
-function Test-Exaone([string]$v) {
-    # 아주 짧은 질문 1번으로 키 확인(설정 파일 exaone.json 이 있으면 그 주소·모델 사용)
-    $base = 'https://api.exaone.ai/v1'; $model = 'k-exaone_v2.5'
-    $cf = Join-Path $KeyDir 'exaone.json'
-    if (Test-Path $cf) { try { $j = Get-Content $cf -Raw -Encoding UTF8 | ConvertFrom-Json; if ($j.base_url) { $base = "$($j.base_url)".TrimEnd('/') }; if ($j.model) { $model = $j.model } } catch { } }
-    $body = @{ model = $model; max_tokens = 5; messages = @(@{ role = 'user'; content = 'ping' }) } | ConvertTo-Json -Depth 4
-    try {
-        $r = Invoke-RestMethod -Method Post -Uri "$base/chat/completions" -Headers @{ Authorization = "Bearer $v" } -ContentType 'application/json' -Body $body -TimeoutSec 60
-        if ($r.choices) { return "확인 완료(EXAONE 응답 정상, 모델 $model)" } else { return 'EXAONE 응답을 해석하지 못했습니다' }
-    } catch {
-        $code = $null; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-        if ($code -eq 401) { return 'EXAONE 응답 401: 키가 틀렸거나 만료됨(일단 저장합니다)' }
-        if ($code -eq 404) { return 'EXAONE 응답 404: 주소나 모델 이름이 다름 — docs.exaone.ai 에서 확인 후 알려 주세요(일단 저장합니다)' }
-        if ($code) { return "EXAONE 응답 $code (일단 저장합니다)" }
-        return 'EXAONE 접속 확인 실패(인터넷 연결 확인). 일단 저장합니다'
-    }
-}
