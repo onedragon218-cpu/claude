@@ -130,6 +130,8 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="O">O. 가치 5방법</button>
   <button data-s="P">P. 우상향 저평가</button>
   <button data-s="Q">Q. 적정 PER 주가</button>
+  <button data-s="R">R. 노드 우호 판정</button>
+  <button data-s="S">S. 사업부 피어</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -185,6 +187,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 <section id="B">
   <div class="tiles" id="tiles"></div>
   <div class="card" style="margin-top:16px" id="rfcard"></div>
+  <div class="card" style="margin-top:16px" id="docacard"></div>
   <div class="card" style="margin-top:16px">
     <h2>지표별 확보 현황</h2>
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
@@ -508,6 +511,24 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <details style="margin-top:10px"><summary>계산 근거</summary><div id="q-why" class="muted" style="margin-top:6px"></div></details>
     <p class="muted" id="q-principle" style="margin-top:10px"></p>
     <p class="muted" style="margin:4px 0 0">표시 칸 — 매수 조건 아님. 생존(H 화면)·자산 바닥이 먼저.</p>
+  </div>
+</section>
+<section id="R">
+  <div class="card">
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
+    <h2 style="margin:0">노드 우호 판정 <span class="muted" style="font-size:14px;font-weight:400" id="r-period"></span></h2>
+    <div id="r-head" style="margin:8px 0"></div>
+    <div class="tablewrap"><table id="r-table"></table></div>
+    <details style="margin-top:10px"><summary>작업 폴더 참고 줄(키팩터원장·병목지도·인과개별화) <span class="muted" id="r-refn"></span></summary><div id="r-refs" class="muted" style="margin-top:6px"></div></details>
+    <p class="muted" style="margin:10px 0 0">방향성(4축 ①)의 숫자 근거 — 매수 조건 아님 · (기계)는 계산 규칙, 나머지는 해석 · 출처 꼬리표: 자체 수집 · 사용자 · AI 초안 · 작업 폴더(회색 = 오래됨)</p>
+  </div>
+</section>
+<section id="S">
+  <div class="card">
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
+    <h2 style="margin:0">사업부 피어 비교</h2>
+    <p class="muted" id="s-rules" style="margin:6px 0"></p>
+    <div id="s-body"></div>
   </div>
 </section>
 
@@ -1862,9 +1883,73 @@ function renderQDetail(p){
     `<li>과거 10년 실제 ROE 최고 ${d.roe_hist_max==null?'–':d.roe_hist_max.toFixed(2)+'%'} (넘으면 정점 꼬리표) · 자사주 소각은 반영하지 않음</li></ul>`;
 }
 document.querySelectorAll('.q-use').forEach(c=>c.addEventListener('change', renderQ));
+
+// ---------------- R. 노드 우호 판정 · S. 사업부 피어 (analyzer/doca.py) ----------------
+const DC = D.doca || {error:'자료 없음'};
+const srcTag = (name, asof, old) => name ? `<span class="badge ${old?'':'b-OK'}" style="${old?'background:var(--info-bg);color:var(--text-muted)':''}" title="${old?'오래됨':''}">${esc(name)}</span>${asof?` <span class="muted" style="font-size:12px">${esc(String(asof).slice(0,10))}</span>`:''}` : '<span class="muted">–</span>';
+const vBadge = v => !v ? '<span class="muted">–</span>' : `<span class="badge ${/^순풍/.test(v)?'b-OK':/역풍/.test(v)?'b-ERROR':'b-WARN'}">${esc(v)}</span>`;
+function renderDocaCard(){
+  const st = DC.status || {}; const L = st.last;
+  $('#docacard').innerHTML = `<h2 style="margin:0 0 6px">작업 폴더 자료(화면 R·S 빈칸 채우기)</h2>` +
+    (st.found ? `<div>작업 폴더: <code>${esc(st.dir)}</code></div>` : `<div><span class="badge b-WARN">작업 폴더 연결 안 됨</span> <span class="muted">기본 위치 <code>%USERPROFILE%\\claude 작업</code>에서 '핵심' 폴더를 찾지 못했습니다.</span></div>`) +
+    `<div class="muted" style="margin-top:4px">${L ? `마지막 가져오기 ${esc(L.fetched_at)} · ${L.n_items}줄` : '아직 가져오지 않음'} · 지금 쓰는 값: 노드 판정 ${(st.counts||{}).node_judgments||0} · 국내 피어 ${(st.counts||{}).peer_groups||0} · 해외 ${(st.counts||{}).peer_foreign||0} · 사업부 실적 ${(st.counts||{}).segment_fin||0}줄(앱이 받은 값이 있으면 그 값이 우선)</div>` +
+    `<div style="margin-top:6px"><button id="doca-reload">작업 폴더 다시 읽기</button> <span class="muted" id="doca-msg"></span></div>`;
+  $('#doca-reload').onclick = async () => {
+    if (!SERVED){ $('#doca-msg').textContent = '「재무분석 열기」로 연 화면에서 누르세요.'; return; }
+    $('#doca-reload').disabled = true; $('#doca-msg').textContent = '읽는 중…';
+    try { const j = await (await fetch('/api/doca/import', {method:'POST'})).json(); if (j.error) throw new Error(j.error);
+      const rep = Object.entries(j.report||{}).map(([k,t])=>`${k} ${t.rows}줄(새 ${t.new||0}·바뀜 ${t.changed||0})`).join(' · ');
+      $('#doca-msg').textContent = (rep || '가져온 줄 없음') + ((j.notes||[]).length ? ' · 주의: ' + j.notes.join(' / ') : '') + ' — 3초 뒤 새로 고침';
+      setTimeout(()=>location.reload(), 3000);
+    } catch(e){ $('#doca-msg').textContent = '실패: ' + e.message; }
+    $('#doca-reload').disabled = false; };
+}
+function renderR(){
+  if (DC.error){ $('#r-head').textContent = '자료를 읽지 못했습니다: ' + DC.error; return; }
+  const N = DC.nodes; $('#r-period').textContent = N.period;
+  const v = N.verdict, W = N.weights, pc = x => (x==null?'–':x.toFixed(1)+'%');
+  $('#r-head').innerHTML = (v ? `<div style="font-size:15px"><b>종합</b> ${esc(v.text)} ${srcTag(v.source_name, v.as_of, v.stale)}</div>` : '<div class="muted">종합 문장 없음</div>') +
+    `<div class="muted" style="margin-top:4px">사업부 비중 가중: 순풍 쪽 <b>${pc(W.good)}</b> · 확인 필요 <b>${pc(W.mid)}</b> · 역풍 쪽 <b>${pc(W.bad)}</b> (비중 확인된 합계 ${pc(W.total)}${W.total && Math.abs(W.total-100)>5 ? ' — 100%가 아닌 것은 노드가 모든 사업을 덮지 않거나 비중 자료가 일부라서' : ''})</div>`;
+  const R = N.rows;
+  $('#r-table').innerHTML = '<tr><th class="l">노드 · 판정(최종 / 기계)</th><th class="l">수요(위에서 아래)</th><th class="l">이 회사의 몫(아래에서 위)</th><th class="l">숫자</th><th class="l">판정을 바꿀 것</th><th>신호 ①②③</th><th class="l">출처·날짜</th></tr>' +
+    (R.length ? R.map(r=>`<tr style="${r.stale?'color:var(--text-muted)':''}"><td class="l" style="min-width:150px"><b>${r.seq<=20?'①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'[r.seq-1]:r.seq} ${esc(r.segment||'')}</b><br>${vBadge(r.verdict)} <span class="muted">/</span> ${r.mech ? vBadge(r.mech)+'<span class="muted" style="font-size:12px">(기계)</span>' : '<span class="muted" style="font-size:12px" title="2단계에서 자체 수집 신호로 계산">기계 판정 준비 중</span>'}` +
+      `<div class="muted" style="font-size:12px;margin-top:2px" title="${esc(r.weight_note)}">비중 ${r.weight==null?'미확인':r.weight.toFixed(1)+'%'+(r.weight_est?' (추정)':'')}</div></td>` +
+      `<td class="l" style="white-space:normal;min-width:160px">${esc(r.demand||'–')}</td><td class="l" style="white-space:normal;min-width:180px">${esc(r.share||'–')}</td>` +
+      `<td class="l" style="white-space:normal;min-width:160px">${esc(r.numbers||'–')}</td><td class="l" style="white-space:normal;min-width:130px">${esc(r.changers||'–')}</td>` +
+      `<td class="muted" title="① 사업부 매출 ② 노드 수요 지표 ③ 회사 컨센 방향 — 2단계부터">${r.signals.map(x=>x==null?'·':x>0?'+':x<0?'−':'0').join(' ')}</td>` +
+      `<td class="l">${srcTag(r.source_name, r.as_of, r.stale)}${r.newer?' <span class="badge b-WARN">더 새 글 있음</span>':''}<div class="muted" style="font-size:11px">${esc(r.source_ref||'')}</div></td></tr>`).join('')
+    : `<tr><td colspan="7" class="l">이 기업의 노드 판정이 없습니다. 작업 폴더 「핵심\\한장조사\\${esc(D.company.code)}.json」이 있으면 B 탭 [작업 폴더 다시 읽기]로 가져옵니다. 기계 판정은 2단계(자체 수집)부터 채워집니다.</td></tr>`);
+  const refs = N.refs || [];
+  $('#r-refn').textContent = refs.length ? `(${refs.length}줄)` : '(없음)';
+  $('#r-refs').innerHTML = refs.map(x=>`<div>[${esc(x._kind)}] ${esc(Object.entries(x).filter(([k])=>k!=='_kind').map(([k,v])=>`${k}: ${v}`).join(' · '))}</div>`).join('');
+}
+function renderS(){
+  if (DC.error){ $('#s-body').textContent = '자료를 읽지 못했습니다: ' + DC.error; return; }
+  const PG = DC.peers, cy = PG.cy, pct = (x,d=1) => x==null ? '–' : (x*100).toFixed(d)+'%', p1 = x => x==null ? '–' : x.toFixed(1)+'%', n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
+  $('#s-rules').innerHTML = `피어 = 같은 제품·같은 고객층의 국내 상장사(셋을 억지로 채우지 않음). <b>앞 성장</b> = ${cy} 기준점 → ${cy+2}E 매출 연평균(3분기 실적이 있으면 1~3분기 누적 × 4/3을 기준점으로). 지난 5년 = ${cy-5}→${cy-1} 매출 연평균. 영업이익률 ${cy+2}E는 컨센 원래 값(괄호 = × 0.83 보정). 순위는 사업부 안에서 값이 있는 회사끼리. PER·PBR은 맨 끝 참고(피어 PER로 가치를 정하지 않음). 해외 경쟁사는 이름·역할만.`;
+  if (!PG.segments.length){ $('#s-body').innerHTML = `<p class="muted">이 기업의 피어 그룹이 없습니다. 작업 폴더 「핵심\\피어그룹.csv」에 대상 ${esc(D.company.code)} 줄이 있으면 B 탭 [작업 폴더 다시 읽기]로 가져옵니다(피어 후보 제안은 4단계).</p>`; return; }
+  const rk = x => x.rank ? Object.entries(x.rank).map(([k,[i,n]])=>`${k==='front'?'앞 성장':'이익률'} ${i}/${n}`).join(' · ') : '–';
+  $('#s-body').innerHTML = PG.segments.map(sg=>{
+    const rows = sg.lines.map(x=>{ const m = x.m;
+      const nm = `${x.self?'<b>':''}${esc(x.name||x.code||'')}${x.self?'</b> <span class="badge b-OK">본인</span>':''} <span class="muted">${esc(x.code||'')}</span>`;
+      if (!m) return `<tr><td class="l">${nm}</td><td class="l">${esc(x.business||'')}</td><td colspan="7" class="muted l">미수집 — 앱 DB에 이 회사 자료가 없음(피어 자료 받기는 4단계, 받기 전 요청 수를 먼저 보여 드림)</td><td class="l muted" title="${esc(x.reason||'')}">${esc(x.source_name||'')}</td></tr>`;
+      return `<tr><td class="l">${nm}</td><td class="l" title="${esc(x.reason||'')}">${esc(x.business||'')}</td><td title="${esc(m.front_how)}">${pct(m.front)}<div class="muted" style="font-size:11px">${esc(m.front_how)}</div></td><td>${pct(m.past5)}</td>` +
+        `<td>${p1(m.opm_last)} · ${p1(m.opm_2e)} <span class="muted">(${p1(m.opm_2e_adj)})</span></td><td>${p1(m.roe)}</td><td>${p1(m.debt)}</td><td>${rk(x)}</td>` +
+        `<td class="muted">${m.per==null?'–':m.per.toFixed(1)} · ${m.pbr==null?'–':m.pbr.toFixed(2)}</td><td class="l muted" title="${esc(x.reason||'')}">${esc(x.source_name||'')}</td></tr>`; }).join('');
+    const yrs = PG.years;
+    const t8 = '<tr><th class="l">회사</th>' + yrs.map(y=>`<th>${y>=cy?y+'E':y}</th>`).join('') + '</tr>' + sg.lines.filter(x=>x.m).map(x=>
+      `<tr><td class="l">${esc(x.name||x.code)}</td>` + x.m.hist.map(h=>`<td style="${h.est?'color:var(--text-muted)':''}">${n0(h.rev)}<div style="font-size:11px">${h.opm==null?'–':h.opm.toFixed(1)+'%'}${h.est&&h.opm_adj!=null?` (${h.opm_adj.toFixed(1)}%)`:''}</div></td>`).join('') + '</tr>').join('');
+    return `<div style="margin:14px 0 6px"><h3 style="margin:0">${esc(sg.segment)} <span class="muted" style="font-size:13px;font-weight:400">비중 ${sg.weight==null?'미확인':(sg.weight<=1?sg.weight*100:sg.weight).toFixed(1)+'%'}${sg.missing?` · 미수집 ${sg.missing}곳`:''} · 피어 목록 ${esc(String(sg.as_of||'').slice(0,10))}</span></h3>
+      <div style="margin:4px 0"><b>${esc(sg.conclusion)}</b></div></div>
+      <div class="tablewrap"><table><tr><th class="l">회사</th><th class="l">피어의 해당 사업</th><th>앞 성장 ${cy}→${cy+2}E</th><th>지난 5년 매출 연평균</th><th>영업이익률(최근 · ${cy+2}E)</th><th>ROE</th><th>부채비율</th><th>순위</th><th>PER · PBR(참고)</th><th class="l">출처</th></tr>${rows}</table></div>
+      <div class="muted" style="margin:4px 0">해외 경쟁사: ${sg.foreign.length ? sg.foreign.map(f=>`${esc(f.name)}${f.ticker?` (${esc(f.ticker)})`:''}${f.role?' · '+esc(f.role):''}`).join(' / ') : '없음'}</div>
+      <details><summary class="muted">8년 표(매출 억원 · 영업이익률, 회색 = 컨센, 괄호 = × 0.83)</summary><div class="tablewrap"><table>${t8}</table></div></details>`; }).join('') +
+    (PG.segment_fin.length ? `<h3 style="margin:16px 0 6px">이 회사 사업부 실적(억원)</h3><div class="tablewrap"><table><tr><th>연도</th><th class="l">부문</th><th>매출</th><th>이익</th><th class="l">이익 종류</th><th class="l">출처</th></tr>` +
+      PG.segment_fin.map(r=>`<tr><td>${r.fy}${r.period!=='FY'?' '+esc(r.period):''}</td><td class="l">${esc(r.segment)}</td><td>${n0(r.revenue)}</td><td>${n0(r.profit)}</td><td class="l">${esc(r.profit_kind||'')}</td><td class="l">${srcTag({self:'자체 수집',user:'사용자',ai:'AI 초안',doca_seed:'작업 폴더'}[r.source], r.as_of, false)}${r.status==='ESTIMATED'?' <span class="badge b-WARN">추정</span>':''}</td></tr>`).join('') + '</table></div>' : '');
+}
 ['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderDocaCard(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));

@@ -79,6 +79,44 @@ CREATE TABLE IF NOT EXISTS validation (
   stock_code TEXT, run_at TEXT, check_no INTEGER, check_name TEXT,
   fiscal_year INTEGER, metric TEXT, level TEXT, message TEXT
 );
+-- 화면 R「노드 우호 판정」· S「사업부 피어 비교」(지시서 2026-11-15). source: self(앱 수집)·ai·user·doca_seed(작업 폴더)
+-- 값이 바뀌면 새 버전, 이전 값은 is_current=0. 같은 칸은 화면에서 출처 우선순위(self > user > ai > doca_seed)로 고른다.
+CREATE TABLE IF NOT EXISTS nodes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, name TEXT, parent TEXT, direction TEXT,
+  key_factor TEXT, description TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ix_nodes ON nodes(node_id, is_current);
+CREATE TABLE IF NOT EXISTS company_nodes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, seq INTEGER NOT NULL, segment TEXT, node_id TEXT,
+  weight REAL, weight_year TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ix_cnodes ON company_nodes(stock_code, is_current);
+CREATE TABLE IF NOT EXISTS node_signal_defs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, signal_key TEXT NOT NULL, channel TEXT, code TEXT,
+  direction TEXT, unit TEXT, description TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS node_signals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, signal_key TEXT NOT NULL, period TEXT NOT NULL,
+  value REAL, unit TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ix_nsig ON node_signals(node_id, signal_key, is_current);
+CREATE TABLE IF NOT EXISTS node_judgments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, seq INTEGER NOT NULL, node_name TEXT,
+  year_from INTEGER, year_to INTEGER, verdict TEXT, mech_verdict TEXT, demand TEXT, share TEXT, numbers TEXT,
+  changers TEXT, evidence TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ix_njudg ON node_judgments(stock_code, is_current);
+CREATE TABLE IF NOT EXISTS company_node_verdict (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, text TEXT, weighted TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS segment_fin (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, fy INTEGER NOT NULL, period TEXT NOT NULL DEFAULT 'FY',
+  segment TEXT NOT NULL, revenue REAL, profit REAL, profit_kind TEXT, status TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ix_segfin ON segment_fin(stock_code, is_current);
+CREATE TABLE IF NOT EXISTS peer_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, segment TEXT NOT NULL, segment_weight REAL,
+  peer_code TEXT, peer_name TEXT, peer_business TEXT, reason TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS ix_peer ON peer_groups(target, is_current);
+CREATE TABLE IF NOT EXISTS peer_foreign (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, segment TEXT, name TEXT NOT NULL, ticker TEXT,
+  role TEXT, reason TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
+-- 작업 폴더의 참고 표(키팩터원장·병목지도·인과개별화) 한 줄씩. 판정을 바꾸지 않고 근거 칸에 참고로만 보여 줌
+CREATE TABLE IF NOT EXISTS doca_refs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, stock_code TEXT, row_key TEXT NOT NULL, row_json TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
 """
 
 

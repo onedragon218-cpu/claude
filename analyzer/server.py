@@ -213,6 +213,19 @@ class H(BaseHTTPRequestHandler):
             added = universe.add([(c, nm) for c, nm in items])
             return self._send(200, json.dumps({"added": added, "total": len(universe.load())}, ensure_ascii=False),
                               "application/json")
+        if u.path == "/api/doca/import":
+            # 작업 폴더 다시 읽기(PC에서만: 이 PC의 폴더 경로를 다루므로)
+            from . import doca, lan
+            self._drain()
+            if not lan.is_local(self.client_address[0]):
+                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
+            root = doca.get_doca_dir()
+            conn = db.connect()
+            try:
+                rep, notes = doca.import_doca(conn, root) if root else ({}, ["작업 폴더 연결 안 됨"])
+            finally:
+                conn.close()
+            return self._send(200, json.dumps({"report": rep, "notes": notes, "dir": root}, ensure_ascii=False), "application/json")
         if u.path == "/api/segments/keywords":
             from . import segments
             n = int(self.headers.get("Content-Length") or 0)

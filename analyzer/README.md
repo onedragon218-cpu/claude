@@ -339,3 +339,11 @@ DB에 자료가 있는 기업을 컨센서스 기준으로 분류합니다.
 ## 9. 최근 본 기업(2026-11-14)
 - 화면 맨 위 제목 아래에 최근 본 기업 최대 12곳을 칩으로 보여 준다(2곳 이상일 때). 누르면 지금 보던 큰 탭 그대로 그 기업으로 이동. × = 목록에서 빼기, 「모두 지우기」 = 지금 기업만 남김.
 - 이 브라우저에만 저장(localStorage 'ui:recent'). 고른 큰 탭도 기억('ui:sec')해서 다른 기업으로 옮겨도 같은 탭이 열린다.
+
+## 10. 화면 R「노드 우호 판정」· S「사업부 피어 비교」 + 독립 DB(2026-11-15, `analyzer/doca.py`, 1단계)
+- 새 표: nodes · company_nodes · node_signal_defs · node_signals · node_judgments · company_node_verdict · segment_fin · peer_groups · peer_foreign (+ doca_refs 참고 줄). 모든 줄에 source(self·user·ai·doca_seed)·source_ref·as_of·버전.
+- 같은 칸은 화면에서 self(앱 수집) > user > ai > doca_seed(작업 폴더) 순서로 고른다. 작업 폴더 값은 빈칸 채우기용, 90일 넘으면 회색.
+- 작업 폴더 가져오기: `python -m analyzer import-doca "C:\Users\이름\claude 작업"`(경로는 settings.json의 doca_dir에 저장, 비우면 저장된 경로 → `%USERPROFILE%\claude 작업`). '핵심' 폴더는 하위 3단계까지 찾는다. 화면 B [작업 폴더 다시 읽기](PC에서만), 설치할 때도 한 번 실행.
+- 읽는 파일: 핵심\한장조사\{코드}.json(nodes·nodes_verdict·asof), 피어그룹.csv, 피어그룹_해외.csv, 피어_부문.csv, 가지키팩터.csv, 키팩터원장·병목지도·인과개별화.csv(참고). utf-8-sig, 안 되면 cp949. 열 이름이 지시서와 다르면 그 파일은 건너뛰고 알린다. 다시 가져오면 바뀐 줄만 새 버전.
+- 화면 R: 종합 문장, 사업부 비중 가중(WiseReport 주요제품 > 작업 폴더 비중, 한 항목에 노드 여러 개면 n등분 추정), 노드별 판정(최종/기계)·수요·몫·숫자·바꿀 것·신호·출처. 기계 판정·신호는 2단계.
+- 화면 S: 사업부별 국내 피어 표(앞 성장 = 올해 기준점 → 내후년 컨센 매출 연평균, 3분기 누적이 있으면 × 4/3 / 지난 5년 연평균 / 영업이익률 최근·내후년(× 0.83) / ROE / 부채비율 / 사업부 안 순위 / PER·PBR 참고), 해외 경쟁사 이름만, 8년 표, 사업부 실적. 앱 DB에 없는 피어는 '미수집'.

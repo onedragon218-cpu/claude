@@ -666,6 +666,55 @@ class T(unittest.TestCase):
         self.assertEqual(len(fairper.sensitivity(cur["data"])), 3)
         conn.close()
 
+    def test_doca_import_priority_verdict_growth(self):
+        from analyzer import doca
+        with tempfile.TemporaryDirectory() as d:
+            core = os.path.join(d, "claude 작업", "엔진", "핵심")
+            os.makedirs(os.path.join(core, "한장조사"))
+            with open(os.path.join(core, "한장조사", "213500.json"), "w", encoding="utf-8") as f:
+                json.dump({"asof": "2026-10-28", "nodes": [["① 산업용지", "<span class='tag t-good'>순풍(약)</span>", "a", "b", "c", "d"],
+                                                            ["③ 인쇄용지", "역풍", "e", "f", "g", "h"]], "nodes_verdict": "종합"}, f, ensure_ascii=False)
+            w = lambda n, t: open(os.path.join(core, n), "w", encoding="utf-8-sig").write(t)
+            w("피어그룹.csv", "대상,사업부,사업부_비중,code,name,피어의_해당사업,근거\n213500,인쇄용지,0.6,213500,한솔제지,인쇄용지,본인\n213500,인쇄용지,0.6,9580,무림P&P,인쇄용지,같은 제품\n")
+            w("피어그룹_해외.csv", "대상,사업부,name,ticker,역할,근거\n213500,인쇄용지,Sylvamo,SLVM,경쟁,x\n213500,산업용지,IP,IP,경쟁,y\n")
+            w("피어_부문.csv", "대상,사업부,code,name,부문명,fy,매출억,이익억,이익종류,원천\n213500,인쇄용지,213500,한솔제지,인쇄용지,2025,100,10,영업이익,사업보고서\n213500,산업용지,213500,한솔제지,산업용지,2025,50,5,영업이익,사업보고서\n")
+            conn = db.connect(os.path.join(d, "t.db"))
+            rep, notes = doca.import_doca(conn, os.path.join(d, "claude 작업"))
+            self.assertEqual((rep["한장조사(노드 줄)"]["rows"], rep["피어그룹.csv"]["rows"], rep["피어그룹_해외.csv"]["rows"], rep["피어_부문.csv"]["rows"]), (2, 2, 2, 2))
+            cnt = lambda t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            before = {t: cnt(t) for t in ("node_judgments", "peer_groups", "peer_foreign", "segment_fin", "company_node_verdict")}
+            doca.import_doca(conn, os.path.join(d, "claude 작업"))              # 1) 다시 돌려도 줄이 늘지 않음
+            self.assertEqual(before, {t: cnt(t) for t in before})
+            self.assertEqual(conn.execute("SELECT peer_code FROM peer_groups WHERE peer_name='무림P&P'").fetchone()[0], "009580")
+            w("피어_부문.csv", "대상,사업부,code,name,부문명,fy,매출억,이익억,이익종류,원천\n213500,인쇄용지,213500,한솔제지,인쇄용지,2025,120,10,영업이익,사업보고서\n213500,산업용지,213500,한솔제지,산업용지,2025,50,5,영업이익,사업보고서\n")
+            doca.import_doca(conn, os.path.join(d, "claude 작업"))              # 바뀐 줄만 새 버전
+            self.assertEqual(cnt("segment_fin"), before["segment_fin"] + 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM segment_fin WHERE is_current=1").fetchone()[0], 2)
+            # 2) 같은 칸에 self 값이 있으면 seed 값이 화면에 나오지 않음
+            doca.put(conn, "node_judgments", {"stock_code": "213500", "seq": 3}, {"node_name": "인쇄용지", "verdict": "확인 필요"}, "self", "앱")
+            conn.commit()
+            rows = doca.nodes_payload(conn, "213500", config.periods(2026))["rows"]
+            r3 = next(r for r in rows if r["seq"] == 3)
+            self.assertEqual((r3["verdict"], r3["source_name"]), ("확인 필요", "자체 수집"))
+            self.assertEqual(next(r for r in rows if r["seq"] == 1)["verdict"], "순풍(약)")
+            # 6) 피어 3곳 미만이어도 표가 깨지지 않음
+            pp = doca.peers_payload(conn, "213500", config.periods(2026))
+            self.assertEqual(len(pp["segments"]), 1)
+            self.assertTrue(any(x["self"] for x in pp["segments"][0]["lines"]))
+            conn.close()
+        # 3) 기계 판정
+        self.assertEqual(doca.mech_verdict([1, 1, 0]), ("순풍", []))
+        self.assertEqual(doca.mech_verdict([1, -1, 0]), ("확인 필요", ["몫 확인"]))
+        self.assertEqual(doca.mech_verdict([1, None, None])[0], "판정 못 함(자료 부족)")
+        # 4) 앞 성장: 3분기 누적이 있으면 기준점 = 누적 × 4/3
+        g, base, how = doca.front_growth(75.0, 90.0, 121.0)
+        self.assertEqual((base, how), (100.0, "3Q 누적×4/3"))
+        self.assertAlmostEqual(g, 0.1, places=9)
+        self.assertEqual(doca.front_growth(None, 100.0, 121.0)[2], "올해 컨센")
+        # 5) 판정 태그 HTML 벗기기
+        self.assertEqual(doca.strip_tag("<span class='tag t-good'>순풍(약)</span>"), "순풍(약)")
+        self.assertEqual(doca.split_seq("③ 인쇄용지", 9), (3, "인쇄용지"))
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

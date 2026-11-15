@@ -204,6 +204,15 @@ if (-not $okLan) {
     Write-Host "    $lanBat" -ForegroundColor Yellow
 }
 
+# 작업 폴더(DOCA) 자료 가져오기: 화면 R·S의 빈칸 채우기용. 폴더가 없으면 조용히 건너뜀(설치는 계속)
+Write-Host ''
+Write-Host '=== 작업 폴더 자료 가져오기(화면 R·S) ===' -ForegroundColor Cyan
+try {
+    Push-Location $Root
+    & $py -m analyzer import-doca 2>&1 | Out-Host
+} catch { Write-Host "  작업 폴더 가져오기를 건너뜁니다: $($_.Exception.Message)" -ForegroundColor Yellow }
+finally { Pop-Location }
+
 # 첫 수집: 설치 창에서 기다리지 않고 화면 뒤에서 돌린다(자동 수집과 같은 작업). 도는 동안에도 화면을 그대로 쓸 수 있다.
 Write-Host ''
 Write-Host '=== 첫 수집(빠진 값만) ===' -ForegroundColor Cyan

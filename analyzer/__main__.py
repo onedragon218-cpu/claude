@@ -115,6 +115,7 @@ def main(argv=None):
     c = sub.add_parser("import-consensus"); c.add_argument("code"); c.add_argument("csv")
     v = sub.add_parser("reverify"); v.add_argument("code"); v.add_argument("--year", type=int)
     sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=8765)
+    di = sub.add_parser("import-doca"); di.add_argument("path", nargs="?", help="작업 폴더(비우면 설정·기본 위치)")
     dc = sub.add_parser("doctor"); dc.add_argument("--port", type=int, default=8765)
     sub.add_parser("calibrate")
     ln = sub.add_parser("lan"); ln.add_argument("action", choices=["on", "off", "status", "check", "renew-cert"])
@@ -217,6 +218,22 @@ def main(argv=None):
                 print("  " + line.replace("\t", "  "))
     elif args.cmd == "doctor":
         doctor(args.port)
+    elif args.cmd == "import-doca":
+        from . import doca
+        root = args.path or doca.get_doca_dir()
+        if not root:
+            print("작업 폴더 연결 안 됨(건너뜀). 예: python -m analyzer import-doca \"C:\\Users\\이름\\claude 작업\"")
+            return 0
+        conn = db.connect()
+        rep, notes = doca.import_doca(conn, root)
+        if rep and args.path:
+            doca.set_doca_dir(args.path)
+        for k, t in rep.items():
+            print(f"{k}: {t['rows']}줄 (새 {t.get('new', 0)} · 바뀜 {t.get('changed', 0)} · 같음 {t.get('same', 0)})")
+        for n in notes:
+            print("주의: " + n)
+        if not rep:
+            print("가져온 줄이 없습니다.")
     elif args.cmd == "serve":
         from . import server
         server.serve(args.port)
