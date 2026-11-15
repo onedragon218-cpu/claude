@@ -63,22 +63,62 @@ def set_doca_dir(path):
         json.dump(d, fh, ensure_ascii=False, indent=1)
 
 
+FILES = ["가지키팩터.csv", "피어그룹.csv", "피어그룹_해외.csv", "피어_부문.csv", "키팩터원장.csv", "병목지도.csv", "인과개별화.csv"]
+
+
+def _is_core(c):
+    return os.path.isdir(c) and (os.path.exists(os.path.join(c, "피어그룹.csv")) or os.path.isdir(os.path.join(c, "한장조사")))
+
+
 def core_dir(root):
-    """작업 폴더 경로에서 '핵심' 폴더 찾기(…\\claude 작업 / …\\엔진 / …\\핵심 어느 것을 줘도 됨)"""
-    ok = lambda c: os.path.isdir(c) and (os.path.exists(os.path.join(c, "피어그룹.csv")) or os.path.isdir(os.path.join(c, "한장조사")))
-    for c in (os.path.join(root, "엔진", "핵심"), os.path.join(root, "핵심"), root):
-        if ok(c):
+    """작업 폴더에서 자료 폴더 찾기. 지정한 폴더 자체 → 엔진\\핵심 → 핵심 → 하위 5단계까지(이름이 '핵심'이 아니어도
+    피어그룹.csv 또는 한장조사 폴더가 있으면 그 폴더). 여러 곳이면 '핵심'이라는 이름을 먼저."""
+    if not root:
+        return None
+    root = os.path.expandvars(os.path.expanduser(str(root).strip().strip('"')))
+    for c in (root, os.path.join(root, "엔진", "핵심"), os.path.join(root, "핵심")):
+        if _is_core(c):
             return c
-    if os.path.isdir(root):                     # 하위 폴더에서 찾기(3단계 깊이까지)
-        base = root.rstrip("\\/").count(os.sep)
-        for dp, dns, _ in os.walk(root):
-            if dp.count(os.sep) - base >= 3:
-                dns[:] = []
-                continue
-            dns[:] = [d for d in dns if not d.startswith((".", "__"))]
-            if os.path.basename(dp) == "핵심" and ok(dp):
-                return dp
-    return None
+    if not os.path.isdir(root):
+        return None
+    base, found = root.rstrip("\\/").count(os.sep), []
+    for dp, dns, _ in os.walk(root):
+        if dp.count(os.sep) - base >= 5:
+            dns[:] = []
+            continue
+        dns[:] = sorted(d for d in dns if not d.startswith((".", "__")) and d not in ("node_modules", "venv", ".venv"))
+        if _is_core(dp):
+            found.append(dp)
+            dns[:] = []
+    found.sort(key=lambda d: (os.path.basename(d) != "핵심", d.count(os.sep)))
+    return found[0] if found else None
+
+
+def inspect(root, code=None):
+    """작업 폴더 진단: 찾은 자료 폴더, 파일별 있음/줄 수, 이 기업 자료가 있는지"""
+    core = core_dir(root)
+    out = {"root": root, "exists": bool(root and os.path.isdir(os.path.expandvars(os.path.expanduser(str(root).strip().strip('"'))))),
+           "core": core, "files": [], "json_n": 0, "code_json": None, "code_peer": None}
+    if not core:
+        return out
+    js = glob.glob(os.path.join(core, "한장조사", "*.json"))
+    out["json_n"] = len(js)
+    if code:
+        out["code_json"] = os.path.exists(os.path.join(core, "한장조사", f"{code}.json"))
+    for n in FILES:
+        f = os.path.join(core, n)
+        if os.path.exists(f):
+            try:
+                rows, cols = read_csv(f)
+                item = {"name": n, "rows": len(rows), "cols": cols[:12]}
+                if n == "피어그룹.csv" and code:
+                    out["code_peer"] = sum(1 for r in rows if code6(r.get("대상")) == code)
+            except Exception as e:     # noqa: BLE001
+                item = {"name": n, "error": f"{type(e).__name__}: {e}"[:120]}
+        else:
+            item = {"name": n, "missing": True}
+        out["files"].append(item)
+    return out
 
 
 # ---------------------------------------------------------------- 버전으로 쌓기
@@ -293,12 +333,19 @@ def import_doca(conn, root, today=None):
     return rep, notes
 
 
-def status(conn):
-    r = db.last_fetch(conn, "doca_import", get_doca_dir() and (core_dir(get_doca_dir()) or "") or "")
-    if r is None:
-        r = conn.execute("SELECT * FROM fetch_log WHERE source='doca_import' ORDER BY id DESC LIMIT 1").fetchone()
+def status(conn, code=None):
     root = get_doca_dir()
-    return {"dir": root, "found": bool(root and core_dir(root)), "last": dict(r) if r else None,
+    r = conn.execute("SELECT * FROM fetch_log WHERE source='doca_import' ORDER BY id DESC LIMIT 1").fetchone()
+    last = dict(r) if r else None
+    if last and last.get("note"):
+        try:
+            last["report"] = json.loads(last["note"])
+        except ValueError:
+            pass
+    have = {t: conn.execute(f"SELECT COUNT(DISTINCT {c}) FROM {t} WHERE is_current=1 AND source='doca_seed'").fetchone()[0]
+            for t, c in (("node_judgments", "stock_code"), ("peer_groups", "target"))}
+    return {"dir": root, "default": default_doca_dir(), "found": bool(core_dir(root)), "inspect": inspect(root, code) if root else None,
+            "last": last, "companies": have,
             "counts": {t: conn.execute(f"SELECT COUNT(*) FROM {t} WHERE is_current=1").fetchone()[0]
                        for t in ("node_judgments", "peer_groups", "peer_foreign", "segment_fin", "nodes")}}
 
@@ -505,4 +552,4 @@ def peers_payload(conn, code, P):
 
 
 def payload(conn, code, P):
-    return {"status": status(conn), "nodes": nodes_payload(conn, code, P), "peers": peers_payload(conn, code, P)}
+    return {"status": status(conn, code), "nodes": nodes_payload(conn, code, P), "peers": peers_payload(conn, code, P)}

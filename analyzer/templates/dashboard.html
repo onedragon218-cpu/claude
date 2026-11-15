@@ -1888,22 +1888,46 @@ document.querySelectorAll('.q-use').forEach(c=>c.addEventListener('change', rend
 const DC = D.doca || {error:'자료 없음'};
 const srcTag = (name, asof, old) => name ? `<span class="badge ${old?'':'b-OK'}" style="${old?'background:var(--info-bg);color:var(--text-muted)':''}" title="${old?'오래됨':''}">${esc(name)}</span>${asof?` <span class="muted" style="font-size:12px">${esc(String(asof).slice(0,10))}</span>`:''}` : '<span class="muted">–</span>';
 const vBadge = v => !v ? '<span class="muted">–</span>' : `<span class="badge ${/^순풍/.test(v)?'b-OK':/역풍/.test(v)?'b-ERROR':'b-WARN'}">${esc(v)}</span>`;
+function docaDiag(ins){
+  if (!ins) return '';
+  if (!ins.exists) return `<div class="muted">폴더가 없습니다: <code>${esc(ins.root||'')}</code></div>`;
+  if (!ins.core) return `<div class="muted">폴더는 있지만, 그 아래 5단계까지 <b>피어그룹.csv</b>나 <b>한장조사</b> 폴더가 있는 곳을 찾지 못했습니다.</div>`;
+  const code = D.company.code;
+  return `<div style="margin-top:4px">자료 폴더: <code>${esc(ins.core)}</code></div>` +
+    `<table style="margin-top:4px"><tr><th class="l">파일</th><th>상태</th><th class="l">열 이름(앞부분)</th></tr>` +
+    `<tr><td class="l">한장조사\\*.json</td><td>${ins.json_n}개</td><td class="l muted">${ins.code_json===null?'':ins.code_json?`이 기업(${esc(code)}.json) 있음`:`<b>이 기업(${esc(code)}.json) 없음</b>`}</td></tr>` +
+    ins.files.map(f=>`<tr><td class="l">${esc(f.name)}</td><td>${f.missing?'<span class="muted">없음</span>':f.error?`<span class="badge b-ERROR">읽기 실패</span>`:f.rows+'줄'}</td><td class="l muted" style="white-space:normal">${f.error?esc(f.error):esc((f.cols||[]).join(', '))}${f.name==='피어그룹.csv'&&ins.code_peer!=null?` · <b>대상 ${esc(code)} ${ins.code_peer}줄</b>`:''}</td></tr>`).join('') + '</table>'; }
 function renderDocaCard(){
-  const st = DC.status || {}; const L = st.last;
+  const st = DC.status || {}; const L = st.last, C = st.counts || {}, rep = (L && L.report) || {};
   $('#docacard').innerHTML = `<h2 style="margin:0 0 6px">작업 폴더 자료(화면 R·S 빈칸 채우기)</h2>` +
-    (st.found ? `<div>작업 폴더: <code>${esc(st.dir)}</code></div>` : `<div><span class="badge b-WARN">작업 폴더 연결 안 됨</span> <span class="muted">기본 위치 <code>%USERPROFILE%\\claude 작업</code>에서 '핵심' 폴더를 찾지 못했습니다.</span></div>`) +
-    `<div class="muted" style="margin-top:4px">${L ? `마지막 가져오기 ${esc(L.fetched_at)} · ${L.n_items}줄` : '아직 가져오지 않음'} · 지금 쓰는 값: 노드 판정 ${(st.counts||{}).node_judgments||0} · 국내 피어 ${(st.counts||{}).peer_groups||0} · 해외 ${(st.counts||{}).peer_foreign||0} · 사업부 실적 ${(st.counts||{}).segment_fin||0}줄(앱이 받은 값이 있으면 그 값이 우선)</div>` +
-    `<div style="margin-top:6px"><button id="doca-reload">작업 폴더 다시 읽기</button> <span class="muted" id="doca-msg"></span></div>`;
-  $('#doca-reload').onclick = async () => {
+    `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><label style="flex-direction:row;align-items:center;gap:6px">작업 폴더 <input id="doca-path" style="width:460px;max-width:100%" placeholder="${esc(st.default||'C:\\Users\\이름\\claude 작업')}" value="${esc(st.dir||'')}"></label>` +
+    `<button class="primary" id="doca-save">이 폴더로 저장하고 읽기</button><button id="doca-reload">다시 읽기</button></div>` +
+    `<div class="muted" style="margin-top:4px;font-size:13px">탐색기에서 폴더를 열고 주소창을 눌러 경로를 복사해 붙여 넣으세요. <code>claude 작업</code>, <code>엔진</code>, <code>핵심</code> 어느 폴더를 넣어도 그 아래에서 자료 폴더를 찾습니다.</div>` +
+    (st.found ? '' : `<div style="margin-top:6px"><span class="badge b-WARN">작업 폴더 연결 안 됨</span></div>`) +
+    `<div id="doca-diag">${docaDiag(st.inspect)}</div>` +
+    `<div class="muted" style="margin-top:6px">${L ? `마지막 가져오기 ${esc(L.fetched_at)} · ${L.n_items}줄${Object.keys(rep).length?' ('+Object.entries(rep).map(([k,t])=>`${esc(k)} ${t.rows}`).join(' · ')+')':''}` : '아직 가져오지 않음'}` +
+    ` · 가져온 회사: 노드 판정 ${(st.companies||{}).node_judgments||0}곳 · 피어 그룹 ${(st.companies||{}).peer_groups||0}곳 · 지금 쓰는 줄: 노드 ${C.node_judgments||0} · 국내 피어 ${C.peer_groups||0} · 해외 ${C.peer_foreign||0} · 사업부 실적 ${C.segment_fin||0}</div>` +
+    `<div class="muted" id="doca-msg" style="margin-top:4px"></div>`;
+  const run = async (url, body) => {
     if (!SERVED){ $('#doca-msg').textContent = '「재무분석 열기」로 연 화면에서 누르세요.'; return; }
-    $('#doca-reload').disabled = true; $('#doca-msg').textContent = '읽는 중…';
-    try { const j = await (await fetch('/api/doca/import', {method:'POST'})).json(); if (j.error) throw new Error(j.error);
-      const rep = Object.entries(j.report||{}).map(([k,t])=>`${k} ${t.rows}줄(새 ${t.new||0}·바뀜 ${t.changed||0})`).join(' · ');
-      $('#doca-msg').textContent = (rep || '가져온 줄 없음') + ((j.notes||[]).length ? ' · 주의: ' + j.notes.join(' / ') : '') + ' — 3초 뒤 새로 고침';
-      setTimeout(()=>location.reload(), 3000);
-    } catch(e){ $('#doca-msg').textContent = '실패: ' + e.message; }
-    $('#doca-reload').disabled = false; };
+    ['#doca-save','#doca-reload'].forEach(x=>$(x).disabled = true); $('#doca-msg').textContent = '읽는 중…';
+    try { const j = await (await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})})).json();
+      if (j.inspect) $('#doca-diag').innerHTML = docaDiag(j.inspect);
+      if (j.error) throw new Error(j.error);
+      const r = Object.entries(j.report||{}).map(([k,t])=>`${k} ${t.rows}줄(새 ${t.new||0}·바뀜 ${t.changed||0})`).join(' · ');
+      $('#doca-msg').innerHTML = esc(r || '가져온 줄 없음') + ((j.notes||[]).length ? '<br><b>주의</b>: ' + j.notes.map(esc).join(' / ') : '') + '<br>5초 뒤 새로 고칩니다.';
+      setTimeout(()=>location.reload(), 5000);
+    } catch(e){ $('#doca-msg').innerHTML = '<b>실패</b>: ' + esc(e.message); }
+    ['#doca-save','#doca-reload'].forEach(x=>$(x).disabled = false); };
+  $('#doca-save').onclick = () => { const v = $('#doca-path').value.trim(); if (!v){ $('#doca-path').focus(); return; } run('/api/doca/dir', {path: v, code: D.company.code}); };
+  $('#doca-reload').onclick = () => run('/api/doca/import');
 }
+function docaWhy(){   // R·S 화면이 비었을 때 이유
+  const st = DC.status || {}, ins = st.inspect, code = esc(D.company.code);
+  if (!st.found) return `작업 폴더가 연결되지 않았습니다. <b>B 탭 → 작업 폴더</b> 칸에 폴더 경로를 넣고 [이 폴더로 저장하고 읽기]를 누르세요.`;
+  if (!st.last) return `작업 폴더는 찾았지만 아직 가져오지 않았습니다. B 탭 [다시 읽기]를 누르세요.`;
+  if (ins && ins.code_json === false) return `작업 폴더(한장조사 ${ins.json_n}개)에 이 기업(${code}.json)이 없습니다.`;
+  return `작업 폴더에서 이 기업(${code}) 자료를 가져오지 못했습니다. B 탭 작업 폴더 칸의 진단 표와 '주의' 문구를 확인해 주세요.`; }
 function renderR(){
   if (DC.error){ $('#r-head').textContent = '자료를 읽지 못했습니다: ' + DC.error; return; }
   const N = DC.nodes; $('#r-period').textContent = N.period;
@@ -1918,7 +1942,7 @@ function renderR(){
       `<td class="l" style="white-space:normal;min-width:160px">${esc(r.numbers||'–')}</td><td class="l" style="white-space:normal;min-width:130px">${esc(r.changers||'–')}</td>` +
       `<td class="muted" title="① 사업부 매출 ② 노드 수요 지표 ③ 회사 컨센 방향 — 2단계부터">${r.signals.map(x=>x==null?'·':x>0?'+':x<0?'−':'0').join(' ')}</td>` +
       `<td class="l">${srcTag(r.source_name, r.as_of, r.stale)}${r.newer?' <span class="badge b-WARN">더 새 글 있음</span>':''}<div class="muted" style="font-size:11px">${esc(r.source_ref||'')}</div></td></tr>`).join('')
-    : `<tr><td colspan="7" class="l">이 기업의 노드 판정이 없습니다. 작업 폴더 「핵심\\한장조사\\${esc(D.company.code)}.json」이 있으면 B 탭 [작업 폴더 다시 읽기]로 가져옵니다. 기계 판정은 2단계(자체 수집)부터 채워집니다.</td></tr>`);
+    : `<tr><td colspan="7" class="l">이 기업의 노드 판정이 없습니다. ${docaWhy()} 기계 판정은 2단계(자체 수집)부터 채워집니다.</td></tr>`);
   const refs = N.refs || [];
   $('#r-refn').textContent = refs.length ? `(${refs.length}줄)` : '(없음)';
   $('#r-refs').innerHTML = refs.map(x=>`<div>[${esc(x._kind)}] ${esc(Object.entries(x).filter(([k])=>k!=='_kind').map(([k,v])=>`${k}: ${v}`).join(' · '))}</div>`).join('');
@@ -1927,7 +1951,7 @@ function renderS(){
   if (DC.error){ $('#s-body').textContent = '자료를 읽지 못했습니다: ' + DC.error; return; }
   const PG = DC.peers, cy = PG.cy, pct = (x,d=1) => x==null ? '–' : (x*100).toFixed(d)+'%', p1 = x => x==null ? '–' : x.toFixed(1)+'%', n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
   $('#s-rules').innerHTML = `피어 = 같은 제품·같은 고객층의 국내 상장사(셋을 억지로 채우지 않음). <b>앞 성장</b> = ${cy} 기준점 → ${cy+2}E 매출 연평균(3분기 실적이 있으면 1~3분기 누적 × 4/3을 기준점으로). 지난 5년 = ${cy-5}→${cy-1} 매출 연평균. 영업이익률 ${cy+2}E는 컨센 원래 값(괄호 = × 0.83 보정). 순위는 사업부 안에서 값이 있는 회사끼리. PER·PBR은 맨 끝 참고(피어 PER로 가치를 정하지 않음). 해외 경쟁사는 이름·역할만.`;
-  if (!PG.segments.length){ $('#s-body').innerHTML = `<p class="muted">이 기업의 피어 그룹이 없습니다. 작업 폴더 「핵심\\피어그룹.csv」에 대상 ${esc(D.company.code)} 줄이 있으면 B 탭 [작업 폴더 다시 읽기]로 가져옵니다(피어 후보 제안은 4단계).</p>`; return; }
+  if (!PG.segments.length){ $('#s-body').innerHTML = `<p class="muted">이 기업의 피어 그룹이 없습니다. ${(DC.status||{}).inspect && DC.status.inspect.code_peer===0 ? `작업 폴더 피어그룹.csv에 대상 ${esc(D.company.code)} 줄이 없습니다.` : docaWhy()} (피어 후보 제안은 4단계)</p>`; return; }
   const rk = x => x.rank ? Object.entries(x.rank).map(([k,[i,n]])=>`${k==='front'?'앞 성장':'이익률'} ${i}/${n}`).join(' · ') : '–';
   $('#s-body').innerHTML = PG.segments.map(sg=>{
     const rows = sg.lines.map(x=>{ const m = x.m;
