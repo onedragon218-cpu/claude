@@ -79,44 +79,6 @@ CREATE TABLE IF NOT EXISTS validation (
   stock_code TEXT, run_at TEXT, check_no INTEGER, check_name TEXT,
   fiscal_year INTEGER, metric TEXT, level TEXT, message TEXT
 );
--- 화면 R「노드 우호 판정」· S「사업부 피어 비교」(지시서 2026-11-15). source: self(앱 수집)·ai·user·doca_seed(작업 폴더)
--- 값이 바뀌면 새 버전, 이전 값은 is_current=0. 같은 칸은 화면에서 출처 우선순위(self > user > ai > doca_seed)로 고른다.
-CREATE TABLE IF NOT EXISTS nodes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, name TEXT, parent TEXT, direction TEXT,
-  key_factor TEXT, description TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS ix_nodes ON nodes(node_id, is_current);
-CREATE TABLE IF NOT EXISTS company_nodes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, seq INTEGER NOT NULL, segment TEXT, node_id TEXT,
-  weight REAL, weight_year TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS ix_cnodes ON company_nodes(stock_code, is_current);
-CREATE TABLE IF NOT EXISTS node_signal_defs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, signal_key TEXT NOT NULL, channel TEXT, code TEXT,
-  direction TEXT, unit TEXT, description TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE TABLE IF NOT EXISTS node_signals (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, signal_key TEXT NOT NULL, period TEXT NOT NULL,
-  value REAL, unit TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS ix_nsig ON node_signals(node_id, signal_key, is_current);
-CREATE TABLE IF NOT EXISTS node_judgments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, seq INTEGER NOT NULL, node_name TEXT,
-  year_from INTEGER, year_to INTEGER, verdict TEXT, mech_verdict TEXT, demand TEXT, share TEXT, numbers TEXT,
-  changers TEXT, evidence TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS ix_njudg ON node_judgments(stock_code, is_current);
-CREATE TABLE IF NOT EXISTS company_node_verdict (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, text TEXT, weighted TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE TABLE IF NOT EXISTS segment_fin (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, stock_code TEXT NOT NULL, fy INTEGER NOT NULL, period TEXT NOT NULL DEFAULT 'FY',
-  segment TEXT NOT NULL, revenue REAL, profit REAL, profit_kind TEXT, status TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS ix_segfin ON segment_fin(stock_code, is_current);
-CREATE TABLE IF NOT EXISTS peer_groups (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, segment TEXT NOT NULL, segment_weight REAL,
-  peer_code TEXT, peer_name TEXT, peer_business TEXT, reason TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
-CREATE INDEX IF NOT EXISTS ix_peer ON peer_groups(target, is_current);
-CREATE TABLE IF NOT EXISTS peer_foreign (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, segment TEXT, name TEXT NOT NULL, ticker TEXT,
-  role TEXT, reason TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
--- 작업 폴더의 참고 표(키팩터원장·병목지도·인과개별화) 한 줄씩. 판정을 바꾸지 않고 근거 칸에 참고로만 보여 줌
-CREATE TABLE IF NOT EXISTS doca_refs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, stock_code TEXT, row_key TEXT NOT NULL, row_json TEXT, source TEXT NOT NULL, source_ref TEXT, as_of TEXT, collected_at TEXT, is_current INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1);
 """
 
 
@@ -138,7 +100,69 @@ def connect(path=None):
     if "induty_code" not in cols:   # 업종코드(한국표준산업분류) 칸 추가
         conn.execute("ALTER TABLE companies ADD COLUMN induty_code TEXT")
         conn.commit()
+    _drop_doca_tables(conn)
     return conn
+
+
+# 2026-11-15 화면 R·S(되돌림)에서 만들었던 표. 그 기능에서만 쓰던 표라 지워도 기존 자료에 영향 없음(2026-11-16 사용자 지시)
+DOCA_TABLES = ("nodes", "company_nodes", "node_signal_defs", "node_signals", "node_judgments", "company_node_verdict",
+               "segment_fin", "peer_groups", "peer_foreign", "doca_refs")
+
+
+def _drop_doca_tables(conn):
+    have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    gone = [t for t in DOCA_TABLES if t in have]
+    for t in gone:
+        conn.execute(f"DROP TABLE IF EXISTS {t}")
+    if gone:
+        conn.commit()
+    return gone
+
+
+def backup(path=None, tag="before_delete"):
+    """DB 파일을 데이터 폴더 backup\\ 에 통째로 복사(SQLite 백업 기능, 쓰는 중에도 안전). 반환: 백업 파일 경로"""
+    src = path or config.DB_PATH
+    d = os.path.join(os.path.dirname(src), "backup")
+    os.makedirs(d, exist_ok=True)
+    dst = os.path.join(d, f"analyzer_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}_{tag}.db")
+    a, b = sqlite3.connect(src), sqlite3.connect(dst)
+    try:
+        a.backup(b)
+    finally:
+        b.close(); a.close()
+    return dst
+
+
+def delete_companies(conn, codes):
+    """'DB에 있는 기업'에서 지우기: 종목코드 칸이 있는 모든 표에서 그 기업 줄을 지운다. 반환: {표: 지운 줄 수}"""
+    codes = [c for c in dict.fromkeys(str(x).strip().upper() for x in codes) if len(c) == 6 and c.isalnum()]
+    out = {}
+    if not codes:
+        return out
+    q = ",".join("?" * len(codes))
+    for (t,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({t})")]
+        if "stock_code" in cols:
+            n = conn.execute(f"DELETE FROM {t} WHERE stock_code IN ({q})", codes).rowcount
+            if n:
+                out[t] = n
+    conn.commit()
+    return out
+
+
+def doca_added(conn):
+    """작업 폴더 가져오기(2026-11-15, 되돌림)가 '데이터베이스에 있는 기업'에 넣은 것으로 보이는 기업.
+    기준: 기업 등록 시각이 가져오기 기록(fetch_log 'doca_import') 직전 10분 안. 반환: 종목코드 목록"""
+    out = []
+    for r in conn.execute("SELECT fetched_at FROM fetch_log WHERE source='doca_import'"):
+        try:
+            end = dt.datetime.fromisoformat(r["fetched_at"])
+        except (TypeError, ValueError):
+            continue
+        start = (end - dt.timedelta(minutes=10)).isoformat(sep=" ")
+        out += [x["stock_code"] for x in conn.execute("SELECT stock_code FROM companies WHERE created_at BETWEEN ? AND ?",
+                                                      (start, end.isoformat(sep=" ")))]
+    return sorted(set(out))
 
 
 def set_induty(conn, stock_code, induty_code):

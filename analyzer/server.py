@@ -213,40 +213,36 @@ class H(BaseHTTPRequestHandler):
             added = universe.add([(c, nm) for c, nm in items])
             return self._send(200, json.dumps({"added": added, "total": len(universe.load())}, ensure_ascii=False),
                               "application/json")
-        if u.path == "/api/doca/dir":
-            # 작업 폴더 직접 지정(PC에서만): 경로를 확인해 저장하고 바로 가져오기
-            from . import doca, lan
+        if u.path == "/api/companies/delete":
+            # 'DB에 있는 기업' 지우기(PC에서만). 지우기 전에 DB 파일을 backup\ 에 통째로 복사한다
+            from . import lan
             n = int(self.headers.get("Content-Length") or 0)
-            d = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 < n < 100000 else {}
+            d = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 < n < 1_000_000 else {}
             if not lan.is_local(self.client_address[0]):
-                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
-            path = str(d.get("path") or "").strip().strip('"')
-            ins = doca.inspect(path, str(d.get("code") or "") or None)
-            if not ins["exists"]:
-                return self._send(200, json.dumps({"error": f"폴더가 없습니다: {path}", "inspect": ins}, ensure_ascii=False), "application/json")
-            if not ins["core"]:
-                return self._send(200, json.dumps({"error": "이 폴더 아래(5단계까지)에서 피어그룹.csv나 한장조사 폴더를 찾지 못했습니다", "inspect": ins},
-                                                  ensure_ascii=False), "application/json")
-            doca.set_doca_dir(path)
+                return self._send(403, json.dumps({"error": "PC에서만 지울 수 있습니다"}, ensure_ascii=False), "application/json")
+            codes = [str(c) for c in (d.get("codes") or [])][:500]
+            if not codes or d.get("confirm") is not True:
+                return self._send(400, json.dumps({"error": "지울 기업이 없거나 확인이 없습니다"}, ensure_ascii=False), "application/json")
+            with JOB_LOCK:
+                if JOB.get("running"):
+                    return self._send(200, json.dumps({"error": "수집·갱신 작업이 진행 중입니다. 끝난 뒤 지워 주세요"}, ensure_ascii=False), "application/json")
+            try:
+                bk = db.backup()
+            except Exception as e:      # noqa: BLE001  백업이 안 되면 지우지 않는다
+                return self._send(200, json.dumps({"error": f"백업을 만들지 못해 지우지 않았습니다: {e}"}, ensure_ascii=False), "application/json")
             conn = db.connect()
             try:
-                rep, notes = doca.import_doca(conn, path)
+                res = db.delete_companies(conn, codes)
             finally:
                 conn.close()
-            return self._send(200, json.dumps({"report": rep, "notes": notes, "dir": path, "inspect": ins}, ensure_ascii=False), "application/json")
-        if u.path == "/api/doca/import":
-            # 작업 폴더 다시 읽기(PC에서만: 이 PC의 폴더 경로를 다루므로)
-            from . import doca, lan
-            self._drain()
-            if not lan.is_local(self.client_address[0]):
-                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
-            root = doca.get_doca_dir()
-            conn = db.connect()
-            try:
-                rep, notes = doca.import_doca(conn, root) if root else ({}, ["작업 폴더 연결 안 됨"])
-            finally:
-                conn.close()
-            return self._send(200, json.dumps({"report": rep, "notes": notes, "dir": root}, ensure_ascii=False), "application/json")
+            for c in codes:
+                f = os.path.join(config.OUTPUT_DIR, f"{c}.html")
+                if c.isalnum() and os.path.exists(f):
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass
+            return self._send(200, json.dumps({"deleted": res, "backup": bk, "codes": codes}, ensure_ascii=False), "application/json")
         if u.path == "/api/segments/keywords":
             from . import segments
             n = int(self.headers.get("Content-Length") or 0)

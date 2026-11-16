@@ -130,8 +130,6 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="O">O. 가치 5방법</button>
   <button data-s="P">P. 우상향 저평가</button>
   <button data-s="Q">Q. 적정 PER 주가</button>
-  <button data-s="R">R. 노드 우호 판정</button>
-  <button data-s="S">S. 사업부 피어</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -160,9 +158,11 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <label style="flex-direction:row;align-items:center;gap:6px">목록에서 찾기 <input id="cfilter" placeholder="이름 또는 코드" style="width:160px"></label>
       <button id="csel-old" title="마지막 수집일이 오래된 기업부터 체크">수집 7일 지난 기업 체크</button>
       <button id="csel-none">체크 모두 풀기</button>
+      <button id="csel-doca" style="display:none" title="2026-11-15 작업 폴더 가져오기(되돌림)가 이 목록에 넣은 것으로 보이는 기업"></button>
+      <button id="cdel" disabled style="color:var(--bad);border-color:var(--bad)">체크한 기업 삭제</button>
       <span class="muted" id="cselinfo"></span>
     </div>
-    <p class="muted" style="margin:6px 0 10px"><b>체크한 기업 갱신</b>: 왼쪽 체크 상자로 고른 기업만 갱신합니다(맨 위 체크 상자 = 지금 보이는 기업 모두). 전체 갱신: DB의 모든 기업에 대해 빠진 값, 새 공시·정정 공시, 컨센서스, 기준일 주가를 확인합니다. 이미 검증된 DART 실적은 다시 받지 않습니다.</p>
+    <p class="muted" style="margin:6px 0 10px"><b>체크한 기업 갱신</b>: 왼쪽 체크 상자로 고른 기업만 갱신합니다(맨 위 체크 상자 = 지금 보이는 기업 모두). <b>체크한 기업 삭제</b>: 고른 기업과 그 수집 자료를 DB에서 지웁니다(PC에서만, 지우기 전 DB 자동 백업). 전체 갱신: DB의 모든 기업에 대해 빠진 값, 새 공시·정정 공시, 컨센서스, 기준일 주가를 확인합니다. 이미 검증된 DART 실적은 다시 받지 않습니다.</p>
     <div id="ustatus"></div>
     <div class="tablewrap"><table id="comps"></table></div>
     <p class="muted" style="margin:8px 0 0">기업 자료가 저장되는 데이터 폴더: <code id="datadir"></code> <button id="opendata" style="margin-left:6px">폴더 열기</button> <span id="opendatamsg"></span></p>
@@ -187,7 +187,6 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 <section id="B">
   <div class="tiles" id="tiles"></div>
   <div class="card" style="margin-top:16px" id="rfcard"></div>
-  <div class="card" style="margin-top:16px" id="docacard"></div>
   <div class="card" style="margin-top:16px">
     <h2>지표별 확보 현황</h2>
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
@@ -511,24 +510,6 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <details style="margin-top:10px"><summary>계산 근거</summary><div id="q-why" class="muted" style="margin-top:6px"></div></details>
     <p class="muted" id="q-principle" style="margin-top:10px"></p>
     <p class="muted" style="margin:4px 0 0">표시 칸 — 매수 조건 아님. 생존(H 화면)·자산 바닥이 먼저.</p>
-  </div>
-</section>
-<section id="R">
-  <div class="card">
-    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
-    <h2 style="margin:0">노드 우호 판정 <span class="muted" style="font-size:14px;font-weight:400" id="r-period"></span></h2>
-    <div id="r-head" style="margin:8px 0"></div>
-    <div class="tablewrap"><table id="r-table"></table></div>
-    <details style="margin-top:10px"><summary>작업 폴더 참고 줄(키팩터원장·병목지도·인과개별화) <span class="muted" id="r-refn"></span></summary><div id="r-refs" class="muted" style="margin-top:6px"></div></details>
-    <p class="muted" style="margin:10px 0 0">방향성(4축 ①)의 숫자 근거 — 매수 조건 아님 · (기계)는 계산 규칙, 나머지는 해석 · 출처 꼬리표: 자체 수집 · 사용자 · AI 초안 · 작업 폴더(회색 = 오래됨)</p>
-  </div>
-</section>
-<section id="S">
-  <div class="card">
-    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
-    <h2 style="margin:0">사업부 피어 비교</h2>
-    <p class="muted" id="s-rules" style="margin:6px 0"></p>
-    <div id="s-body"></div>
   </div>
 </section>
 
@@ -1883,97 +1864,9 @@ function renderQDetail(p){
     `<li>과거 10년 실제 ROE 최고 ${d.roe_hist_max==null?'–':d.roe_hist_max.toFixed(2)+'%'} (넘으면 정점 꼬리표) · 자사주 소각은 반영하지 않음</li></ul>`;
 }
 document.querySelectorAll('.q-use').forEach(c=>c.addEventListener('change', renderQ));
-
-// ---------------- R. 노드 우호 판정 · S. 사업부 피어 (analyzer/doca.py) ----------------
-const DC = D.doca || {error:'자료 없음'};
-const srcTag = (name, asof, old) => name ? `<span class="badge ${old?'':'b-OK'}" style="${old?'background:var(--info-bg);color:var(--text-muted)':''}" title="${old?'오래됨':''}">${esc(name)}</span>${asof?` <span class="muted" style="font-size:12px">${esc(String(asof).slice(0,10))}</span>`:''}` : '<span class="muted">–</span>';
-const vBadge = v => !v ? '<span class="muted">–</span>' : `<span class="badge ${/^순풍/.test(v)?'b-OK':/역풍/.test(v)?'b-ERROR':'b-WARN'}">${esc(v)}</span>`;
-function docaDiag(ins){
-  if (!ins) return '';
-  if (!ins.exists) return `<div class="muted">폴더가 없습니다: <code>${esc(ins.root||'')}</code></div>`;
-  if (!ins.core) return `<div class="muted">폴더는 있지만, 그 아래 5단계까지 <b>피어그룹.csv</b>나 <b>한장조사</b> 폴더가 있는 곳을 찾지 못했습니다.</div>`;
-  const code = D.company.code;
-  return `<div style="margin-top:4px">자료 폴더: <code>${esc(ins.core)}</code></div>` +
-    `<table style="margin-top:4px"><tr><th class="l">파일</th><th>상태</th><th class="l">열 이름(앞부분)</th></tr>` +
-    `<tr><td class="l">한장조사\\*.json</td><td>${ins.json_n}개</td><td class="l muted">${ins.code_json===null?'':ins.code_json?`이 기업(${esc(code)}.json) 있음`:`<b>이 기업(${esc(code)}.json) 없음</b>`}</td></tr>` +
-    ins.files.map(f=>`<tr><td class="l">${esc(f.name)}</td><td>${f.missing?'<span class="muted">없음</span>':f.error?`<span class="badge b-ERROR">읽기 실패</span>`:f.rows+'줄'}</td><td class="l muted" style="white-space:normal">${f.error?esc(f.error):esc((f.cols||[]).join(', '))}${f.name==='피어그룹.csv'&&ins.code_peer!=null?` · <b>대상 ${esc(code)} ${ins.code_peer}줄</b>`:''}</td></tr>`).join('') + '</table>'; }
-function renderDocaCard(){
-  const st = DC.status || {}; const L = st.last, C = st.counts || {}, rep = (L && L.report) || {};
-  $('#docacard').innerHTML = `<h2 style="margin:0 0 6px">작업 폴더 자료(화면 R·S 빈칸 채우기)</h2>` +
-    `<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><label style="flex-direction:row;align-items:center;gap:6px">작업 폴더 <input id="doca-path" style="width:460px;max-width:100%" placeholder="${esc(st.default||'C:\\Users\\이름\\claude 작업')}" value="${esc(st.dir||'')}"></label>` +
-    `<button class="primary" id="doca-save">이 폴더로 저장하고 읽기</button><button id="doca-reload">다시 읽기</button></div>` +
-    `<div class="muted" style="margin-top:4px;font-size:13px">탐색기에서 폴더를 열고 주소창을 눌러 경로를 복사해 붙여 넣으세요. <code>claude 작업</code>, <code>엔진</code>, <code>핵심</code> 어느 폴더를 넣어도 그 아래에서 자료 폴더를 찾습니다.</div>` +
-    (st.found ? '' : `<div style="margin-top:6px"><span class="badge b-WARN">작업 폴더 연결 안 됨</span></div>`) +
-    `<div id="doca-diag">${docaDiag(st.inspect)}</div>` +
-    `<div class="muted" style="margin-top:6px">${L ? `마지막 가져오기 ${esc(L.fetched_at)} · ${L.n_items}줄${Object.keys(rep).length?' ('+Object.entries(rep).map(([k,t])=>`${esc(k)} ${t.rows}`).join(' · ')+')':''}` : '아직 가져오지 않음'}` +
-    ` · 가져온 회사: 노드 판정 ${(st.companies||{}).node_judgments||0}곳 · 피어 그룹 ${(st.companies||{}).peer_groups||0}곳 · 지금 쓰는 줄: 노드 ${C.node_judgments||0} · 국내 피어 ${C.peer_groups||0} · 해외 ${C.peer_foreign||0} · 사업부 실적 ${C.segment_fin||0}</div>` +
-    `<div class="muted" id="doca-msg" style="margin-top:4px"></div>`;
-  const run = async (url, body) => {
-    if (!SERVED){ $('#doca-msg').textContent = '「재무분석 열기」로 연 화면에서 누르세요.'; return; }
-    ['#doca-save','#doca-reload'].forEach(x=>$(x).disabled = true); $('#doca-msg').textContent = '읽는 중…';
-    try { const j = await (await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})})).json();
-      if (j.inspect) $('#doca-diag').innerHTML = docaDiag(j.inspect);
-      if (j.error) throw new Error(j.error);
-      const r = Object.entries(j.report||{}).map(([k,t])=>`${k} ${t.rows}줄(새 ${t.new||0}·바뀜 ${t.changed||0})`).join(' · ');
-      $('#doca-msg').innerHTML = esc(r || '가져온 줄 없음') + ((j.notes||[]).length ? '<br><b>주의</b>: ' + j.notes.map(esc).join(' / ') : '') + '<br>5초 뒤 새로 고칩니다.';
-      setTimeout(()=>location.reload(), 5000);
-    } catch(e){ $('#doca-msg').innerHTML = '<b>실패</b>: ' + esc(e.message); }
-    ['#doca-save','#doca-reload'].forEach(x=>$(x).disabled = false); };
-  $('#doca-save').onclick = () => { const v = $('#doca-path').value.trim(); if (!v){ $('#doca-path').focus(); return; } run('/api/doca/dir', {path: v, code: D.company.code}); };
-  $('#doca-reload').onclick = () => run('/api/doca/import');
-}
-function docaWhy(){   // R·S 화면이 비었을 때 이유
-  const st = DC.status || {}, ins = st.inspect, code = esc(D.company.code);
-  if (!st.found) return `작업 폴더가 연결되지 않았습니다. <b>B 탭 → 작업 폴더</b> 칸에 폴더 경로를 넣고 [이 폴더로 저장하고 읽기]를 누르세요.`;
-  if (!st.last) return `작업 폴더는 찾았지만 아직 가져오지 않았습니다. B 탭 [다시 읽기]를 누르세요.`;
-  if (ins && ins.code_json === false) return `작업 폴더(한장조사 ${ins.json_n}개)에 이 기업(${code}.json)이 없습니다.`;
-  return `작업 폴더에서 이 기업(${code}) 자료를 가져오지 못했습니다. B 탭 작업 폴더 칸의 진단 표와 '주의' 문구를 확인해 주세요.`; }
-function renderR(){
-  if (DC.error){ $('#r-head').textContent = '자료를 읽지 못했습니다: ' + DC.error; return; }
-  const N = DC.nodes; $('#r-period').textContent = N.period;
-  const v = N.verdict, W = N.weights, pc = x => (x==null?'–':x.toFixed(1)+'%');
-  $('#r-head').innerHTML = (v ? `<div style="font-size:15px"><b>종합</b> ${esc(v.text)} ${srcTag(v.source_name, v.as_of, v.stale)}</div>` : '<div class="muted">종합 문장 없음</div>') +
-    `<div class="muted" style="margin-top:4px">사업부 비중 가중: 순풍 쪽 <b>${pc(W.good)}</b> · 확인 필요 <b>${pc(W.mid)}</b> · 역풍 쪽 <b>${pc(W.bad)}</b> (비중 확인된 합계 ${pc(W.total)}${W.total && Math.abs(W.total-100)>5 ? ' — 100%가 아닌 것은 노드가 모든 사업을 덮지 않거나 비중 자료가 일부라서' : ''})</div>`;
-  const R = N.rows;
-  $('#r-table').innerHTML = '<tr><th class="l">노드 · 판정(최종 / 기계)</th><th class="l">수요(위에서 아래)</th><th class="l">이 회사의 몫(아래에서 위)</th><th class="l">숫자</th><th class="l">판정을 바꿀 것</th><th>신호 ①②③</th><th class="l">출처·날짜</th></tr>' +
-    (R.length ? R.map(r=>`<tr style="${r.stale?'color:var(--text-muted)':''}"><td class="l" style="min-width:150px"><b>${r.seq<=20?'①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'[r.seq-1]:r.seq} ${esc(r.segment||'')}</b><br>${vBadge(r.verdict)} <span class="muted">/</span> ${r.mech ? vBadge(r.mech)+'<span class="muted" style="font-size:12px">(기계)</span>' : '<span class="muted" style="font-size:12px" title="2단계에서 자체 수집 신호로 계산">기계 판정 준비 중</span>'}` +
-      `<div class="muted" style="font-size:12px;margin-top:2px" title="${esc(r.weight_note)}">비중 ${r.weight==null?'미확인':r.weight.toFixed(1)+'%'+(r.weight_est?' (추정)':'')}</div></td>` +
-      `<td class="l" style="white-space:normal;min-width:160px">${esc(r.demand||'–')}</td><td class="l" style="white-space:normal;min-width:180px">${esc(r.share||'–')}</td>` +
-      `<td class="l" style="white-space:normal;min-width:160px">${esc(r.numbers||'–')}</td><td class="l" style="white-space:normal;min-width:130px">${esc(r.changers||'–')}</td>` +
-      `<td class="muted" title="① 사업부 매출 ② 노드 수요 지표 ③ 회사 컨센 방향 — 2단계부터">${r.signals.map(x=>x==null?'·':x>0?'+':x<0?'−':'0').join(' ')}</td>` +
-      `<td class="l">${srcTag(r.source_name, r.as_of, r.stale)}${r.newer?' <span class="badge b-WARN">더 새 글 있음</span>':''}<div class="muted" style="font-size:11px">${esc(r.source_ref||'')}</div></td></tr>`).join('')
-    : `<tr><td colspan="7" class="l">이 기업의 노드 판정이 없습니다. ${docaWhy()} 기계 판정은 2단계(자체 수집)부터 채워집니다.</td></tr>`);
-  const refs = N.refs || [];
-  $('#r-refn').textContent = refs.length ? `(${refs.length}줄)` : '(없음)';
-  $('#r-refs').innerHTML = refs.map(x=>`<div>[${esc(x._kind)}] ${esc(Object.entries(x).filter(([k])=>k!=='_kind').map(([k,v])=>`${k}: ${v}`).join(' · '))}</div>`).join('');
-}
-function renderS(){
-  if (DC.error){ $('#s-body').textContent = '자료를 읽지 못했습니다: ' + DC.error; return; }
-  const PG = DC.peers, cy = PG.cy, pct = (x,d=1) => x==null ? '–' : (x*100).toFixed(d)+'%', p1 = x => x==null ? '–' : x.toFixed(1)+'%', n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
-  $('#s-rules').innerHTML = `피어 = 같은 제품·같은 고객층의 국내 상장사(셋을 억지로 채우지 않음). <b>앞 성장</b> = ${cy} 기준점 → ${cy+2}E 매출 연평균(3분기 실적이 있으면 1~3분기 누적 × 4/3을 기준점으로). 지난 5년 = ${cy-5}→${cy-1} 매출 연평균. 영업이익률 ${cy+2}E는 컨센 원래 값(괄호 = × 0.83 보정). 순위는 사업부 안에서 값이 있는 회사끼리. PER·PBR은 맨 끝 참고(피어 PER로 가치를 정하지 않음). 해외 경쟁사는 이름·역할만.`;
-  if (!PG.segments.length){ $('#s-body').innerHTML = `<p class="muted">이 기업의 피어 그룹이 없습니다. ${(DC.status||{}).inspect && DC.status.inspect.code_peer===0 ? `작업 폴더 피어그룹.csv에 대상 ${esc(D.company.code)} 줄이 없습니다.` : docaWhy()} (피어 후보 제안은 4단계)</p>`; return; }
-  const rk = x => x.rank ? Object.entries(x.rank).map(([k,[i,n]])=>`${k==='front'?'앞 성장':'이익률'} ${i}/${n}`).join(' · ') : '–';
-  $('#s-body').innerHTML = PG.segments.map(sg=>{
-    const rows = sg.lines.map(x=>{ const m = x.m;
-      const nm = `${x.self?'<b>':''}${esc(x.name||x.code||'')}${x.self?'</b> <span class="badge b-OK">본인</span>':''} <span class="muted">${esc(x.code||'')}</span>`;
-      if (!m) return `<tr><td class="l">${nm}</td><td class="l">${esc(x.business||'')}</td><td colspan="7" class="muted l">미수집 — 앱 DB에 이 회사 자료가 없음(피어 자료 받기는 4단계, 받기 전 요청 수를 먼저 보여 드림)</td><td class="l muted" title="${esc(x.reason||'')}">${esc(x.source_name||'')}</td></tr>`;
-      return `<tr><td class="l">${nm}</td><td class="l" title="${esc(x.reason||'')}">${esc(x.business||'')}</td><td title="${esc(m.front_how)}">${pct(m.front)}<div class="muted" style="font-size:11px">${esc(m.front_how)}</div></td><td>${pct(m.past5)}</td>` +
-        `<td>${p1(m.opm_last)} · ${p1(m.opm_2e)} <span class="muted">(${p1(m.opm_2e_adj)})</span></td><td>${p1(m.roe)}</td><td>${p1(m.debt)}</td><td>${rk(x)}</td>` +
-        `<td class="muted">${m.per==null?'–':m.per.toFixed(1)} · ${m.pbr==null?'–':m.pbr.toFixed(2)}</td><td class="l muted" title="${esc(x.reason||'')}">${esc(x.source_name||'')}</td></tr>`; }).join('');
-    const yrs = PG.years;
-    const t8 = '<tr><th class="l">회사</th>' + yrs.map(y=>`<th>${y>=cy?y+'E':y}</th>`).join('') + '</tr>' + sg.lines.filter(x=>x.m).map(x=>
-      `<tr><td class="l">${esc(x.name||x.code)}</td>` + x.m.hist.map(h=>`<td style="${h.est?'color:var(--text-muted)':''}">${n0(h.rev)}<div style="font-size:11px">${h.opm==null?'–':h.opm.toFixed(1)+'%'}${h.est&&h.opm_adj!=null?` (${h.opm_adj.toFixed(1)}%)`:''}</div></td>`).join('') + '</tr>').join('');
-    return `<div style="margin:14px 0 6px"><h3 style="margin:0">${esc(sg.segment)} <span class="muted" style="font-size:13px;font-weight:400">비중 ${sg.weight==null?'미확인':(sg.weight<=1?sg.weight*100:sg.weight).toFixed(1)+'%'}${sg.missing?` · 미수집 ${sg.missing}곳`:''} · 피어 목록 ${esc(String(sg.as_of||'').slice(0,10))}</span></h3>
-      <div style="margin:4px 0"><b>${esc(sg.conclusion)}</b></div></div>
-      <div class="tablewrap"><table><tr><th class="l">회사</th><th class="l">피어의 해당 사업</th><th>앞 성장 ${cy}→${cy+2}E</th><th>지난 5년 매출 연평균</th><th>영업이익률(최근 · ${cy+2}E)</th><th>ROE</th><th>부채비율</th><th>순위</th><th>PER · PBR(참고)</th><th class="l">출처</th></tr>${rows}</table></div>
-      <div class="muted" style="margin:4px 0">해외 경쟁사: ${sg.foreign.length ? sg.foreign.map(f=>`${esc(f.name)}${f.ticker?` (${esc(f.ticker)})`:''}${f.role?' · '+esc(f.role):''}`).join(' / ') : '없음'}</div>
-      <details><summary class="muted">8년 표(매출 억원 · 영업이익률, 회색 = 컨센, 괄호 = × 0.83)</summary><div class="tablewrap"><table>${t8}</table></div></details>`; }).join('') +
-    (PG.segment_fin.length ? `<h3 style="margin:16px 0 6px">이 회사 사업부 실적(억원)</h3><div class="tablewrap"><table><tr><th>연도</th><th class="l">부문</th><th>매출</th><th>이익</th><th class="l">이익 종류</th><th class="l">출처</th></tr>` +
-      PG.segment_fin.map(r=>`<tr><td>${r.fy}${r.period!=='FY'?' '+esc(r.period):''}</td><td class="l">${esc(r.segment)}</td><td>${n0(r.revenue)}</td><td>${n0(r.profit)}</td><td class="l">${esc(r.profit_kind||'')}</td><td class="l">${srcTag({self:'자체 수집',user:'사용자',ai:'AI 초안',doca_seed:'작업 폴더'}[r.source], r.as_of, false)}${r.status==='ESTIMATED'?' <span class="badge b-WARN">추정</span>':''}</td></tr>`).join('') + '</table></div>' : '');
-}
 ['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderDocaCard(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
@@ -2026,15 +1919,18 @@ function renderUniverse(){
 const uChecked = new Set();
 // 'DB에 있는 기업' 표: 체크한 기업만 갱신(2026-11-13)
 const cChecked = new Set();
+const DOCA_ADDED = new Set(Array.isArray(D.doca_added) ? D.doca_added : []);
 function cVisible(){ const q = ($('#cfilter').value||'').trim().toLowerCase();
   return D.companies.filter(c=>!q || (c.name||'').toLowerCase().includes(q) || c.stock_code.toLowerCase().includes(q)); }
 function cSelInfo(){ const n = cChecked.size;
+  $('#cdel').disabled = !n || UJOB_RUNNING; $('#cdel').textContent = `체크한 기업 삭제${n?` (${n}곳)`:''}`;
+  if (DOCA_ADDED.size){ $('#csel-doca').style.display = ''; $('#csel-doca').textContent = `가져오기로 들어온 기업 체크 (${DOCA_ADDED.size}곳)`; }
   $('#uupsel').disabled = !n || UJOB_RUNNING; $('#uupsel').textContent = `체크한 기업 갱신${n?` (${n}곳)`:''}`;
   $('#cselinfo').textContent = n ? `${n}곳 선택 · 예상 소요 약 ${Math.max(1, Math.round(n*1.5))}분(기업당 1~2분, 컨센서스·주가 새로 받기를 켜면 더 걸림)` : ''; }
 function renderComps(){
   const V = cVisible(), all = V.length && V.every(c=>cChecked.has(c.stock_code));
   $('#comps').innerHTML = `<tr><th><input type="checkbox" id="cselall" ${all?'checked':''} title="지금 보이는 기업 모두 체크/풀기"></th><th class="l">종목코드</th><th class="l">기업명</th><th>저장된 값</th><th class="l">마지막 수집일</th><th class="l"></th></tr>` +
-    V.map(c=>`<tr class="clickrow ${c.stock_code===D.company.code?'cur':''}" data-code="${esc(c.stock_code)}" tabindex="0" title="눌러서 이 기업 보기"><td><input type="checkbox" class="csel" value="${esc(c.stock_code)}" ${cChecked.has(c.stock_code)?'checked':''}></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.stock_code)}</a></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.name||'')}</a></td><td>${c.n}</td><td class="l">${esc(c.last||'–')}</td><td class="l">${c.stock_code===D.company.code?'보는 중':'열기 →'}</td></tr>`).join('');
+    V.map(c=>`<tr class="clickrow ${c.stock_code===D.company.code?'cur':''}" data-code="${esc(c.stock_code)}" tabindex="0" title="눌러서 이 기업 보기"><td><input type="checkbox" class="csel" value="${esc(c.stock_code)}" ${cChecked.has(c.stock_code)?'checked':''}></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.stock_code)}</a></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.name||'')}</a>${DOCA_ADDED.has(c.stock_code)?' <span class="badge b-WARN" title="작업 폴더 가져오기(2026-11-15, 되돌림)로 들어온 것으로 보임">가져오기로 들어옴</span>':''}</td><td>${c.n}</td><td class="l">${esc(c.last||'–')}</td><td class="l">${c.stock_code===D.company.code?'보는 중':'열기 →'}</td></tr>`).join('');
   document.querySelectorAll('#comps tr.clickrow').forEach(tr=>{
     const go = ()=>{ location.href = companyUrl(tr.dataset.code); };
     tr.onclick = e => { if (e.target.tagName!=='A' && e.target.tagName!=='INPUT' && !e.target.closest('td:first-child')) go(); };
@@ -2048,6 +1944,23 @@ $('#cfilter').addEventListener('input', renderComps);
 $('#csel-none').onclick = () => { cChecked.clear(); renderComps(); };
 $('#csel-old').onclick = () => { const lim = new Date(Date.now() - 7*864e5).toISOString().slice(0,10);
   D.companies.forEach(c=>{ if (!c.last || c.last.slice(0,10) < lim) cChecked.add(c.stock_code); }); renderComps(); };
+$('#csel-doca').onclick = () => { DOCA_ADDED.forEach(c=>{ if (D.companies.some(x=>x.stock_code===c)) cChecked.add(c); }); renderComps(); };
+$('#cdel').onclick = async () => {
+  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  const codes = [...cChecked]; if (!codes.length) return;
+  const nm = c => (D.companies.find(x=>x.stock_code===c)||{}).name || c;
+  const list = codes.map(c=>`· ${nm(c)} (${c})`).join('\n');
+  if (!confirm(`아래 ${codes.length}곳을 'DB에 있는 기업'에서 지웁니다.\n그 기업의 수집 자료(재무·컨센서스·주가·뉴스·공시)도 함께 지워지며 되돌릴 수 없습니다.\n(지우기 전에 DB 파일 전체를 데이터 폴더 backup에 자동 백업합니다)\n\n${list.length>1500?list.slice(0,1500)+'\n…':list}`)) return;
+  if (prompt(`정말 지우려면 지울 기업 수 ${codes.length}을(를) 숫자로 입력하세요.`) !== String(codes.length)) { alert('입력한 숫자가 달라 지우지 않았습니다.'); return; }
+  $('#cdel').disabled = true;
+  try { const j = await (await fetch('/api/companies/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({codes, confirm:true})})).json();
+    if (j.error) throw new Error(j.error);
+    const n = Object.values(j.deleted||{}).reduce((a,b)=>a+b,0);
+    $('#ustatus').innerHTML = `<div class="warnbox">${codes.length}곳을 지웠습니다(자료 ${n.toLocaleString('ko-KR')}줄). 백업: <code>${esc(j.backup)}</code> — 3초 뒤 새로 고칩니다.</div>`;
+    cChecked.clear();
+    setTimeout(()=>{ location.href = codes.includes(D.company.code) ? '/' : location.href; }, 3000);
+  } catch(e){ $('#ustatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)">지우지 못했습니다: ${esc(e.message)}</div>`; $('#cdel').disabled = false; }
+};
 $('#uupsel').onclick = async () => {
   if (!SERVED){ $('#ustatus').innerHTML = `<div class="warnbox">저장된 화면 파일에서는 갱신할 수 없습니다. '재무분석 열기'로 연 화면에서 누르세요.</div>`; return; }
   const codes = [...cChecked]; if (!codes.length) return;
@@ -2101,7 +2014,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

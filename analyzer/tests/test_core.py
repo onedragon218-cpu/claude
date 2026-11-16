@@ -666,54 +666,37 @@ class T(unittest.TestCase):
         self.assertEqual(len(fairper.sensitivity(cur["data"])), 3)
         conn.close()
 
-    def test_doca_import_priority_verdict_growth(self):
-        from analyzer import doca
+    def test_delete_companies_backup_and_doca_cleanup(self):
+        import sqlite3
         with tempfile.TemporaryDirectory() as d:
-            core = os.path.join(d, "claude 작업", "엔진", "핵심")
-            os.makedirs(os.path.join(core, "한장조사"))
-            with open(os.path.join(core, "한장조사", "213500.json"), "w", encoding="utf-8") as f:
-                json.dump({"asof": "2026-10-28", "nodes": [["① 산업용지", "<span class='tag t-good'>순풍(약)</span>", "a", "b", "c", "d"],
-                                                            ["③ 인쇄용지", "역풍", "e", "f", "g", "h"]], "nodes_verdict": "종합"}, f, ensure_ascii=False)
-            w = lambda n, t: open(os.path.join(core, n), "w", encoding="utf-8-sig").write(t)
-            w("피어그룹.csv", "대상,사업부,사업부_비중,code,name,피어의_해당사업,근거\n213500,인쇄용지,0.6,213500,한솔제지,인쇄용지,본인\n213500,인쇄용지,0.6,9580,무림P&P,인쇄용지,같은 제품\n")
-            w("피어그룹_해외.csv", "대상,사업부,name,ticker,역할,근거\n213500,인쇄용지,Sylvamo,SLVM,경쟁,x\n213500,산업용지,IP,IP,경쟁,y\n")
-            w("피어_부문.csv", "대상,사업부,code,name,부문명,fy,매출억,이익억,이익종류,원천\n213500,인쇄용지,213500,한솔제지,인쇄용지,2025,100,10,영업이익,사업보고서\n213500,산업용지,213500,한솔제지,산업용지,2025,50,5,영업이익,사업보고서\n")
-            conn = db.connect(os.path.join(d, "t.db"))
-            rep, notes = doca.import_doca(conn, os.path.join(d, "claude 작업"))
-            self.assertEqual((rep["한장조사(노드 줄)"]["rows"], rep["피어그룹.csv"]["rows"], rep["피어그룹_해외.csv"]["rows"], rep["피어_부문.csv"]["rows"]), (2, 2, 2, 2))
-            cnt = lambda t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-            before = {t: cnt(t) for t in ("node_judgments", "peer_groups", "peer_foreign", "segment_fin", "company_node_verdict")}
-            doca.import_doca(conn, os.path.join(d, "claude 작업"))              # 1) 다시 돌려도 줄이 늘지 않음
-            self.assertEqual(before, {t: cnt(t) for t in before})
-            self.assertEqual(conn.execute("SELECT peer_code FROM peer_groups WHERE peer_name='무림P&P'").fetchone()[0], "009580")
-            w("피어_부문.csv", "대상,사업부,code,name,부문명,fy,매출억,이익억,이익종류,원천\n213500,인쇄용지,213500,한솔제지,인쇄용지,2025,120,10,영업이익,사업보고서\n213500,산업용지,213500,한솔제지,산업용지,2025,50,5,영업이익,사업보고서\n")
-            doca.import_doca(conn, os.path.join(d, "claude 작업"))              # 바뀐 줄만 새 버전
-            self.assertEqual(cnt("segment_fin"), before["segment_fin"] + 1)
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM segment_fin WHERE is_current=1").fetchone()[0], 2)
-            # 2) 같은 칸에 self 값이 있으면 seed 값이 화면에 나오지 않음
-            doca.put(conn, "node_judgments", {"stock_code": "213500", "seq": 3}, {"node_name": "인쇄용지", "verdict": "확인 필요"}, "self", "앱")
+            path = os.path.join(d, "t.db")
+            raw = sqlite3.connect(path)                     # 되돌린 기능이 만들었던 표가 남아 있는 DB
+            raw.execute("CREATE TABLE node_judgments (id INTEGER, stock_code TEXT)")
+            raw.execute("CREATE TABLE peer_groups (id INTEGER, target TEXT)")
+            raw.commit(); raw.close()
+            conn = db.connect(path)
+            have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertFalse(have & set(db.DOCA_TABLES))        # 4) 표 삭제
+            self.assertIn("facts", have)
+            db.ensure_company(conn, "213500", "한솔제지")
+            conn.execute("UPDATE companies SET created_at='2026-11-01 09:00:00' WHERE stock_code='213500'")
+            for c, t in (("000001", "2026-11-15 10:00:05"), ("000002", "2026-11-15 10:00:09"), ("000003", "2026-11-15 12:00:00")):
+                db.ensure_company(conn, c, "가짜" + c)
+                conn.execute("UPDATE companies SET created_at=? WHERE stock_code=?", (t, c))
+            conn.execute("INSERT INTO fetch_log(source, key, fetched_at, ok, n_items) VALUES ('doca_import', 'x', '2026-11-15 10:00:10', 1, 3)")
+            conn.execute("INSERT INTO facts(stock_code, fiscal_year, period, metric, value, is_current, status, version) VALUES ('000001', 2025, 'FY', 'revenue', 1, 1, 'VERIFIED', 1)")
+            conn.execute("INSERT INTO news(stock_code, published, title) VALUES ('000001', '2026-11-15', 't')")
             conn.commit()
-            rows = doca.nodes_payload(conn, "213500", config.periods(2026))["rows"]
-            r3 = next(r for r in rows if r["seq"] == 3)
-            self.assertEqual((r3["verdict"], r3["source_name"]), ("확인 필요", "자체 수집"))
-            self.assertEqual(next(r for r in rows if r["seq"] == 1)["verdict"], "순풍(약)")
-            # 6) 피어 3곳 미만이어도 표가 깨지지 않음
-            pp = doca.peers_payload(conn, "213500", config.periods(2026))
-            self.assertEqual(len(pp["segments"]), 1)
-            self.assertTrue(any(x["self"] for x in pp["segments"][0]["lines"]))
+            self.assertEqual(db.doca_added(conn), ["000001", "000002"])   # 가져오기 시각 직전 10분 안에 등록된 기업만
+            bk = db.backup(path)
+            self.assertTrue(os.path.exists(bk))
+            res = db.delete_companies(conn, ["000001", "000002"])
+            self.assertEqual(res.get("companies"), 2)
+            self.assertEqual((res.get("facts"), res.get("news")), (1, 1))
+            left = [r[0] for r in conn.execute("SELECT stock_code FROM companies ORDER BY 1")]
+            self.assertEqual(left, ["000003", "213500"])
+            self.assertEqual(sqlite3.connect(bk).execute("SELECT COUNT(*) FROM companies").fetchone()[0], 4)   # 백업에는 지우기 전 그대로
             conn.close()
-        # 3) 기계 판정
-        self.assertEqual(doca.mech_verdict([1, 1, 0]), ("순풍", []))
-        self.assertEqual(doca.mech_verdict([1, -1, 0]), ("확인 필요", ["몫 확인"]))
-        self.assertEqual(doca.mech_verdict([1, None, None])[0], "판정 못 함(자료 부족)")
-        # 4) 앞 성장: 3분기 누적이 있으면 기준점 = 누적 × 4/3
-        g, base, how = doca.front_growth(75.0, 90.0, 121.0)
-        self.assertEqual((base, how), (100.0, "3Q 누적×4/3"))
-        self.assertAlmostEqual(g, 0.1, places=9)
-        self.assertEqual(doca.front_growth(None, 100.0, 121.0)[2], "올해 컨센")
-        # 5) 판정 태그 HTML 벗기기
-        self.assertEqual(doca.strip_tag("<span class='tag t-good'>순풍(약)</span>"), "순풍(약)")
-        self.assertEqual(doca.split_seq("③ 인쇄용지", 9), (3, "인쇄용지"))
 
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
