@@ -777,6 +777,26 @@ class T(unittest.TestCase):
         # 막연한 사업부 이름은 기업개요의 주력 낱말로 연결(업종코드보다 먼저)
         self.assertEqual(nodeview.link_segment("제품(수출)", "211", K, {}, {}, ("botulinum", 3, "보툴리눔"))[0], "botulinum")
 
+    def test_nodeview_freshness_levels(self):
+        import datetime as _d
+        from analyzer import nodeview
+        t = _d.date(2026, 11, 18)
+        self.assertEqual(nodeview._age("2026-11-04", t), 14)
+        self.assertEqual(nodeview._age("2026-06", t), (t - _d.date(2026, 6, 30)).days)     # 'YYYY-MM' = 그달 말일
+        conn = db.connect()
+        P = config.periods(2026)
+        K = nodeview.knowledge()
+        res = nodeview.company(conn, "213500", P, K)
+        lv = lambda today: {f["key"]: f["level"] for f in nodeview.freshness(conn, "213500", P, res, K, today)}
+        now = lv(_d.date(2026, 11, 18))
+        self.assertEqual(now["consensus"], "ok")
+        self.assertEqual(lv(_d.date(2026, 11, 25))["consensus"], "warn")           # 21일: 2주 넘음
+        self.assertEqual(lv(_d.date(2026, 12, 20))["consensus"], "old")            # 46일: 한 달 넘음
+        self.assertEqual(now["annual"], "ok")                                      # 2025년 실적 있음
+        P2 = config.periods(2027)
+        self.assertEqual({f["key"]: f["level"] for f in nodeview.freshness(conn, "213500", P2, res, K, _d.date(2027, 4, 2))}["annual"], "warn")
+        conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

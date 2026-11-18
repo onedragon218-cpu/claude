@@ -1911,8 +1911,8 @@ function renderR(){
       `<div style="margin-top:4px"><b>WiseReport 기업개요</b>${(PF.wr_lines||[]).length ? '<ul style="margin:2px 0">' + PF.wr_lines.map(l=>`<li>${esc(l)}</li>`).join('') + '</ul>' : ' <span class="muted">없음</span>'}</div>` +
       `<div><b>DART 사업보고서 「사업의 개요」</b> ${PF.dart_overview ? `<div class="muted" style="white-space:normal">${esc(PF.dart_overview)}${PF.dart_overview.length>=600?'…':''}</div>` : `<span class="muted">${PF.dart_year ? '읽지 못함' : '아직 받지 않음(DART 키가 있는 PC에서 갱신하면 받음)'}</span>`}</div>` +
       ((PF.dart_products||[]).length ? `<div style="margin-top:4px"><b>DART 주요 제품 매출 비율</b><table><tr><th class="l">품목</th><th class="l">용도</th><th>비율</th></tr>${PF.dart_products.map(x=>`<tr><td class="l">${esc(x.name)}</td><td class="l">${esc(x.desc||'')}</td><td>${x.pct.toFixed(1)}%</td></tr>`).join('')}</table></div>` : (PF.dart_note ? `<div class="muted">${esc(PF.dart_note)}</div>` : '')) +
-      `</details>` : '') + `</div>` +
-    `<div class="muted" style="margin-top:6px">사업부 출처 ${esc(NV.seg_source||'없음')} · 지식 사전 ${esc(NV.knowledge_as_of||'')}${NV.review?` · Claude 검토 반영 ${esc(NV.review.as_of)}`:''}</div>`;
+      `</details>` : '') + `</div>`;
+  rFresh();
   $('#r-tiles').innerHTML = [['우호 쪽 매출 비중', pc(NV.share.good)], ['중립', pc(NV.share.mid)], ['비우호 쪽', pc(NV.share.bad)], ['가중 점수(−4~+4)', NV.wscore==null?'–':(NV.wscore>0?'+':'')+NV.wscore.toFixed(2)]]
     .map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   const groups = {}; (NV.node_choices||[]).forEach(n=>(groups[n.group] = groups[n.group] || []).push(n));
@@ -1939,6 +1939,14 @@ function renderR(){
     (NV.themes||[]).map(t=>`<tr><td class="l"><b>${esc(t.name)}</b></td><td>${(+t.strength).toFixed(1)}</td><td>${esc(t.confidence||'')}</td><td class="l" style="white-space:normal">${esc(t.desc||'')}</td><td class="l muted" style="white-space:normal">${esc(t.counter||'')}</td><td class="l muted">${esc(t.origin||'')}</td></tr>`).join('');
   $('#r-revinfo').textContent = NV.review ? `지금 반영된 Claude 검토: ${NV.review.as_of} (흐름 ${NV.review.n.themes} · 노드 ${NV.review.n.nodes} · 연결 ${NV.review.n.links} · 판정 ${NV.review.n.verdicts})` : '아직 Claude 검토 없음';
 }
+function rFresh(){   // 자료 기준일: 주의 = 노랑, 오래됨 = 빨강, 없음 = 회색(기준은 칸에 마우스를 올리면 보임)
+  const F = NV.freshness || [], st = {ok:'border-color:var(--border)', warn:'background:var(--warn-bg);border-color:var(--warn);color:var(--warn)',
+    old:'background:var(--bad-bg);border-color:var(--bad);color:var(--bad)', none:'background:var(--info-bg);border-color:var(--border);color:var(--text-muted)'};
+  const nOld = F.filter(f=>f.level==='old').length, nWarn = F.filter(f=>f.level==='warn').length;
+  const head = nOld||nWarn ? `<span style="color:${nOld?'var(--bad)':'var(--warn)'};font-weight:600">갱신이 필요한 자료 ${nOld+nWarn}개</span>` : '<span class="muted">자료 기준일</span>';
+  $('#r-head').insertAdjacentHTML('beforeend', `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">${head}` +
+    F.map(f=>`<span title="${esc(f.role)} · ${esc(f.rule)} · ${esc(f.hint)}" style="font-size:12px;padding:2px 8px;border:1px solid;border-radius:12px;${st[f.level]}">${esc(f.name)} <b>${esc(f.date||'없음')}</b>${f.age!=null?` <span style="opacity:.75">(${f.age}일)</span>`:''}</span>`).join('') +
+    `</div><div class="muted" style="font-size:12px;margin-top:2px">사업부 출처 ${esc(NV.seg_source||'없음')} · 노랑 = 곧 갱신 필요, 빨강 = 오래됨(판정을 그대로 믿기 어려움), 회색 = 자료 없음. 칸에 마우스를 올리면 기준이 보입니다.</div>`); }
 async function rExport(scope){
   if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
   $('#r-revmsg').textContent = '만드는 중…';

@@ -572,6 +572,65 @@ def save_review(d):
     return {k: len(new[k]) for k in ("themes", "nodes", "links", "verdicts")}
 
 
+# ---------------------------------------------------------------- 자료 기준일·신선도(2026-11-18 사용자 요청)
+# (이름, 판정에서의 역할, 주의 기준(일), 오래됨 기준(일), 근거) — 각 자료가 원래 갱신되는 주기의 약 2배를 '주의', 4배 안팎을 '오래됨'으로
+FRESH_RULES = {
+    "consensus": ("컨센서스", "시장 기대·매출 전망", 14, 30, "7일마다 받음 → 2주 넘으면 주의, 한 달 넘으면 오래됨"),
+    "cons_hist": ("컨센서스 추이(3개월 수정)", "시장 기대", 45, 75, "월말 기준으로 갱신 → 한 달 반 넘으면 주의"),
+    "mix": ("사업부 구성비", "사업부 목록·비중", 240, 420, "반기 보고서마다 바뀜 → 8개월 넘으면 주의, 14개월 넘으면 오래됨"),
+    "profile": ("기업개요(회사 정의)", "주력 연결·숨은 사업", 60, 120, "30일마다 받음 → 두 달 넘으면 주의"),
+    "news": ("뉴스", "관심도(점수 아님)", 14, 45, "3일마다 받음 → 2주 넘게 새 기사가 없으면 주의"),
+    "knowledge": ("지식 사전(세계 경제 흐름)", "구조 점수", 120, 240, "저절로 바뀌지 않음 → 4개월 넘으면 Claude 검토 권함"),
+    "review": ("Claude 검토", "흐름 갱신·판정 의견", 90, 180, "검토 결과는 90일 유효 → 지나면 다시 검토 권함"),
+}
+
+
+def _age(d, today):
+    if not d:
+        return None
+    s = str(d)[:10]
+    try:
+        if len(s) == 7:                                  # 'YYYY-MM' → 그달 말일로 봄
+            y, m = int(s[:4]), int(s[5:7])
+            last = (dt.date(y + (m == 12), m % 12 + 1, 1) - dt.timedelta(days=1))
+            return (today - last).days
+        return (today - dt.date.fromisoformat(s)).days
+    except ValueError:
+        return None
+
+
+def freshness(conn, code, P, res, K, today=None):
+    """자료 기준일과 상태(ok·warn·old·none). 사업보고서·연간 실적은 '나와 있어야 할 해'와 비교한다."""
+    today = today or dt.date.today()
+    from .goodco import Data
+    D = Data(conn, code, P)
+    pf = res.get("profile") or {}
+    hist = conn.execute("SELECT MAX(as_of) d FROM consensus_history WHERE stock_code=?", (code,)).fetchone()
+    news = conn.execute("SELECT MAX(published) d FROM news WHERE stock_code=?", (code,)).fetchone()
+    rv = K.get("review") or {}
+    dates = {"consensus": D.cons_asof(), "cons_hist": hist["d"] if hist else None, "mix": res.get("mix_as_of"),
+             "profile": pf.get("wr_at"), "news": news["d"] if news else None,
+             "knowledge": _load(os.path.join(KDIR, "nodes.json")).get("as_of"), "review": rv.get("as_of")}
+    out = []
+    for k, (nm, role, warn, old, rule) in FRESH_RULES.items():
+        d, age = dates.get(k), _age(dates.get(k), today)
+        lvl = "none" if d is None else "old" if age is not None and age > old else "warn" if age is not None and age > warn else "ok"
+        hint = {"none": "자료 없음" + (" — 이 기업을 갱신하세요" if k not in ("knowledge", "review") else " — R 탭 아래 Claude 검토로 넣을 수 있음"),
+                "old": "오래됨 — 갱신 권함", "warn": "주의 — 곧 갱신 필요", "ok": "최신"}[lvl]
+        out.append({"key": k, "name": nm, "role": role, "date": str(d)[:10] if d else None, "age": age, "level": lvl, "rule": rule, "hint": hint})
+    # 연간 자료: 기준 연도의 전년 사업보고서가 나와 있어야 함(4월 1일 기준 연도 전환과 같은 규칙)
+    want = P["current"] - 1
+    fy = max([y for (y, per, m) in D.f if per == "FY" and m == "revenue" and D.f[(y, per, m)][0] is not None and y < P["current"]], default=None)
+    for k, nm, role, have in (("annual", "연간 실적(DART)", "사업부 매출 흐름", fy),
+                              ("bizreport", "사업보고서 「사업의 내용」", "사업부·주요 제품", pf.get("dart_year"))):
+        lvl = "none" if have is None else "ok" if have >= want else "warn" if have == want - 1 else "old"
+        out.append({"key": k, "name": nm, "role": role, "date": f"{have}년" if have else None, "age": None, "level": lvl,
+                    "rule": f"기준 연도 {P['current']} → {want}년 사업보고서가 있어야 함(3월 말 공시, 4월 1일에 기준 연도가 바뀜)",
+                    "hint": {"none": "자료 없음" + (" — DART 키가 있는 PC에서 갱신" if k == "bizreport" else ""), "ok": "최신",
+                             "warn": f"{want}년 자료가 아직 없음 — 갱신 권함", "old": "2년 이상 지난 자료"}[lvl]})
+    return out
+
+
 def payload(conn, code, P):
     K = knowledge()
     res = company(conn, code, P, K)
@@ -582,4 +641,4 @@ def payload(conn, code, P):
                 node_choices=[{"id": n["id"], "name": n["name"], "group": n.get("group", "기타")} for n in K["nodes"].values()],
                 knowledge_as_of=_load(os.path.join(KDIR, "nodes.json")).get("as_of"),
                 review={"as_of": rv.get("as_of"), "n": {k: len(rv.get(k) or []) for k in ("themes", "nodes", "links", "verdicts")}} if rv else None,
-                disclaimer=DISCLAIMER)
+                freshness=freshness(conn, code, P, res, K), disclaimer=DISCLAIMER)
