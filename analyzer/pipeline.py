@@ -446,6 +446,11 @@ def collect_business(conn, code, stats, has_key=False, corp_fn=None):
         except wisereport.ConsensusUnavailable as e:
             db.log_fetch(conn, "segments", code, code, False, 0, str(e))
             stats.notes.append(f"사업부 구성 미확보: {e}")
+    try:                                   # 회사 정의(WiseReport 기업개요 30일마다 · DART 사업보고서 「사업의 내용」 새 보고서마다)
+        from . import profile
+        profile.collect(conn, code, has_key, stats)
+    except Exception as e:                 # noqa: BLE001
+        stats.notes.append(f"회사 정의 미확보: {type(e).__name__}")
     today = _dt.date.today()
     since = today - _dt.timedelta(days=365)
     if has_key and corp_fn and not db.fetched_recently(conn, "dart_events", code, config.TTL_DAYS["dart_events"], ok_only=True):

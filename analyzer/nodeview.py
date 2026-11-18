@@ -83,8 +83,8 @@ def is_generic(name):
     return name in GENERIC or s in {re.sub(r"\s+", "", g) for g in GENERIC} or bool(re.fullmatch(r"(기타|용역|상품|제품)(\(.*\))?(등|부문)?", s))
 
 
-def link_segment(name, ksic, K, user_links, review_links):
-    """반환: (노드 id 또는 None, 연결 방법 설명)"""
+def link_segment(name, ksic, K, user_links, review_links, main=None):
+    """반환: (노드 id 또는 None, 연결 방법 설명). 순서: 사용자 > Claude 검토 > 이름 낱말 > 기업개요 주력(막연한 이름일 때) > 업종코드"""
     if name in user_links:
         return user_links[name], "사용자 지정"
     if name in review_links:
@@ -97,6 +97,8 @@ def link_segment(name, ksic, K, user_links, review_links):
                     best = (nid, len(kw), kw)
     if best:
         return best[0], f"이름 낱말 '{best[2]}'"
+    if main:
+        return main[0], f"기업개요 낱말 '{main[2]}'(주력 사업으로 연결)"
     if ksic:
         bk = None
         for nid, n in K["nodes"].items():
@@ -106,6 +108,73 @@ def link_segment(name, ksic, K, user_links, review_links):
         if bk:
             return bk[0], f"회사 업종코드 {ksic}(앞자리 {bk[2]})로 추정"
     return None, "연결할 노드를 찾지 못함"
+
+
+# ---------------------------------------------------------------- 회사 정의(기업개요·사업보고서)
+BIZ_NEAR = re.compile(r"^.{0,12}?(사업|제조|생산|판매|제작|개발|영위|연구)")
+_PRE_OK = set(" ,·/()[]\"'“”‘’·-")
+_POST_PARTICLES = ("으로", "과", "와", "및", "을", "를", "의", "이", "가", "은", "는", "에", "로", "등", "와의", "과의")
+
+
+def _token_hits(text, kw):
+    """낱말 단위로만 찾기: '방송'이 '방송영상물' 안에서 걸리지 않게. 뒤에는 조사·문장부호·숫자·영문만 허용"""
+    out, low, k = [], text.lower(), kw.lower()
+    st = 0
+    while True:
+        i = low.find(k, st)
+        if i < 0:
+            return out
+        st = i + 1
+        pre = text[i - 1] if i > 0 else " "
+        post = text[i + len(kw):]
+        if pre not in _PRE_OK and not ("A" <= pre.upper() <= "Z" and False):
+            if not (pre.isspace()):
+                continue
+        if post and not (post[0] in _PRE_OK or post[0].isspace() or post[0].isdigit() or post[0].isascii() and post[0].isalpha()
+                         or post.startswith(_POST_PARTICLES)):
+            continue
+        out.append(i)
+
+
+def profile_nodes(prof, K):
+    """기업개요·사업의 개요 문장에서 노드 찾기. 반환: [(노드 id, 점수, 대표 낱말, 사업으로 쓰였나)] 점수 큰 순.
+    낱말 단위로만 세고(방송영상물 ≠ 방송), 괄호 안은 빼고, '주력'이 있는 문장은 2배.
+    '사업으로 쓰였나' = 낱말 뒤 12자 안에 사업·제조·생산·판매·제작·개발·영위가 있음(고객 이름 '방송국·플랫폼에 공급'과 구별)."""
+    if not prof:
+        return []
+    sents = []
+    for line in (prof.get("wr_lines") or []) + [prof.get("dart_overview") or ""]:
+        sents += [x for x in re.split(r"(?<=[.다음함])\s+|\n", line or "") if x.strip()]
+    sents += [f"{p.get('name', '')} {p.get('desc', '')} 제조" for p in prof.get("dart_products") or []]
+    hits = {}
+    for snt in sents:
+        clean = re.sub(r"\([^)]*\)", " ", snt)
+        w = 2 if "주력" in clean else 1
+        for nid, n in K["nodes"].items():
+            for kw in n.get("keywords") or []:
+                if len(kw) < 2:
+                    continue
+                for pos in _token_hits(clean, kw):
+                    biz = bool(BIZ_NEAR.search(clean[pos + len(kw):]))
+                    sc, ex, b = hits.get(nid, (0, kw, False))
+                    hits[nid] = (sc + w * len(kw) / 2, ex if len(ex) >= len(kw) else kw, b or biz)
+    return sorted([(nid, round(sc, 1), kw, b) for nid, (sc, kw, b) in hits.items()], key=lambda x: -x[1])
+
+
+def definition(prof):
+    """한 줄 정의: '주력'이 있는 줄 > 첫 줄. 설립 연혁·상장 문구는 걷어 낸다(원문은 화면에 따로 보여 줌)."""
+    lines = (prof or {}).get("wr_lines") or []
+    if not lines:
+        ov = (prof or {}).get("dart_overview")
+        return (ov[:160] + "…") if ov and len(ov) > 160 else ov
+    pick = next((l for l in lines if "주력" in l), lines[0])
+    x = re.sub(r"^.*(?:신설된|설립된|출범한|설립되었으며|설립되었고|설립되어)\s*", "", pick).lstrip(" ,")
+    x = re.split(r"(?:으로|로),\s", x)[0]
+    x = re.sub(r"(임|함|음)?\.\s*$", "", x).strip()
+    return x if len(x) >= 6 else pick
+
+
+ROLE_ORDER = {"주력": 0, "최대 사업": 0, "부수": 1, "부수(비중 미확인)": 2, "기타": 3}
 
 
 # ---------------------------------------------------------------- 신호
@@ -244,6 +313,17 @@ def company(conn, code, P, K=None):
     as_of = (conn.execute("SELECT MAX(as_of) d FROM segments WHERE stock_code=? AND kind='mix'", (code,)).fetchone() or {"d": None})["d"]
     segs = [dict(r) for r in conn.execute("SELECT name, pct FROM segments WHERE stock_code=? AND kind='mix' AND as_of=? ORDER BY pct DESC",
                                           (code, as_of))] if as_of else []
+    from . import profile as _profile
+    prof = _profile.get(conn, code)
+    seg_src = f"WiseReport 주요제품 매출구성({as_of})" if segs else None
+    dp = (prof or {}).get("dart_products") or []
+    if len(dp) >= 2 and 80 <= sum(x["pct"] for x in dp) <= 120:      # 사업보고서 주요 제품 표가 있으면 그것(품목·용도가 더 구체적)
+        segs = [{"name": x["name"] + (f" — {x['desc']}" if x.get("desc") and x["desc"] != x["name"] else ""), "pct": x["pct"],
+                 "link_text": f"{x['name']} {x.get('desc') or ''}"} for x in sorted(dp, key=lambda x: -x["pct"])]
+        seg_src = f"DART 사업보고서 {prof.get('dart_year')} 주요 제품"
+    pnodes = profile_nodes(prof, K)
+    main = next(((nid, sc, kw) for nid, sc, kw, _ in pnodes if not K["nodes"][nid].get("broad")),
+                (pnodes[0][:3] if pnodes else None))
     user = {r["segment"]: r["node_id"] for r in conn.execute("SELECT segment, node_id FROM node_links WHERE stock_code=?", (code,))}
     rv = K.get("review") or {}
     rlinks = {x["segment"]: x["node"] for x in rv.get("links") or [] if x.get("stock_code") == code}
@@ -257,7 +337,10 @@ def company(conn, code, P, K=None):
     out = []
     today = dt.date.today()
     for sg in segs:
-        nid, how = link_segment(sg["name"], ksic, K, user, rlinks)
+        nid, how = link_segment(sg["name"], ksic, K, user, rlinks) if sg["name"] in user or sg["name"] in rlinks else \
+            link_segment(sg.get("link_text") or sg["name"], ksic, K, {}, {}, main if is_generic(sg["name"]) or sg["name"] == "회사 전체" else None)
+        if nid is None and main:
+            nid, how = main[0], f"기업개요 낱말 '{main[2]}'(주력 사업으로 연결)"
         small_generic = is_generic(sg["name"]) and (sg.get("pct") or 0) < 10 and sg["name"] not in user and sg["name"] not in rlinks
         r = {"segment": sg["name"], "pct": sg.get("pct"), "node_id": nid, "how": how}
         if small_generic or nid is None:
@@ -277,31 +360,68 @@ def company(conn, code, P, K=None):
             r["review"] = dict(cv, as_of=cv.get("as_of") or rv.get("as_of"),
                                stale=age is not None and age > int(cv.get("valid_days") or REVIEW_STALE_DAYS))
         out.append(r)
+    pk = {nid: kw for nid, sc, kw, _ in pnodes}
+    for x in out:
+        if x.get("node_id") in pk:
+            x["profile_kw"] = pk[x["node_id"]]
+    # 숨은 부수 사업: 기업개요에는 있지만 매출 구성에 없는 사업(비중 미확인 — 회사 가중 점수에는 넣지 않음)
+    linked = {x.get("node_id") for x in out}
+    seg_text = " ".join(x["segment"] for x in out)
+    for nid, sc, kw, biz in pnodes:
+        n = K["nodes"][nid]
+        covered = any(k and k in seg_text for k in n.get("keywords") or [])     # 이미 매출 구성 이름에 들어 있는 사업(예: '인쇄용지, 특수지')
+        if nid in linked or covered or n.get("broad") or not biz:
+            continue
+        r = {"segment": f"{n['name']}(기업개요)", "pct": None, "node_id": nid, "how": f"기업개요 낱말 '{kw}'", "hidden": True,
+             "node_name": n["name"], "node_why": n.get("why"), "watch": n.get("watch"), "node_origin": n.get("origin")}
+        r.update(judge(n, K, {"pct": 0}, cs, (None, "비중 미확인 사업이라 사업부 숫자 없음")))
+        r["news"] = news_interest(conn, code, n["name"], n, K)
+        out.append(r)
+        linked.add(nid)
+    # 역할: 가장 큰 사업 = 주력(40% 이상) 또는 최대 사업, 5% 이상 부수, 5% 미만 기타
+    ranked = sorted([x for x in out if not x.get("excluded") and not x.get("hidden") and x.get("pct") is not None], key=lambda x: -x["pct"])
+    for i, x in enumerate(ranked):
+        x["role"] = ("주력" if x["pct"] >= 40 else "최대 사업") if i == 0 else "부수" if x["pct"] >= 5 else "기타"
+    for x in out:
+        if x.get("hidden"):
+            x["role"] = "부수(비중 미확인)"
+        elif x.get("excluded"):
+            x["role"] = "기타"
+        x.setdefault("role", "부수")
+    out.sort(key=lambda x: (ROLE_ORDER.get(x["role"], 9), -(x.get("pct") or 0)))
     judged = [x for x in out if not x.get("excluded") and x.get("pct")]
     tot = sum(x["pct"] for x in judged)
     share = {k: sum(x["pct"] for x in judged if (x["score"] >= 0.5 if k == "good" else x["score"] <= -0.5 if k == "bad" else -0.5 < x["score"] < 0.5))
              for k in ("good", "mid", "bad")}
     wscore = sum(x["pct"] * x["score"] for x in judged) / tot if tot else None
-    return {"code": code, "name": name, "ksic": ksic, "mix_as_of": as_of, "segments": out, "company_signals": cs,
-            "share": share, "share_total": tot, "wscore": wscore, "summary": summary(out, wscore)}
+    prof_out = None
+    if prof:
+        prof_out = {"definition": definition(prof), "wr_lines": prof.get("wr_lines") or [], "wics": prof.get("wics"),
+                    "wr_at": prof.get("wr_at"), "wr_url": prof.get("wr_url"), "dart_year": prof.get("dart_year"),
+                    "dart_overview": (prof.get("dart_overview") or "")[:600] or None, "dart_products": dp, "dart_note": prof.get("dart_note"),
+                    "dart_at": prof.get("dart_at"), "dart_rcept_no": prof.get("dart_rcept_no"),
+                    "main_node": next((x.get("node_name") for x in out if x.get("role") in ("주력", "최대 사업")), None)
+                    or (K["nodes"][main[0]]["name"] if main else None)}
+    return {"code": code, "name": name, "ksic": ksic, "mix_as_of": as_of, "seg_source": seg_src, "segments": out, "company_signals": cs,
+            "share": share, "share_total": tot, "wscore": wscore, "profile": prof_out, "summary": summary(out, wscore, prof_out)}
 
 
-def summary(rows, wscore):
-    judged = sorted([x for x in rows if not x.get("excluded")], key=lambda x: -(x.get("pct") or 0))
+def summary(rows, wscore, prof=None):
+    """회사 방향 한 줄: 주력 사업의 판정 → 부수 사업 → 가중 결과"""
+    judged = [x for x in rows if not x.get("excluded")]
     if not judged:
-        return "판정할 사업부가 없습니다(사업부 구성비·업종코드 없음)."
-    top = judged[0]
+        return "판정할 사업부가 없습니다(사업부 구성비·기업개요·업종코드 없음)."
+    main = next((x for x in judged if x.get("role") in ("주력", "최대 사업")), judged[0])
+    pc = lambda x: f"{x['pct']:.0f}%" if x.get("pct") is not None else "비중 미확인"
+    s = f"{main.get('role', '주력')} '{main['segment']}'({pc(main)})는 {main['verdict']}"
+    if main.get("parts"):
+        s += f"({main['parts'][0][0]} {main['parts'][0][1]:+.1f})"
+    subs = [x for x in judged if x is not main and x.get("role") != "기타"]
+    if subs:
+        s += ", 부수 사업은 " + ", ".join(f"'{x['segment']}'({pc(x)}) {x['verdict']}" for x in subs[:3])
     lab = "우호" if wscore is not None and wscore >= 0.5 else "비우호" if wscore is not None and wscore <= -0.5 else "중립"
-    s = f"매출 비중으로 가중하면 {lab} 쪽({wscore:+.2f})." if wscore is not None else ""
-    s += f" 가장 큰 사업부 '{top['segment']}'({(top.get('pct') or 0):.0f}%)는 {top['verdict']}"
-    if top.get("parts"):
-        s += f" — {top['parts'][0][0]} 영향이 가장 큼."
-    else:
-        s += "."
-    other = [x for x in judged[1:] if x["verdict"] != top["verdict"]]
-    if other:
-        s += " 반면 " + ", ".join(f"'{x['segment']}'는 {x['verdict']}" for x in other[:2]) + "."
-    return s.strip()
+    s += "." + (f" 매출 비중으로 가중하면 {lab} 쪽({wscore:+.2f})." if wscore is not None else "")
+    return s
 
 
 def log_today(conn, code, P):
@@ -344,9 +464,11 @@ def export(conn, codes, P):
         except Exception as e:     # noqa: BLE001
             comps.append({"code": c, "error": f"{type(e).__name__}: {e}"})
             continue
+        pf = r.get("profile") or {}
         comps.append({"stock_code": c, "name": r["name"], "industry_code": r["ksic"], "segments_as_of": r["mix_as_of"],
-                      "summary": r["summary"],
-                      "segments": [{"segment": s["segment"], "pct": s["pct"], "node": s.get("node_id"), "link_how": s.get("how"),
+                      "segments_source": r.get("seg_source"), "company_overview": pf.get("wr_lines"), "wics": pf.get("wics"),
+                      "business_overview_dart": pf.get("dart_overview"), "summary": r["summary"],
+                      "segments": [{"segment": s["segment"], "role": s.get("role"), "pct": s["pct"], "node": s.get("node_id"), "link_how": s.get("how"),
                                     **({"excluded": s.get("why")} if s.get("excluded") else
                                        {"app_verdict": s["verdict"], "score": s["score"], "confidence": s["confidence"],
                                         "structural": [f"{n} {v:+.1f}" for n, v, _ in s["parts"]],

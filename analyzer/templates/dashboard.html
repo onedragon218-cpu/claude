@@ -1897,16 +1897,31 @@ const sgn = x => x==null ? '<span class="muted">·</span>' : x>0 ? '<b style="co
 function renderR(){
   if (NV.error){ $('#r-head').textContent = '판정하지 못했습니다: ' + NV.error; return; }
   const pc = x => x==null ? '–' : x.toFixed(1)+'%';
-  $('#r-head').innerHTML = `<div style="font-size:15px"><b>요약</b> ${esc(NV.summary)}</div><div class="muted" style="margin-top:4px">사업부 구성비 ${esc(NV.mix_as_of||'없음')} (WiseReport) · 업종코드 ${esc(NV.ksic||'–')} · 지식 사전 ${esc(NV.knowledge_as_of||'')}${NV.review?` · Claude 검토 반영 ${esc(NV.review.as_of)}`:''}</div>`;
+  const PF = NV.profile, pcx = x => x==null ? '비중 미확인' : x.toFixed(0)+'%';
+  const roleList = (want) => NV.segments.filter(r=>want.includes(r.role) && !r.excluded).map(r=>`<span style="white-space:nowrap">${esc(r.segment)}${r.node_name && !String(r.segment).includes(r.node_name) && !/\(기업개요\)$/.test(r.segment) ? ` <span class="muted">[${esc(r.node_name)}]</span>` : ''} <span class="muted">${pcx(r.pct)}</span> <span class="badge ${vCls(r.verdict)}">${esc(r.verdict)}</span></span>`).join(' · ');
+  const mainL = roleList(['주력','최대 사업']), subL = roleList(['부수','부수(비중 미확인)']), etcL = NV.segments.filter(r=>r.role==='기타').map(r=>`${esc(r.segment)} ${pcx(r.pct)}${r.excluded?'(판정 제외)':''}`).join(' · ');
+  $('#r-head').innerHTML = `<div class="warnbox" style="border-left-color:var(--accent);background:transparent;margin:0">` +
+    `<div style="font-size:16px"><b>${esc(NV.name)}</b> — ${PF && PF.definition ? esc(PF.definition) : '<span class="muted">회사 정의 자료 없음(이 기업을 갱신하면 WiseReport 기업개요·DART 사업보고서를 받습니다)</span>'}</div>` +
+    `<div class="muted" style="margin-top:2px">${PF && PF.wics ? `업종(WICS) ${esc(PF.wics)} · ` : ''}업종코드 ${esc(NV.ksic||'–')}${PF && PF.main_node ? ` · 주력 노드 ${esc(PF.main_node)}` : ''}</div>` +
+    `<table style="margin-top:8px"><tr><td class="l" style="width:90px"><b>주력 사업</b></td><td class="l">${mainL||'<span class="muted">–</span>'}</td></tr>` +
+    `<tr><td class="l"><b>부수 사업</b></td><td class="l">${subL||'<span class="muted">없음</span>'}</td></tr>` +
+    (etcL ? `<tr><td class="l muted">기타</td><td class="l muted">${etcL}</td></tr>` : '') +
+    `<tr><td class="l"><b>회사 방향</b></td><td class="l">${esc(NV.summary)}</td></tr></table>` +
+    (PF ? `<details style="margin-top:6px"><summary class="muted">회사 정의 원문(기업개요 ${esc((PF.wr_at||'').slice(0,10))}${PF.dart_year?` · DART 사업보고서 ${PF.dart_year}`:''})</summary>` +
+      `<div style="margin-top:4px"><b>WiseReport 기업개요</b>${(PF.wr_lines||[]).length ? '<ul style="margin:2px 0">' + PF.wr_lines.map(l=>`<li>${esc(l)}</li>`).join('') + '</ul>' : ' <span class="muted">없음</span>'}</div>` +
+      `<div><b>DART 사업보고서 「사업의 개요」</b> ${PF.dart_overview ? `<div class="muted" style="white-space:normal">${esc(PF.dart_overview)}${PF.dart_overview.length>=600?'…':''}</div>` : `<span class="muted">${PF.dart_year ? '읽지 못함' : '아직 받지 않음(DART 키가 있는 PC에서 갱신하면 받음)'}</span>`}</div>` +
+      ((PF.dart_products||[]).length ? `<div style="margin-top:4px"><b>DART 주요 제품 매출 비율</b><table><tr><th class="l">품목</th><th class="l">용도</th><th>비율</th></tr>${PF.dart_products.map(x=>`<tr><td class="l">${esc(x.name)}</td><td class="l">${esc(x.desc||'')}</td><td>${x.pct.toFixed(1)}%</td></tr>`).join('')}</table></div>` : (PF.dart_note ? `<div class="muted">${esc(PF.dart_note)}</div>` : '')) +
+      `</details>` : '') + `</div>` +
+    `<div class="muted" style="margin-top:6px">사업부 출처 ${esc(NV.seg_source||'없음')} · 지식 사전 ${esc(NV.knowledge_as_of||'')}${NV.review?` · Claude 검토 반영 ${esc(NV.review.as_of)}`:''}</div>`;
   $('#r-tiles').innerHTML = [['우호 쪽 매출 비중', pc(NV.share.good)], ['중립', pc(NV.share.mid)], ['비우호 쪽', pc(NV.share.bad)], ['가중 점수(−4~+4)', NV.wscore==null?'–':(NV.wscore>0?'+':'')+NV.wscore.toFixed(2)]]
     .map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   const groups = {}; (NV.node_choices||[]).forEach(n=>(groups[n.group] = groups[n.group] || []).push(n));
   const sel = (r) => `<select class="r-link" data-seg="${esc(r.segment)}" title="이 사업부를 다른 노드에 연결(PC에서만)"><option value="">${r.node_id?'— 자동 연결로 되돌리기 —':'— 노드 고르기 —'}</option>` +
     Object.entries(groups).map(([g, ns])=>`<optgroup label="${esc(g)}">${ns.map(n=>`<option value="${esc(n.id)}" ${n.id===r.node_id?'selected':''}>${esc(n.name)}</option>`).join('')}</optgroup>`).join('') + '</select>';
-  $('#r-table').innerHTML = '<tr><th class="l">사업부(비중)</th><th class="l">연결 노드</th><th class="l">앱 판정</th><th class="l">Claude 검토</th><th class="l">구조 흐름(영향)</th><th class="l">숫자 신호</th><th class="l">반대 근거</th><th class="l">판정을 바꿀 것</th><th class="l">뉴스 관심도</th></tr>' +
+  $('#r-table').innerHTML = '<tr><th class="l">역할 · 사업부(비중)</th><th class="l">연결 노드</th><th class="l">앱 판정</th><th class="l">Claude 검토</th><th class="l">구조 흐름(영향)</th><th class="l">숫자 신호</th><th class="l">반대 근거</th><th class="l">판정을 바꿀 것</th><th class="l">뉴스 관심도</th></tr>' +
     NV.segments.map(r=>{
-      const head = `<td class="l" style="min-width:120px"><b>${esc(r.segment)}</b><br><span class="muted">${pc(r.pct)}</span></td>`;
-      const link = `<td class="l" style="min-width:170px">${r.node_name?`<b>${esc(r.node_name)}</b>`:'<span class="muted">연결 없음</span>'}<div class="muted" style="font-size:12px">${esc(r.how||'')}</div>${sel(r)}</td>`;
+      const head = `<td class="l" style="min-width:130px"><span class="badge ${r.role==='주력'||r.role==='최대 사업'?'b-OK':''}" style="${r.role==='주력'||r.role==='최대 사업'?'':'background:var(--info-bg);color:var(--text-secondary)'}">${esc(r.role||'')}</span><br><b>${esc(r.segment)}</b><br><span class="muted">${r.pct==null?'비중 미확인':pc(r.pct)}</span></td>`;
+      const link = `<td class="l" style="min-width:170px">${r.node_name?`<b>${esc(r.node_name)}</b>`:'<span class="muted">연결 없음</span>'}<div class="muted" style="font-size:12px">${esc(r.how||'')}</div>${r.profile_kw?`<div class="muted" style="font-size:11px">기업개요 언급: '${esc(r.profile_kw)}'</div>`:''}${r.hidden?'':sel(r)}</td>`;
       const rv = r.review ? `<td class="l" style="min-width:150px;${r.review.stale?'color:var(--text-muted)':''}"><span class="badge ${r.review.stale?'':vCls(r.review.verdict)}">${esc(r.review.verdict)}</span> <span class="muted">확신 ${esc(r.review.confidence)}</span>${!r.excluded && r.review.verdict!==r.verdict?' <span class="badge b-WARN" title="앱 판정과 다름">다름</span>':''}<div style="font-size:12px;white-space:normal">${esc(r.review.reason||'')}</div><div class="muted" style="font-size:11px">${esc(r.review.as_of||'')}${r.review.stale?' · 오래됨':''}</div></td>` : '<td class="l muted">–</td>';
       if (r.excluded) return `<tr style="color:var(--text-muted)">${head}${link}<td class="l" colspan="1">판정 제외</td>${rv}<td colspan="5" class="l">${esc(r.why||'')}</td></tr>`;
       const nums = r.nums.map(([lab, x, d])=>`<div>${sgn(x)} <span style="font-size:12px">${esc(lab)}</span><div class="muted" style="font-size:11px">${esc(d)}</div></div>`).join('');

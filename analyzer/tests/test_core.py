@@ -749,6 +749,34 @@ class T(unittest.TestCase):
         self.assertTrue(any(x.get("excluded") for x in r["segments"]))     # 용역부문 등(1.3%) 판정 제외
         conn.close()
 
+    def test_profile_definition_and_roles(self):
+        from analyzer import profile, nodeview
+        page = ('<li class="dot_cmp" data-cd="1">동사는 2016년 A사의 드라마 사업본부가 물적분할되어 설립된 방송영상물 제작 전문기업으로, 2017년 상장함.</li>'
+                '<li class="dot_cmp" data-cd="1">드라마 콘텐츠를 기획·제작하여 방송국, 미디어 플랫폼, 해외시장에 공급하고 있음.</li> WICS : 방송과엔터테인먼트 &nbsp;')
+        w = profile.parse_wr(page)
+        self.assertEqual((len(w["lines"]), w["wics"]), (2, "방송과엔터테인먼트"))
+        K = nodeview.knowledge()
+        prof = {"wr_lines": w["lines"]}
+        self.assertEqual(nodeview.definition(prof), "방송영상물 제작 전문기업")
+        found = {nid: biz for nid, sc, kw, biz in nodeview.profile_nodes(prof, K)}
+        self.assertNotIn("broadcasting", found)                 # '방송영상물' 안의 '방송'은 세지 않음
+        self.assertFalse(found.get("platform", False))           # '플랫폼에 공급'은 고객이지 사업이 아님
+        self.assertTrue(found.get("drama"))
+        self.assertEqual(nodeview.definition({"wr_lines": ["동사는 1965년 A로 설립되었고, 2015년 B에서 인적분할하여 신설된 국내 최대 지류 제조회사임."]}),
+                         "국내 최대 지류 제조회사")
+        xml = ('<SECTION-1><TITLE>II. 사업의 내용</TITLE><SECTION-2><TITLE>1. 사업의 개요</TITLE><P>당사는 보툴리눔 톡신을 주력으로 합니다.</P></SECTION-2>'
+               '<SECTION-2><TITLE>2. 주요 제품 및 서비스</TITLE><TABLE><TR><TH>사업부문</TH><TH>품목</TH><TH>구체적용도</TH><TH>매출액</TH><TH>비율</TH></TR>'
+               '<TR><TD ROWSPAN="2">바이오</TD><TD>메디톡신</TD><TD>보툴리눔 톡신 제제</TD><TE>120</TE><TE>60.0</TE></TR>'
+               '<TR><TD>뉴라미스</TD><TD>필러</TD><TE>40</TE><TE>20.0</TE></TR><TR><TD>기타</TD><TD>기타</TD><TD>용역</TD><TE>40</TE><TE>20.0</TE></TR>'
+               '<TR><TD>합계</TD><TD></TD><TD></TD><TE>200</TE><TE>100.0</TE></TR></TABLE></SECTION-2></SECTION-1><SECTION-1><TITLE>III. 재무</TITLE></SECTION-1>')
+        b = profile.parse_business(xml)
+        self.assertIn("보툴리눔", b["overview"])
+        self.assertEqual([(x["name"], x["desc"], x["pct"]) for x in b["products"]],
+                         [("메디톡신", "보툴리눔 톡신 제제", 60.0), ("뉴라미스", "필러", 20.0), ("기타", "용역", 20.0)])
+        self.assertEqual(profile.parse_business("<SECTION-1><TITLE>I. 회사</TITLE></SECTION-1>")["products"], [])
+        # 막연한 사업부 이름은 기업개요의 주력 낱말로 연결(업종코드보다 먼저)
+        self.assertEqual(nodeview.link_segment("제품(수출)", "211", K, {}, {}, ("botulinum", 3, "보툴리눔"))[0], "botulinum")
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")
