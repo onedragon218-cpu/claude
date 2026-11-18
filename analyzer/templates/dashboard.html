@@ -131,6 +131,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="P">P. 우상향 저평가</button>
   <button data-s="Q">Q. 적정 PER 주가</button>
   <button data-s="R">R. 사업부 우호 판정</button>
+  <button data-s="S">S. 노드 사전</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -535,6 +536,28 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     </div>
     <textarea id="r-revtext" rows="5" style="width:100%;box-sizing:border-box;margin-top:8px" placeholder="② Claude가 돌려준 JSON을 여기에 붙여 넣으세요(앞뒤 설명 글이 섞여 있어도 됩니다)"></textarea>
     <div class="row" style="gap:8px;align-items:center;margin-top:6px"><button class="primary" id="r-revsave">② 검토 결과 넣기</button><span class="muted" id="r-revmsg"></span></div>
+  </div>
+</section>
+<section id="S">
+  <div class="card">
+    <h2 style="margin:0 0 6px">노드는 어떻게 만들어지고 쓰이나</h2>
+    <div id="s-guide"></div>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">세계 경제 흐름 <span class="muted" style="font-size:14px;font-weight:400" id="s-tcount"></span></h2>
+    <div class="tablewrap"><table id="s-themes"></table></div>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">노드 목록 <span class="muted" style="font-size:14px;font-weight:400" id="s-ncount"></span></h2>
+    <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <label style="flex-direction:row;align-items:center;gap:6px">찾기 <input id="s-q" placeholder="노드 이름·낱말·회사" style="width:180px"></label>
+      <label style="flex-direction:row;align-items:center;gap:6px">묶음 <select id="s-group"><option value="">전체</option></select></label>
+      <label style="flex-direction:row;align-items:center;gap:6px">흐름 <select id="s-theme"><option value="">전체</option></select></label>
+      <label style="flex-direction:row;align-items:center;gap:6px">정렬 <select id="s-sort"><option value="score_desc">구조 점수 높은 순</option><option value="score_asc">구조 점수 낮은 순</option><option value="links">연결 회사 많은 순</option><option value="group">묶음·이름</option></select></label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="s-linked"> 연결된 회사가 있는 노드만</label>
+    </div>
+    <div class="tablewrap"><table id="s-nodes"></table></div>
+    <p class="muted" id="s-note" style="margin:8px 0 0"></p>
   </div>
 </section>
 
@@ -1955,6 +1978,77 @@ async function rExport(scope){
     a.download = `사업부우호_검토요청_${scope==='all'?'DB전체':D.company.code}_${new Date().toISOString().slice(0,10)}.json`; a.click();
     $('#r-revmsg').innerHTML = '파일을 받았습니다. claude.ai 대화에 이 파일을 올리고 <b>"파일 안 instructions대로 검토해서 JSON만 답해줘"</b>라고 쓰세요.';
   } catch(e){ $('#r-revmsg').textContent = '만들지 못했습니다: ' + e.message; } }
+
+// ---------------- S. 노드 사전 (analyzer/nodeview.py catalog) ----------------
+const NC = D.nodecat || {error:'자료 없음'};
+function sGuide(){
+  const ex = (NV && !NV.error) ? (NV.segments||[]).find(r=>!r.excluded && !r.hidden && r.parts) : null;
+  const f1 = x => (x>0?'+':'') + (+x).toFixed(1);
+  let exHtml = '<p class="muted">지금 보는 회사에 판정된 사업부가 없어 예시를 만들지 못했습니다.</p>';
+  if (ex){
+    const raw = ex.parts.reduce((a,p)=>a+p[1],0), w = ex.weight_company, sg = ex.signals;
+    const nums = ex.nums.map(([lab,x,d])=>`<tr><td class="l">${esc(lab)}</td><td class="l muted" style="white-space:normal">${esc(d)}</td><td>${x==null?'없음':f1(x)}${x!=null&&w!==1&&!/사업부 매출/.test(lab)?` × ${w}`:''}</td></tr>`).join('');
+    exHtml = `<p style="margin:4px 0">지금 보는 회사 <b>${esc(NV.name)}</b>의 <b>${esc(ex.segment)}</b>(${ex.pct==null?'비중 미확인':ex.pct.toFixed(0)+'%'}) → 노드 <b>${esc(ex.node_name)}</b> <span class="muted">(${esc(ex.how)})</span></p>` +
+      `<table><tr><th class="l">단계</th><th class="l">계산</th><th>값</th></tr>` +
+      `<tr><td class="l">구조 점수</td><td class="l" style="white-space:normal">${ex.parts.map(p=>`${esc(p[0])} ${f1(p[1])}`).join(' + ') || '영향 없음'} = ${f1(raw)}${Math.abs(raw)>2?' → ±2로 자름':''}</td><td><b>${f1(ex.structural)}</b></td></tr>${nums}` +
+      `<tr><td class="l"><b>합계</b></td><td class="l">구조 + 숫자 신호${w!==1?`(회사 전체 숫자는 비중 60% 미만이라 × ${w})`:''}</td><td><b>${f1(ex.score)} → ${esc(ex.verdict)}</b> <span class="muted">확신 ${esc(ex.confidence)}</span></td></tr></table>`;
+  }
+  $('#s-guide').innerHTML = `
+  <pre style="margin:0 0 10px;padding:10px;background:var(--info-bg);border-radius:8px;white-space:pre-wrap;font-size:13px">[세계 경제 흐름 ${NC.themes?NC.themes.length:'–'}개]  ──영향(−2~+2)──▶  [노드 ${NC.nodes?NC.nodes.length:'–'}개]  ◀──연결──  [회사의 사업부]
+     knowledge/themes.json                knowledge/nodes.json               WiseReport 구성비 · DART 주요 제품
+                                                   │
+                                                   ▼
+                                구조 점수 + 숫자 신호 → 사업부 판정 → 회사 방향(매출 비중 가중)</pre>
+  <details open><summary><b>① 노드란</b></summary><div style="margin:4px 0 8px">산업·제품 단위의 칸입니다(예: 인쇄용지, 전력기기, 보툴리눔 톡신). <b>앱이 저절로 만들지 않고</b> 미리 정해 둔 지식 사전에서 골라 씁니다. 노드마다 ① 찾을 <b>낱말</b> ② 넓은 노드는 <b>업종코드</b> ③ 세계 경제 흐름별 <b>영향(−2~+2)</b> ④ <b>이유</b>와 <b>지켜볼 지표</b>가 들어 있습니다. '넓은 노드'(제약 일반·제지 일반 등)는 숨은 부수 사업 찾기에 쓰지 않습니다.</div></details>
+  <details open><summary><b>② 흐름(테마)이란</b></summary><div style="margin:4px 0 8px">세계 경제의 큰 변화입니다(예: 디지털 대체, AI 인프라 투자). 흐름마다 <b>강도</b>(지금 얼마나 세게 작동하는지 0~1), 확신, <b>반대 근거</b>가 있습니다. 노드의 구조 점수 = Σ(영향 × 강도)이고 −2~+2로 자릅니다.</div></details>
+  <details open><summary><b>③ 사업부가 노드에 연결되는 순서</b></summary><ol style="margin:4px 0 8px">
+    <li><b>사용자 지정</b> — 화면 R 선택 상자로 고른 것</li><li><b>Claude 검토</b> — 검토 결과로 넣은 연결</li>
+    <li><b>사업부 이름의 낱말</b> — 예: '인쇄용지, 특수지' → 인쇄용지(여러 개면 더 긴 낱말 우선)</li>
+    <li><b>기업개요 주력 낱말</b> — 이름이 '제품(수출)'처럼 막연할 때(예: 메디톡스 → 보툴리눔 톡신)</li>
+    <li><b>회사 업종코드</b> — 위에서 못 찾을 때 넓은 노드로</li><li>연결 없음 — 화면에 이유 표시</li></ol>
+    <div class="muted">비중 10% 미만 '기타·용역'은 판정 제외. 기업개요에 사업으로 나오지만 매출 구성에 없는 노드는 '부수(비중 미확인)'로 따로 판정(회사 가중 점수에는 안 넣음).</div></details>
+  <details open><summary><b>④ 판정 계산 — 지금 보는 회사 예시</b></summary><div style="margin:4px 0 8px">${exHtml}
+    <div class="muted" style="margin-top:4px">숫자 신호: 사업부 매출 흐름(연 ±5% → ±1), 영업이익 컨센서스 3개월 수정(±3% → ±1), 매출 전망 올해→내후년(연 ±5% → ±1). 합계 ≥ +1.5 우호 · ≥ +0.5 약한 우호 · ±0.5 안 중립 · ≤ −0.5 약한 비우호 · ≤ −1.5 비우호. 확신 높음 = 숫자 신호 2개 이상이 모두 같은 쪽이고 구조도 같은 쪽(|구조| ≥ 0.8). 같은 자료면 언제나 같은 답.</div></div></details>
+  <details><summary><b>⑤ 노드를 바꾸거나 늘리는 방법</b></summary><table style="margin:4px 0 8px"><tr><th class="l">방법</th><th class="l">할 수 있는 것</th><th class="l">범위</th></tr>
+    <tr><td class="l">화면 R 선택 상자</td><td class="l">사업부를 기존 노드 중 하나에 다시 연결</td><td class="l">그 회사만, 바로 반영</td></tr>
+    <tr><td class="l">Claude 검토 넣기(화면 R 아래)</td><td class="l">새 노드·새 흐름 추가, 영향·낱말·강도 수정, 사업부 연결</td><td class="l">모든 회사(형식이 틀린 항목은 빼고 알려 줌)</td></tr>
+    <tr><td class="l">새 버전 설치</td><td class="l">기본 사전 파일 자체를 고침</td><td class="l">모든 회사</td></tr></table>
+    <div class="muted">한계: 화면에서 새 노드를 직접 만들 수는 없음 · '제품 → 흐름' 한 단계만 표현(원재료·고객 같은 연쇄는 아직 없음) · 아주 세부 제품은 넓은 노드에 묶일 수 있음.</div></details>`;
+}
+function renderS(){
+  if (NC.error){ $('#s-guide').textContent = '노드 사전을 읽지 못했습니다: ' + NC.error; return; }
+  sGuide();
+  $('#s-tcount').textContent = `${NC.themes.length}개 · 지식 사전 ${NC.knowledge_as_of||''}${NC.review_as_of?` · Claude 검토 ${NC.review_as_of}`:''}`;
+  $('#s-themes').innerHTML = '<tr><th class="l">흐름</th><th>강도</th><th>확신</th><th>우호 노드</th><th>비우호 노드</th><th class="l">내용</th><th class="l">반대 근거</th><th class="l">출처</th></tr>' +
+    NC.themes.map(t=>`<tr><td class="l"><a href="#" class="s-tlink" data-t="${esc(t.id)}"><b>${esc(t.name)}</b></a></td><td>${(+t.strength).toFixed(1)}</td><td>${esc(t.confidence||'')}</td><td style="color:var(--good)">${t.n_pos}</td><td style="color:var(--bad)">${t.n_neg}</td><td class="l" style="white-space:normal">${esc(t.desc||'')}</td><td class="l muted" style="white-space:normal">${esc(t.counter||'')}</td><td class="l muted">${esc(t.origin||'')}</td></tr>`).join('');
+  document.querySelectorAll('.s-tlink').forEach(a=>a.onclick = e => { e.preventDefault(); $('#s-theme').value = a.dataset.t; sNodes(); $('#s-nodes').scrollIntoView({behavior:'smooth'}); });
+  if ($('#s-group').options.length <= 1){
+    [...new Set(NC.nodes.map(n=>n.group))].forEach(g=>$('#s-group').insertAdjacentHTML('beforeend', `<option>${esc(g)}</option>`));
+    NC.themes.forEach(t=>$('#s-theme').insertAdjacentHTML('beforeend', `<option value="${esc(t.id)}">${esc(t.name)}</option>`)); }
+  sNodes();
+}
+function sNodes(){
+  // 지금 보는 회사의 실시간 연결을 판정 기록에 덧붙임(기록이 아직 없어도 보이게)
+  const live = {}; if (NV && !NV.error) (NV.segments||[]).forEach(r=>{ if (r.node_id && !r.excluded) (live[r.node_id] = live[r.node_id] || []).push({code: NV.code, name: NV.name, segment: r.segment, verdict: r.verdict, score: r.score, day: '지금'}); });
+  const q = ($('#s-q').value||'').trim().toLowerCase(), g = $('#s-group').value, th = $('#s-theme').value, srt = $('#s-sort').value, onlyL = $('#s-linked').checked;
+  let rows = NC.nodes.map(n=>{ const L = (n.links||[]).filter(x=>x.code!==(NV&&NV.code)).concat(live[n.id]||[]); return Object.assign({}, n, {L}); });
+  rows = rows.filter(n=>(!g || n.group===g) && (!th || n.themes.some(t=>t.id===th)) && (!onlyL || n.L.length) &&
+    (!q || [n.name, n.id, ...n.keywords, ...n.L.map(x=>x.name+' '+x.code)].join(' ').toLowerCase().includes(q)));
+  const by = {score_desc:(a,b)=>b.score-a.score, score_asc:(a,b)=>a.score-b.score, links:(a,b)=>b.L.length-a.L.length || b.score-a.score, group:(a,b)=>a.group.localeCompare(b.group)||a.name.localeCompare(b.name)}[srt];
+  rows.sort(by);
+  $('#s-ncount').textContent = `${rows.length} / ${NC.nodes.length}개`;
+  const bar = sc => { const w = Math.abs(sc)/2*60; return `<span style="display:inline-block;width:64px;height:8px;background:var(--grid);position:relative;vertical-align:middle;border-radius:4px"><span style="position:absolute;top:0;height:8px;border-radius:4px;${sc>=0?`left:32px;width:${w/2*1}px;background:var(--good)`:`right:32px;width:${w/2*1}px;background:var(--bad)`}"></span></span>`; };
+  $('#s-nodes').innerHTML = '<tr><th class="l">노드</th><th class="l">묶음</th><th>구조 점수</th><th class="l">흐름별 영향(× 강도)</th><th class="l">찾는 낱말 · 업종코드</th><th class="l">이유 · 지켜볼 지표</th><th class="l">연결된 회사(최근 판정)</th></tr>' +
+    (rows.length ? rows.map(n=>`<tr${n.broad?' style="color:var(--text-secondary)"':''}><td class="l" style="min-width:140px"><b>${esc(n.name)}</b><div class="muted" style="font-size:11px">${esc(n.id)}${n.broad?' · 넓은 노드':''}${n.origin&&n.origin!=='기본'?' · '+esc(n.origin):''}</div></td><td class="l">${esc(n.group)}</td>` +
+      `<td style="white-space:nowrap">${bar(n.score)} <b style="color:${n.score>0?'var(--good)':n.score<0?'var(--bad)':'inherit'}">${n.score>0?'+':''}${n.score.toFixed(1)}</b></td>` +
+      `<td class="l" style="min-width:200px">${n.themes.map(t=>`<div style="font-size:12px${th===t.id?';font-weight:700':''}"><span style="color:${t.impact>0?'var(--good)':'var(--bad)'}">${t.impact>0?'+':''}${t.impact}</span> ${esc(t.name)} <span class="muted">(${t.contrib>0?'+':''}${t.contrib.toFixed(1)})</span></div>`).join('') || '<span class="muted">영향 없음</span>'}</td>` +
+      `<td class="l" style="min-width:160px;white-space:normal;font-size:12px">${esc(n.keywords.join(', '))}${n.ksic.length?`<div class="muted">업종코드 ${esc(n.ksic.join(', '))}</div>`:''}</td>` +
+      `<td class="l" style="min-width:220px;white-space:normal;font-size:12px">${esc(n.why||'')}<div class="muted">지켜볼 것: ${esc(n.watch||'')}</div></td>` +
+      `<td class="l" style="min-width:180px;font-size:12px">${n.L.length ? n.L.slice(0,8).map(x=>`<div><a href="${companyUrl(x.code)}">${esc(x.name||x.code)}</a> <span class="muted">${esc(x.segment)}</span> <span class="badge ${vCls(x.verdict)}" style="font-size:11px">${esc(x.verdict)}</span></div>`).join('') + (n.L.length>8?`<div class="muted">외 ${n.L.length-8}곳</div>`:'') : '<span class="muted">–</span>'}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="l">조건에 맞는 노드가 없습니다.</td></tr>');
+  $('#s-note').innerHTML = `연결된 회사 = 매일 분석할 때 남기는 판정 기록(회사별 마지막 날${NC.log_day?`, 가장 최근 ${esc(NC.log_day)}`:''}, ${NC.n_companies}곳) + 지금 보는 회사. 기록은 갱신(자동 수집·전체 갱신)이 돌 때 쌓이므로, 처음에는 지금 보는 회사만 보일 수 있습니다. 흐름 이름을 누르면 그 흐름의 영향을 받는 노드만 봅니다.`;
+}
+['#s-q','#s-group','#s-theme','#s-sort','#s-linked'].forEach(id=>$(id).addEventListener('input', sNodes));
 $('#r-exp1').onclick = () => rExport('one');
 $('#r-expall').onclick = () => rExport('all');
 $('#r-revsave').onclick = async () => {
@@ -1969,7 +2063,7 @@ $('#r-revsave').onclick = async () => {
   $('#r-revsave').disabled = false; };
 ['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));

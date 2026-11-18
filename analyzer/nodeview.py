@@ -631,6 +631,40 @@ def freshness(conn, code, P, res, K, today=None):
     return out
 
 
+# ---------------------------------------------------------------- 화면 S「노드 사전」(2026-11-18)
+def catalog(conn, K=None):
+    """노드·흐름 전체 목록 + 노드마다 연결된 회사(매일 남기는 판정 기록의 회사별 마지막 날 기준)"""
+    ensure(conn)
+    K = K or knowledge()
+    links = {}
+    last = conn.execute("SELECT MAX(day) d FROM node_verdict_log").fetchone()["d"]
+    rows = conn.execute("""SELECT l.stock_code, c.name, l.segment, l.node_id, l.verdict, l.score, l.day FROM node_verdict_log l
+                           JOIN (SELECT stock_code, MAX(day) d FROM node_verdict_log GROUP BY stock_code) m
+                             ON m.stock_code=l.stock_code AND m.d=l.day
+                           LEFT JOIN companies c ON c.stock_code=l.stock_code ORDER BY c.name""").fetchall()
+    for r in rows:
+        links.setdefault(r["node_id"], []).append({"code": r["stock_code"], "name": r["name"], "segment": r["segment"],
+                                                   "verdict": r["verdict"], "score": r["score"], "day": r["day"]})
+    themes = []
+    for t in K["themes"].values():
+        imp = [(nid, n["themes"].get(t["id"])) for nid, n in K["nodes"].items() if n.get("themes", {}).get(t["id"])]
+        themes.append(dict(t, n_pos=sum(1 for _, v in imp if v > 0), n_neg=sum(1 for _, v in imp if v < 0)))
+    nodes = []
+    for n in K["nodes"].values():
+        sc, parts = structural(n, K)
+        nodes.append({"id": n["id"], "name": n["name"], "group": n.get("group", "기타"), "keywords": n.get("keywords") or [],
+                      "ksic": n.get("ksic") or [], "broad": bool(n.get("broad")), "why": n.get("why"), "watch": n.get("watch"),
+                      "origin": n.get("origin"), "score": sc,
+                      "themes": [{"id": tid, "name": K["themes"][tid]["name"], "impact": v,
+                                  "contrib": round(v * float(K["themes"][tid].get("strength", 1.0)), 2)}
+                                 for tid, v in sorted((n.get("themes") or {}).items(), key=lambda x: -abs(x[1])) if v and tid in K["themes"]],
+                      "links": links.get(n["id"], [])})
+    return {"themes": sorted(themes, key=lambda t: -float(t.get("strength", 0))), "nodes": nodes, "log_day": last,
+            "n_companies": len({r["stock_code"] for r in rows}),
+            "knowledge_as_of": _load(os.path.join(KDIR, "nodes.json")).get("as_of"),
+            "review_as_of": (K.get("review") or {}).get("as_of")}
+
+
 def payload(conn, code, P):
     K = knowledge()
     res = company(conn, code, P, K)

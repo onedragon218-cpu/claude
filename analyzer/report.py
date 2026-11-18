@@ -125,6 +125,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "stability": stability(conn, code, P, vres["rows"], comp),
         "app_version": __import__("analyzer").__version__,
         "data_dir": config.DATA_DIR,
+        "nodecat": _safe(lambda: __import__("analyzer.nodeview", fromlist=["catalog"]).catalog(conn)),
         "nodes": _safe(lambda: __import__("analyzer.nodeview", fromlist=["payload"]).payload(conn, code, P)),
         "doca_added": _safe(lambda: db.doca_added(conn)),
         "rf_info": _safe(lambda: dict(__import__("analyzer.rates", fromlist=["info"]).info(

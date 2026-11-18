@@ -797,6 +797,26 @@ class T(unittest.TestCase):
         self.assertEqual({f["key"]: f["level"] for f in nodeview.freshness(conn, "213500", P2, res, K, _d.date(2027, 4, 2))}["annual"], "warn")
         conn.close()
 
+    def test_nodeview_catalog(self):
+        from analyzer import nodeview
+        with tempfile.TemporaryDirectory() as d:
+            conn = db.connect(os.path.join(d, "t.db"))
+            db.ensure_company(conn, "213500", "한솔제지")
+            nodeview.ensure(conn)
+            for day, v in (("2026-11-17", "중립"), ("2026-11-18", "비우호")):      # 회사별 마지막 날 기록만
+                conn.execute("INSERT INTO node_verdict_log(day, stock_code, segment, node_id, verdict, score) VALUES (?,?,?,?,?,?)",
+                             (day, "213500", "인쇄용지, 특수지", "paper_print", v, -3.0))
+            conn.commit()
+            cat = nodeview.catalog(conn)
+            n = next(x for x in cat["nodes"] if x["id"] == "paper_print")
+            self.assertEqual([(x["name"], x["verdict"]) for x in n["links"]], [("한솔제지", "비우호")])
+            self.assertEqual(n["score"], -2.0)
+            self.assertEqual(n["themes"][0]["id"], "T_DIGITAL")
+            t = next(x for x in cat["themes"] if x["id"] == "T_DIGITAL")
+            self.assertGreaterEqual(t["n_neg"], 1)
+            self.assertEqual((cat["log_day"], cat["n_companies"]), ("2026-11-18", 1))
+            conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")
