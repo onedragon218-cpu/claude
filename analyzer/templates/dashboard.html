@@ -130,6 +130,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="O">O. 가치 5방법</button>
   <button data-s="P">P. 우상향 저평가</button>
   <button data-s="Q">Q. 적정 PER 주가</button>
+  <button data-s="R">R. 사업부 우호 판정</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -510,6 +511,30 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <details style="margin-top:10px"><summary>계산 근거</summary><div id="q-why" class="muted" style="margin-top:6px"></div></details>
     <p class="muted" id="q-principle" style="margin-top:10px"></p>
     <p class="muted" style="margin:4px 0 0">표시 칸 — 매수 조건 아님. 생존(H 화면)·자산 바닥이 먼저.</p>
+  </div>
+</section>
+<section id="R">
+  <div class="card">
+    <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
+    <h2 style="margin:0">사업부 우호 판정 <span class="muted" style="font-size:14px;font-weight:400">세계 경제 구조에 이 회사의 사업부가 우호적인가</span></h2>
+    <div id="r-head" style="margin:10px 0"></div>
+    <div class="tiles" id="r-tiles"></div>
+    <div class="tablewrap" style="margin-top:12px"><table id="r-table"></table></div>
+    <p class="muted" id="r-rules" style="margin:8px 0 0"></p>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">이 회사와 관련된 세계 경제 흐름</h2>
+    <div class="tablewrap"><table id="r-themes"></table></div>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">Claude 검토로 지식 갱신</h2>
+    <p class="muted" style="margin:0 0 8px">앱 판정은 지식 사전 + 숫자 규칙이라 새 흐름을 스스로 알아채지 못합니다. 가끔 ① 검토 파일을 만들어 claude.ai 대화에 올리고 ② Claude가 돌려준 JSON을 아래에 붙여 넣으면, 흐름·노드·사업부 연결이 갱신되고 Claude 의견이 앱 판정 옆에 함께 나옵니다(90일 지나면 회색).</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <button id="r-exp1">① 검토 파일 만들기(이 기업)</button><button id="r-expall">① 검토 파일 만들기(DB 전체)</button>
+      <span class="muted" id="r-revinfo"></span>
+    </div>
+    <textarea id="r-revtext" rows="5" style="width:100%;box-sizing:border-box;margin-top:8px" placeholder="② Claude가 돌려준 JSON을 여기에 붙여 넣으세요(앞뒤 설명 글이 섞여 있어도 됩니다)"></textarea>
+    <div class="row" style="gap:8px;align-items:center;margin-top:6px"><button class="primary" id="r-revsave">② 검토 결과 넣기</button><span class="muted" id="r-revmsg"></span></div>
   </div>
 </section>
 
@@ -1864,9 +1889,64 @@ function renderQDetail(p){
     `<li>과거 10년 실제 ROE 최고 ${d.roe_hist_max==null?'–':d.roe_hist_max.toFixed(2)+'%'} (넘으면 정점 꼬리표) · 자사주 소각은 반영하지 않음</li></ul>`;
 }
 document.querySelectorAll('.q-use').forEach(c=>c.addEventListener('change', renderQ));
+
+// ---------------- R. 사업부 우호 판정 (analyzer/nodeview.py) ----------------
+const NV = D.nodes || {error:'자료 없음'};
+const vCls = v => /^우호/.test(v) ? 'b-OK' : /약한 우호/.test(v) ? 'b-OK' : /비우호/.test(v) ? 'b-ERROR' : 'b-WARN';
+const sgn = x => x==null ? '<span class="muted">·</span>' : x>0 ? '<b style="color:var(--good)">+</b>' : x<0 ? '<b style="color:var(--bad)">−</b>' : '0';
+function renderR(){
+  if (NV.error){ $('#r-head').textContent = '판정하지 못했습니다: ' + NV.error; return; }
+  const pc = x => x==null ? '–' : x.toFixed(1)+'%';
+  $('#r-head').innerHTML = `<div style="font-size:15px"><b>요약</b> ${esc(NV.summary)}</div><div class="muted" style="margin-top:4px">사업부 구성비 ${esc(NV.mix_as_of||'없음')} (WiseReport) · 업종코드 ${esc(NV.ksic||'–')} · 지식 사전 ${esc(NV.knowledge_as_of||'')}${NV.review?` · Claude 검토 반영 ${esc(NV.review.as_of)}`:''}</div>`;
+  $('#r-tiles').innerHTML = [['우호 쪽 매출 비중', pc(NV.share.good)], ['중립', pc(NV.share.mid)], ['비우호 쪽', pc(NV.share.bad)], ['가중 점수(−4~+4)', NV.wscore==null?'–':(NV.wscore>0?'+':'')+NV.wscore.toFixed(2)]]
+    .map(([k,v])=>`<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  const groups = {}; (NV.node_choices||[]).forEach(n=>(groups[n.group] = groups[n.group] || []).push(n));
+  const sel = (r) => `<select class="r-link" data-seg="${esc(r.segment)}" title="이 사업부를 다른 노드에 연결(PC에서만)"><option value="">${r.node_id?'— 자동 연결로 되돌리기 —':'— 노드 고르기 —'}</option>` +
+    Object.entries(groups).map(([g, ns])=>`<optgroup label="${esc(g)}">${ns.map(n=>`<option value="${esc(n.id)}" ${n.id===r.node_id?'selected':''}>${esc(n.name)}</option>`).join('')}</optgroup>`).join('') + '</select>';
+  $('#r-table').innerHTML = '<tr><th class="l">사업부(비중)</th><th class="l">연결 노드</th><th class="l">앱 판정</th><th class="l">Claude 검토</th><th class="l">구조 흐름(영향)</th><th class="l">숫자 신호</th><th class="l">반대 근거</th><th class="l">판정을 바꿀 것</th><th class="l">뉴스 관심도</th></tr>' +
+    NV.segments.map(r=>{
+      const head = `<td class="l" style="min-width:120px"><b>${esc(r.segment)}</b><br><span class="muted">${pc(r.pct)}</span></td>`;
+      const link = `<td class="l" style="min-width:170px">${r.node_name?`<b>${esc(r.node_name)}</b>`:'<span class="muted">연결 없음</span>'}<div class="muted" style="font-size:12px">${esc(r.how||'')}</div>${sel(r)}</td>`;
+      const rv = r.review ? `<td class="l" style="min-width:150px;${r.review.stale?'color:var(--text-muted)':''}"><span class="badge ${r.review.stale?'':vCls(r.review.verdict)}">${esc(r.review.verdict)}</span> <span class="muted">확신 ${esc(r.review.confidence)}</span>${!r.excluded && r.review.verdict!==r.verdict?' <span class="badge b-WARN" title="앱 판정과 다름">다름</span>':''}<div style="font-size:12px;white-space:normal">${esc(r.review.reason||'')}</div><div class="muted" style="font-size:11px">${esc(r.review.as_of||'')}${r.review.stale?' · 오래됨':''}</div></td>` : '<td class="l muted">–</td>';
+      if (r.excluded) return `<tr style="color:var(--text-muted)">${head}${link}<td class="l" colspan="1">판정 제외</td>${rv}<td colspan="5" class="l">${esc(r.why||'')}</td></tr>`;
+      const nums = r.nums.map(([lab, x, d])=>`<div>${sgn(x)} <span style="font-size:12px">${esc(lab)}</span><div class="muted" style="font-size:11px">${esc(d)}</div></div>`).join('');
+      const parts = r.parts.map(([nm, c])=>`<div><span style="color:${c>0?'var(--good)':c<0?'var(--bad)':'inherit'}">${c>0?'+':''}${c.toFixed(1)}</span> ${esc(nm)}</div>`).join('') || '<span class="muted">구조 영향 없음</span>';
+      const nw = r.news ? `<b>${esc(r.news.label)}</b><div class="muted" style="font-size:11px">최근 3개월 ${r.news.recent}건 · 이전 월평균 ${r.news.before_avg}×3</div>` + (r.news.top||[]).map(t=>`<div style="font-size:11px"><a href="${esc(t.link)}" target="_blank" rel="noopener">${esc(t.date)} ${esc(t.title)}</a></div>`).join('') : '–';
+      return `<tr>${head}${link}<td class="l" style="min-width:110px"><span class="badge ${vCls(r.verdict)}">${esc(r.verdict)}</span><div class="muted" style="font-size:12px">점수 ${r.score>0?'+':''}${r.score.toFixed(2)} · 확신 ${esc(r.confidence)}</div></td>${rv}` +
+        `<td class="l" style="min-width:170px" title="${esc(r.node_why||'')}">${parts}<div class="muted" style="font-size:11px;white-space:normal;margin-top:2px">${esc(r.node_why||'')}</div></td><td class="l" style="min-width:230px">${nums}</td>` +
+        `<td class="l" style="min-width:170px;white-space:normal;font-size:12px">${r.counter.length ? r.counter.map(esc).join('<br>') : '<span class="muted">–</span>'}</td><td class="l" style="min-width:140px;white-space:normal;font-size:12px">${esc(r.watch||'')}</td><td class="l" style="min-width:180px;white-space:normal">${nw}</td></tr>`; }).join('');
+  document.querySelectorAll('.r-link').forEach(s=>s.onchange = async ()=>{
+    if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+    try { const j = await (await fetch('/api/nodes/link', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code: D.company.code, segment: s.dataset.seg, node: s.value || null})})).json();
+      if (j.error) throw new Error(j.error); location.reload(); } catch(e){ alert('저장하지 못했습니다: ' + e.message); } });
+  $('#r-rules').innerHTML = '앱 판정 = <b>구조 점수</b>(노드가 세계 경제 흐름에서 받는 영향 −2~+2 × 흐름 강도, 합계 −2~+2) + <b>숫자 신호</b>(사업부 매출 흐름 ±1, 영업이익 컨센서스 3개월 수정 ±3% → ±1, 매출 전망 ±5% → ±1; 회사 전체 숫자는 사업부 비중이 60% 미만이면 절반만 반영). 합계 ≥ +1.5 우호 · ≥ +0.5 약한 우호 · ±0.5 안 중립 · ≤ −0.5 약한 비우호 · ≤ −1.5 비우호. 확신 높음 = 숫자 신호 2개 이상이 모두 같은 쪽이고 구조도 같은 쪽. 같은 자료면 언제나 같은 답입니다. 뉴스 기사 수는 점수에 넣지 않습니다. 판정은 매일 한 번 기록해 두었다가 나중에 실제 실적과 맞춰 봅니다.';
+  $('#r-themes').innerHTML = '<tr><th class="l">흐름</th><th>강도</th><th>확신</th><th class="l">내용</th><th class="l">반대 근거</th><th class="l">출처</th></tr>' +
+    (NV.themes||[]).map(t=>`<tr><td class="l"><b>${esc(t.name)}</b></td><td>${(+t.strength).toFixed(1)}</td><td>${esc(t.confidence||'')}</td><td class="l" style="white-space:normal">${esc(t.desc||'')}</td><td class="l muted" style="white-space:normal">${esc(t.counter||'')}</td><td class="l muted">${esc(t.origin||'')}</td></tr>`).join('');
+  $('#r-revinfo').textContent = NV.review ? `지금 반영된 Claude 검토: ${NV.review.as_of} (흐름 ${NV.review.n.themes} · 노드 ${NV.review.n.nodes} · 연결 ${NV.review.n.links} · 판정 ${NV.review.n.verdicts})` : '아직 Claude 검토 없음';
+}
+async function rExport(scope){
+  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#r-revmsg').textContent = '만드는 중…';
+  try { const r = await fetch(`/api/nodes/export?scope=${scope}&code=${D.company.code}&base_year=${BY}`); const t = await r.text(); JSON.parse(t);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], {type:'application/json'}));
+    a.download = `사업부우호_검토요청_${scope==='all'?'DB전체':D.company.code}_${new Date().toISOString().slice(0,10)}.json`; a.click();
+    $('#r-revmsg').innerHTML = '파일을 받았습니다. claude.ai 대화에 이 파일을 올리고 <b>"파일 안 instructions대로 검토해서 JSON만 답해줘"</b>라고 쓰세요.';
+  } catch(e){ $('#r-revmsg').textContent = '만들지 못했습니다: ' + e.message; } }
+$('#r-exp1').onclick = () => rExport('one');
+$('#r-expall').onclick = () => rExport('all');
+$('#r-revsave').onclick = async () => {
+  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  const t = $('#r-revtext').value.trim(); if (!t){ $('#r-revtext').focus(); return; }
+  $('#r-revsave').disabled = true;
+  try { const j = await (await fetch('/api/nodes/review', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: t})})).json();
+    if (j.error) throw new Error(j.error + ((j.notes||[]).length ? ' · ' + j.notes.join(' / ') : ''));
+    $('#r-revmsg').innerHTML = `넣었습니다: 흐름 ${j.saved.themes} · 노드 ${j.saved.nodes} · 연결 ${j.saved.links} · 판정 ${j.saved.verdicts}` + ((j.notes||[]).length ? `<br><b>뺀 항목</b>: ${j.notes.map(esc).join(' / ')}` : '') + '<br>5초 뒤 새로 고칩니다.';
+    setTimeout(()=>location.reload(), 5000);
+  } catch(e){ $('#r-revmsg').innerHTML = '<b>넣지 못했습니다</b>: ' + esc(e.message); }
+  $('#r-revsave').disabled = false; };
 ['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
@@ -2014,7 +2094,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

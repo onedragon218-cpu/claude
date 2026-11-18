@@ -698,6 +698,57 @@ class T(unittest.TestCase):
             self.assertEqual(sqlite3.connect(bk).execute("SELECT COUNT(*) FROM companies").fetchone()[0], 4)   # 백업에는 지우기 전 그대로
             conn.close()
 
+    def test_nodeview_knowledge_engine(self):
+        from unittest import mock
+        from analyzer import nodeview
+        K = nodeview.knowledge()
+        self.assertGreaterEqual(len(K["nodes"]), 50)
+        for n in K["nodes"].values():                          # 사전 무결성: 없는 흐름·범위 밖 영향 없음
+            for t, v in n["themes"].items():
+                self.assertIn(t, K["themes"], n["id"])
+                self.assertTrue(-2 <= v <= 2)
+        # 연결: 사용자 > Claude 검토 > 이름 낱말(긴 것 우선) > 업종코드
+        self.assertEqual(nodeview.link_segment("인쇄용지, 특수지", "171", K, {}, {})[0], "paper_print")
+        self.assertEqual(nodeview.link_segment("제품(수출)", "211", K, {}, {})[0], "pharma")
+        self.assertEqual(nodeview.link_segment("제품(수출)", "211", K, {}, {"제품(수출)": "botulinum"}), ("botulinum", "Claude 검토"))
+        self.assertEqual(nodeview.link_segment("제품(수출)", "211", K, {"제품(수출)": "cdmo"}, {"제품(수출)": "botulinum"})[1], "사용자 지정")
+        self.assertTrue(nodeview.is_generic("용역부문 등") and nodeview.is_generic("제품(내수)") and not nodeview.is_generic("산업용지"))
+        # 판정 규칙: 같은 입력이면 같은 답, 문턱대로
+        node = {"themes": {"T_DIGITAL": -2}}
+        cs = {"op_rev3": (-10.0, 2027), "fwd_g": 0.0, "rev_g2": -0.06}
+        a = nodeview.judge(node, K, {"pct": 70}, cs, (-1, "x"))
+        self.assertEqual(a, nodeview.judge(node, K, {"pct": 70}, cs, (-1, "x")))
+        self.assertEqual(a["verdict"], "비우호")
+        self.assertAlmostEqual(a["score"], -2 * K["themes"]["T_DIGITAL"]["strength"] - 1 - 1, places=6)
+        self.assertEqual(a["confidence"], "높음")
+        b = nodeview.judge({"themes": {}}, K, {"pct": 20}, {"op_rev3": None, "fwd_g": None}, (None, "없음"))
+        self.assertEqual((b["verdict"], b["confidence"]), ("중립", "낮음"))
+        half = nodeview.judge({"themes": {}}, K, {"pct": 20}, {"op_rev3": (5.0, 2027), "fwd_g": 0.1}, (None, ""))
+        self.assertEqual((half["score"], half["verdict"]), (1.0, "약한 우호"))     # 비중 60% 미만이면 회사 숫자 절반
+        s1, _ = nodeview.structural({"themes": {"T_AI": 2, "T_GRID": 2}}, K)
+        self.assertEqual(s1, 2.0)                                                     # −2~+2로 자름
+        # Claude 검토 넣기: 형식 검사·합치기
+        clean, notes = nodeview.validate_review({"themes": [{"id": "T_AI", "strength": 5}], "nodes": [{"id": "botulinum", "themes": {"T_AGING": 3, "T_KCULT": 1}}],
+                                                 "links": [{"stock_code": "086900", "segment": "제품(수출)", "node": "botulinum"}, {"stock_code": "x", "segment": "a", "node": "b"}],
+                                                 "verdicts": [{"stock_code": "086900", "segment": "제품(수출)", "verdict": "우호"}, {"stock_code": "086900", "segment": "a", "verdict": "좋음"}]}, K)
+        self.assertEqual(clean["themes"][0]["strength"], 1.0)
+        self.assertEqual(clean["nodes"][0]["themes"], {"T_KCULT": 1})
+        self.assertEqual((len(clean["links"]), len(clean["verdicts"]), len(notes)), (1, 1, 3))
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            nodeview.save_review(clean)
+            nodeview.save_review({"as_of": "2026-12-01", "themes": [], "nodes": [], "links": [{"stock_code": "086900", "segment": "제품(수출)", "node": "cdmo"}], "verdicts": []})
+            K2 = nodeview.knowledge()
+            self.assertEqual(K2["review"]["links"], [{"stock_code": "086900", "segment": "제품(수출)", "node": "cdmo"}])   # 같은 사업부는 새 것으로
+            self.assertEqual(len(K2["review"]["verdicts"]), 1)                                                                # 이전 판정은 유지
+            self.assertEqual(K2["themes"]["T_AI"]["strength"], 1.0)
+            self.assertTrue(os.listdir(os.path.join(d, "backup")))                                                            # 이전 검토 파일 보관
+        # 실제 DB 회사로 끝까지(예외 없음, 기록)
+        conn = db.connect()
+        r = nodeview.company(conn, "213500", config.periods(2026))
+        self.assertTrue(any(x.get("node_id") == "paper_print" and x["verdict"] in ("비우호", "약한 비우호") for x in r["segments"]))
+        self.assertTrue(any(x.get("excluded") for x in r["segments"]))     # 용역부문 등(1.3%) 판정 제외
+        conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

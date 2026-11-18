@@ -179,6 +179,15 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/job":
                 with JOB_LOCK:
                     return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
+            if u.path == "/api/nodes/export":
+                from . import nodeview
+                P = config.periods(by)
+                if q.get("scope", ["one"])[0] == "all":
+                    codes = [r["stock_code"] for r in conn.execute("SELECT c.stock_code FROM companies c WHERE EXISTS "
+                                                                   "(SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code) ORDER BY c.name")]
+                else:
+                    codes = [q.get("code", [""])[0]]
+                return self._send(200, json.dumps(nodeview.export(conn, codes, P), ensure_ascii=False, indent=1), "application/json")
             if u.path == "/api/search":
                 from . import search
                 res = search.search(conn, q.get("q", [""])[0], limit=12)
@@ -213,6 +222,45 @@ class H(BaseHTTPRequestHandler):
             added = universe.add([(c, nm) for c, nm in items])
             return self._send(200, json.dumps({"added": added, "total": len(universe.load())}, ensure_ascii=False),
                               "application/json")
+        if u.path in ("/api/nodes/link", "/api/nodes/review"):
+            # 화면 R: 사업부 ↔ 노드 직접 연결 · Claude 검토 결과 넣기(PC에서만)
+            from . import lan, nodeview
+            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(n).decode("utf-8") if 0 < n < 5_000_000 else "{}"
+            if not lan.is_local(self.client_address[0]):
+                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
+            try:
+                d = json.loads(raw or "{}")
+            except ValueError as e:
+                return self._send(200, json.dumps({"error": f"JSON을 읽지 못했습니다: {e}"}, ensure_ascii=False), "application/json")
+            if u.path == "/api/nodes/link":
+                code, seg, nid = str(d.get("code") or ""), str(d.get("segment") or ""), d.get("node") or None
+                K = nodeview.knowledge()
+                if not (code.isalnum() and len(code) == 6) or not seg or (nid and nid not in K["nodes"]):
+                    return self._send(400, json.dumps({"error": "입력 오류"}, ensure_ascii=False), "application/json")
+                conn = db.connect()
+                try:
+                    nodeview.set_link(conn, code, seg, nid)
+                finally:
+                    conn.close()
+                return self._send(200, json.dumps({"saved": True}, ensure_ascii=False), "application/json")
+            body = d.get("review") if isinstance(d.get("review"), dict) else d
+            if isinstance(d.get("text"), str):          # 붙여 넣은 글: 앞뒤 설명·```json 표시를 걷어 내고 JSON만
+                t = d["text"]
+                i, j = t.find("{"), t.rfind("}")
+                try:
+                    body = json.loads(t[i:j + 1]) if i >= 0 and j > i else None
+                except ValueError as e:
+                    return self._send(200, json.dumps({"error": f"JSON을 읽지 못했습니다: {e}"}, ensure_ascii=False), "application/json")
+            try:
+                clean, notes = nodeview.validate_review(body)
+            except ValueError as e:
+                return self._send(200, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+            got = {k: len(clean[k]) for k in ("themes", "nodes", "links", "verdicts")}
+            if not any(got.values()):
+                return self._send(200, json.dumps({"error": "넣을 내용이 없습니다", "notes": notes}, ensure_ascii=False), "application/json")
+            total = nodeview.save_review(clean)
+            return self._send(200, json.dumps({"saved": got, "total": total, "notes": notes}, ensure_ascii=False), "application/json")
         if u.path == "/api/companies/delete":
             # 'DB에 있는 기업' 지우기(PC에서만). 지우기 전에 DB 파일을 backup\ 에 통째로 복사한다
             from . import lan

@@ -774,6 +774,11 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
     from . import valuation, rates
     rates.maybe_fetch(conn, offline=offline)
     val = valuation.run(conn, code, P)
+    try:                                   # 화면 R 판정을 하루 한 번 기록(나중에 실제 실적과 맞춰 보는 검증용)
+        from . import nodeview
+        nodeview.log_today(conn, code, P)
+    except Exception as e:                 # noqa: BLE001  판정 기록이 실패해도 분석은 계속
+        stats.notes.append(f"사업부 우호 판정 기록 실패: {type(e).__name__}")
     report["items"] += val["checks"]
     for c in val["checks"]:
         report["summary"][c["level"]] = report["summary"].get(c["level"], 0) + 1
