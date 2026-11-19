@@ -125,6 +125,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "stability": stability(conn, code, P, vres["rows"], comp),
         "app_version": __import__("analyzer").__version__,
         "data_dir": config.DATA_DIR,
+        "hanjang": _safe(lambda: __import__("analyzer.hanjang", fromlist=["payload"]).payload(conn, code, P)),
         "kiwoom": _safe(lambda: __import__("analyzer.kiwoom_store", fromlist=["summary"]).summary(conn, code)),
         "nodecat": _safe(lambda: __import__("analyzer.nodeview", fromlist=["catalog"]).catalog(conn)),
         "nodes": _safe(lambda: __import__("analyzer.nodeview", fromlist=["payload"]).payload(conn, code, P)),

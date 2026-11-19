@@ -806,6 +806,11 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
         nodeview.log_today(conn, code, P)
     except Exception as e:                 # noqa: BLE001  판정 기록이 실패해도 분석은 계속
         stats.notes.append(f"사업부 우호 판정 기록 실패: {type(e).__name__}")
+    try:                                   # 화면 T 앱 판정(규칙) — 갱신 때마다 다시 계산
+        from . import hanjang
+        hanjang.run_app(conn, code, P)
+    except Exception as e:                 # noqa: BLE001
+        stats.notes.append(f"노드 4년 판정(앱) 실패: {type(e).__name__}")
     report["items"] += val["checks"]
     for c in val["checks"]:
         report["summary"][c["level"]] = report["summary"].get(c["level"], 0) + 1

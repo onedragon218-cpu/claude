@@ -850,6 +850,56 @@ class T(unittest.TestCase):
                 self.assertEqual(sm["flows"]["label"], "외국인 순매도 · 기관 순매수")
                 conn.close()
 
+    def test_hanjang_node4y(self):
+        import io, zipfile
+        from unittest import mock
+        from analyzer import hanjang, hj_learn
+        self.assertEqual(hanjang.map_judgment("<span class='tag t-good'>순풍(약)</span>")[0], "우호")
+        self.assertEqual(hanjang.map_judgment("<span class='tag t-mid'>씨앗</span>")[0], "씨앗")
+        self.assertEqual(hanjang.map_judgment("<span class='tag t-warn'>걸림(확인형)</span>")[0], "걸림")
+        self.assertEqual(hanjang.map_judgment("<span class='tag t-bad'>무엇</span>")[0], "역풍")
+        self.assertEqual(hanjang.rep_judgment({"2026": {"judgment": "우호"}, "2027": {"judgment": "중립"}, "2028": {"judgment": "중립"}, "2029": {"judgment": "우호"}}), "우호")  # 같으면 가까운 해
+        self.assertEqual(hanjang.guess_kind("④ 사람·지배구조"), "사람")
+        self.assertEqual(hanjang.guess_kind("④ 원가·환율"), "원료")
+        seed = {"name": "가짜", "asof": "2026-10-30", "nodes_verdict": "<b>방향은 맞음</b>",
+                "nodes": [["① 메모리 특수가스", "<span class='tag t-good'>우호</span>", "수요 증가", "몫", "2026 1Q 매출 882억", "감산"],
+                          ["② 신사업", "<span class='tag t-mid'>씨앗</span>", "a", "b", "c", "d"],
+                          ["③ 사람·지배구조", "<span class='tag t-warn'>걸림</span>", "—", "횡령", "미확정", "확정 공시"]]}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("한장조사/123456.json", json.dumps(seed, ensure_ascii=False))
+                z.writestr("한장조사/_조사지침.md", "지침")
+                z.writestr("../evil.json", "{}")
+            conn = db.connect(os.path.join(d, "t.db"))
+            rep = hanjang.import_zip(conn, buf.getvalue())
+            self.assertEqual(rep["companies"], 1)
+            c = hanjang.load(conn, "123456", "claude")
+            self.assertEqual([n["rep"] for n in c["nodes"]], ["우호", "씨앗", "걸림"])
+            self.assertEqual(c["verdict"], "방향은 맞음")
+            # Claude 결과 넣기: 판정 말 정리·원천 1·2029 단계 상한·가격 낱말 경고
+            docs, notes = hanjang.validate_claude({"code": "123456", "asof": "2026-11-19", "nodes": [
+                {"name": "가스", "kind": "사업부", "demand": "x", "share": "y", "numbers": "z", "triggers": "w",
+                 "years": {"2026": {"judgment": "우호", "stage": "숫자", "basis": "실적"}, "2027": {"judgment": "순풍", "stage": "확정", "basis": "목표가 상향"},
+                           "2028": {"judgment": "중립", "stage": "확정", "basis": "b"}, "2029": {"judgment": "중립", "stage": "숫자", "basis": "c"}},
+                 "evidence": [{"year": 2026, "date": "2026-08-07", "type": "공시", "stage": "숫자", "dir": "+", "title": "잠정실적"}]}], "verdict": "v"})
+            self.assertEqual(docs[0]["nodes"][0]["years"]["2027"]["judgment"], "우호")
+            warns = hanjang.save(conn, docs[0], "claude", "시험")
+            self.assertTrue(any(w.startswith("1.") for w in warns))           # 노드 1개(3~6 권장)
+            self.assertTrue(any(w.startswith("6.") for w in warns))           # 우호인데 원천 1
+            self.assertTrue(any(w.startswith("7.") for w in warns))           # 2029 단계 상한
+            self.assertTrue(any(w.startswith("9.") for w in warns))           # 근거에 목표가
+            self.assertEqual(hanjang.load(conn, "123456", "claude")["company"]["version"], 2)
+            # 학습 모델: 낱말로 판정을 익힘
+            rows = [("우호", "증설 수요 증가 확대", "A"), ("우호", "수요 증가 램프업", "B"), ("우호", "확대 증가 수주", "C"),
+                    ("역풍", "수요 감소 감산 부진", "A"), ("역풍", "가격 하락 감소", "B"), ("역풍", "부진 적자 감소", "C"),
+                    ("걸림", "횡령 배임 소송", "A"), ("걸림", "전환사채 희석 증자", "B"), ("걸림", "소송 분쟁 최대주주", "C")]
+            m = hj_learn.train_rows(rows)
+            for t, want in (("증설로 수요 증가", "우호"), ("감산과 부진", "역풍"), ("횡령 혐의 소송", "걸림")):
+                p, _ = hj_learn.predict(m, t)
+                self.assertEqual(max(p, key=p.get), want, t)
+            conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

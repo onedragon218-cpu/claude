@@ -88,6 +88,9 @@ a.plain{color:inherit;text-decoration:none} a.plain:hover{text-decoration:underl
 .rchip{font:inherit;font-size:13px;padding:3px 4px 3px 10px;border-radius:14px;border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);display:inline-flex;align-items:center;gap:2px;text-decoration:none}
 .rchip:hover{border-color:var(--accent)} .rchip.cur{border-color:var(--accent);font-weight:600}
 .rchip .x{border:0;background:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0 4px;line-height:1}
+.hj{display:inline-block;min-width:44px;padding:3px 6px;border-radius:6px;font-size:12px;font-weight:600;text-align:center;border:1px solid transparent}
+.hj-우호{background:var(--good-bg);color:var(--good)} .hj-중립{background:var(--info-bg);color:var(--text-secondary)} .hj-역풍{background:var(--bad-bg);color:var(--bad)}
+.hj-씨앗{background:#eaf7d9;color:#4d7c0f} .hj-걸림{background:#fdebd3;color:#b45309} .hj.one{border:1px dashed currentColor} .hj.diff{outline:2px solid var(--warn);outline-offset:1px}
 .subtabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .rawsum{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 10px;font-size:13.5px;color:var(--text-secondary)}
 .rawsum b{color:var(--text-primary);font-variant-numeric:tabular-nums}
@@ -132,6 +135,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="Q">Q. 적정 PER 주가</button>
   <button data-s="R">R. 사업부 우호 판정</button>
   <button data-s="S">S. 노드 사전</button>
+  <button data-s="T">T. 노드 4년 판정</button>
 </nav>
 <main>
 <section id="A" class="on">
@@ -560,6 +564,33 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     </div>
     <div class="tablewrap"><table id="s-nodes"></table></div>
     <p class="muted" id="s-note" style="margin:8px 0 0"></p>
+  </div>
+</section>
+<section id="T">
+  <div class="card">
+    <p style="margin:0 0 6px;font-weight:600;color:var(--warn)">판정은 조사 결과(해석)이며 계산값이 아님 · 매수 조건 아님 · 리서치 참고자료이며 투자자문이 아님</p>
+    <h2 style="margin:0">질문 1 · 무엇으로 버나 — 노드별 4년(2026~2029) 우호 판정 <span class="muted" style="font-size:14px;font-weight:400" id="t-meta"></span></h2>
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0" id="t-view"></div>
+    <div id="t-stale"></div>
+    <div class="tablewrap"><table id="t-table"></table></div>
+    <p class="muted" style="margin:4px 0 0">* 2029는 컨센서스 밖(추정) · 칸 테두리 점선 = 확정 이상 원천 1개뿐(원천 1) · 노란 테두리 = Claude 조사와 앱 판정이 다름 · 줄을 누르면 6칸과 근거가 펼쳐짐</p>
+    <div id="t-verdict" style="margin-top:10px"></div>
+    <div id="t-warn" style="margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">갱신 · Claude 조사로 메우기</h2>
+    <div id="t-agree" class="muted" style="margin-bottom:8px"></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="primary" id="t-run">근거 모으기·앱 판정 다시 계산(이 회사)</button>
+      <button id="t-runall">앱 판정 전체 다시 계산(DB 회사)</button>
+      <button id="t-exp1">Claude 조사 요청 파일(이 회사)</button>
+      <button id="t-expst">Claude 조사 요청 파일(다시 조사 필요 회사, 15곳씩)</button>
+      <span class="muted" id="t-msg"></span>
+    </div>
+    <p class="muted" style="margin:8px 0 4px">조사 결과 넣기: Claude가 돌려준 JSON을 붙여 넣거나, 파일(JSON 또는 작업 폴더 한장조사 zip)을 고르세요. 형식 검사와 기계 검사 10개를 거쳐 저장합니다.</p>
+    <textarea id="t-text" rows="4" style="width:100%;box-sizing:border-box" placeholder="Claude가 돌려준 JSON(앞뒤 설명 글이 섞여 있어도 됨)"></textarea>
+    <div class="row" style="gap:8px;align-items:center;margin-top:6px"><button class="primary" id="t-save">조사 결과 넣기</button><input type="file" id="t-file" accept=".json,.zip,application/json,application/zip"><span class="muted" id="t-msg2"></span></div>
+    <div id="t-missing" style="margin-top:10px"></div>
   </div>
 </section>
 
@@ -2073,6 +2104,79 @@ function renderKiwoom(){
     `<table><tr><th class="l">기간</th><th>외국인</th><th>기관</th><th>개인</th></tr>${row('최근 20거래일', F.d20)}${row(`최근 ${Math.min(60,F.n)}거래일`, F.d60)}</table>` +
     `<details style="margin-top:6px"><summary class="muted">최근 5거래일</summary><table><tr><th class="l">일자</th><th>종가</th><th>외국인</th><th>기관</th><th>개인</th></tr>${F.recent.map(r=>`<tr><td class="l">${d(r.dt)}</td><td>${fmt(r.price,'원')}</td><td>${eok(r.foreign_net==null?null:r.foreign_net/100)}</td><td>${eok(r.inst_net==null?null:r.inst_net/100)}</td><td>${eok(r.indiv_net==null?null:r.indiv_net/100)}</td></tr>`).join('')}</table></details>`;
 }
+
+// ---------------- T. 노드 4년 판정 (analyzer/hanjang.py) ----------------
+const HJ = D.hanjang || {error:'자료 없음'};
+let TVIEW = uiGet('tview', 'both');
+const hjCell = (c, other) => !c || !c.judgment ? '<span class="muted">–</span>' :
+  `<span class="hj hj-${esc(c.judgment)}${/원천 1/.test(c.basis||'')?' one':''}${other&&other.judgment&&other.judgment!==c.judgment?' diff':''}" title="${esc((c.stage?c.stage+' · ':'')+(c.basis||''))}">${esc(c.judgment)}</span>`;
+function renderT(){
+  if (HJ.error){ $('#t-meta').textContent = '읽지 못함: ' + HJ.error; return; }
+  const C = HJ.claude, A = HJ.app, Y = HJ.years;
+  if (TVIEW==='claude' && !C) TVIEW = A ? 'app' : 'claude';
+  $('#t-view').innerHTML = [['both','나란히 비교'],['claude','Claude 조사'],['app','앱 판정(규칙)']].map(([k,n])=>`<button data-k="${k}" class="${TVIEW===k?'primary':''}">${n}</button>`).join('') +
+    `<span class="muted">Claude 조사 ${C?`${esc(C.company.asof||'')} · v${C.company.version}`:'없음'} · 앱 판정 ${A?`${esc(A.company.asof||'')} · v${A.company.version}`:'없음'}</span>`;
+  document.querySelectorAll('#t-view button').forEach(b=>b.onclick=()=>{ TVIEW = b.dataset.k; uiSet('tview', TVIEW); renderT(); });
+  const base = (TVIEW==='app' ? A : C) || A || C;
+  $('#t-meta').textContent = base ? `${base.company.name||''} · 조사일 ${base.company.asof||'–'} · ${base.company.status||''}` : '';
+  $('#t-stale').innerHTML = (HJ.stale||[]).length ? `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg);margin:0 0 8px"><b>다시 조사 필요</b> — ${HJ.stale.map(esc).join(' · ')}</div>` : '';
+  if (!base){ $('#t-table').innerHTML = '<tr><td class="l">이 회사의 판정이 없습니다. 아래 [근거 모으기·앱 판정 다시 계산]을 누르거나, Claude 조사 결과를 넣으세요.</td></tr>'; $('#t-verdict').innerHTML=''; tAgree(); return; }
+  const nodes = base.nodes, other = TVIEW==='both' ? (base===C ? A : C) : null;
+  const om = {}; (other ? other.nodes : []).forEach(n=>om[n.node_id]=n);
+  const hdr = TVIEW==='both' ? `<th class="l">노드 (매출 비중)</th>${Y.map(y=>`<th>${y%100}${y===2029?'*':''}<div class="muted" style="font-size:11px;font-weight:400">Claude / 앱</div></th>`).join('')}<th>땅<div class="muted" style="font-size:11px;font-weight:400">Claude / 앱</div></th><th class="l">종류</th>` :
+    `<th class="l">노드 (매출 비중)</th>${Y.map(y=>`<th>${y%100}${y===2029?'*':''}</th>`).join('')}<th>땅</th><th class="l">종류</th>`;
+  const cl = n => n===undefined ? null : n;
+  $('#t-table').innerHTML = `<tr>${hdr}</tr>` + nodes.map(n=>{
+    const o = om[n.node_id];
+    const a = base===C ? n : o, c = base===C ? o : n;      // 비교 때: 왼쪽 Claude, 오른쪽 앱
+    const cells = TVIEW==='both' ? Y.map(y=>`<td style="white-space:nowrap">${hjCell(((base===C?n:o)||{years:{}}).years[y], ((base===C?o:n)||{years:{}}).years[y])} ${hjCell(((base===C?o:n)||{years:{}}).years[y], ((base===C?n:o)||{years:{}}).years[y])}</td>`).join('')
+      : Y.map(y=>`<td>${hjCell(n.years[y])}</td>`).join('');
+    const land = TVIEW==='both' ? `${esc(((base===C?n:o)||{}).land||'–')} / ${esc(((base===C?o:n)||{}).land||'–')}` : esc(n.land||'–');
+    const ev = (n.evidence||[]).map(e=>`<li>${esc(e.date||'날짜 없음')} · ${esc(e.type||'')} · ${esc(e.stage||'')} ${e.dir?esc(e.dir):''} · ${e.ref&&/^https?:/.test(e.ref)?`<a href="${esc(e.ref)}" target="_blank" rel="noopener">${esc(e.title||'')}</a>`:esc(e.title||'')+(e.ref?` <span class="muted">(${esc(e.ref)})</span>`:'')}${e.read?'':' <span class="muted">(본문 미확인)</span>'}</li>`).join('');
+    const six = (x, lab) => x ? `<div style="margin:4px 0"><b>${lab}</b> <span class="muted" style="font-size:11px">${x===n?(base===C?'Claude':'앱'):(base===C?'앱':'Claude')}</span><table style="margin-top:2px"><tr><td class="l" style="width:110px">수요(위에서 아래)</td><td class="l" style="white-space:normal">${esc(x.demand||'')}</td></tr><tr><td class="l">몫(아래에서 위)</td><td class="l" style="white-space:normal">${esc(x.share||'')}</td></tr><tr><td class="l">숫자</td><td class="l" style="white-space:normal">${esc(x.numbers||'')}</td></tr><tr><td class="l">판정을 바꿀 것</td><td class="l" style="white-space:normal">${esc(x.triggers||'')}</td></tr><tr><td class="l">연도별 근거</td><td class="l" style="white-space:normal;font-size:12px">${Y.map(y=>`${y}: ${esc((x.years[y]||{}).judgment||'–')} · ${esc((x.years[y]||{}).stage||'')} · ${esc((x.years[y]||{}).basis||'')}`).join('<br>')}</td></tr>${x.raw_judgment?`<tr><td class="l">원문 판정</td><td class="l muted" style="white-space:normal">${esc(x.raw_judgment)}</td></tr>`:''}</table></div>` : '';
+    return `<tr class="clickrow t-row" data-id="${n.node_id}"><td class="l"><b>${esc(n.name)}</b>${n.share_pct!=null?` <span class="muted">(${(+n.share_pct).toFixed(0)}%)</span>`:''} <span class="muted">▶</span></td>${cells}<td>${land}</td><td class="l">${esc(n.kind||'')}</td></tr>` +
+      `<tr class="t-detail" data-id="${n.node_id}" style="display:none"><td colspan="${Y.length+3}" class="l" style="background:var(--surface-1)">${six(n, '6칸')}${TVIEW==='both'&&o?six(o,'6칸(비교)'):''}${ev?`<div><b>근거</b><ul style="margin:2px 0">${ev}</ul></div>`:'<div class="muted">근거 목록 없음(옛 판정은 원천이 한 줄 글이라 회사 메모에 보관)</div>'}</td></tr>`; }).join('');
+  document.querySelectorAll('.t-row').forEach(r=>r.onclick=()=>{ const d = document.querySelector(`.t-detail[data-id="${r.dataset.id}"]`); d.style.display = d.style.display==='none' ? '' : 'none'; });
+  const vb = x => x && x.verdict ? `<div style="margin:4px 0"><b>${x===C?'Claude 조사':'앱 판정'} 결론</b> <span class="muted">${esc(x.company.asof||'')}</span><div>${esc(x.verdict)}</div></div>` : '';
+  $('#t-verdict').innerHTML = (TVIEW!=='app'?vb(C):'') + (TVIEW!=='claude'?vb(A):'') + (C && C.company.memo && TVIEW!=='app' ? `<details><summary class="muted">Claude 조사 원천(메모)</summary><div class="muted" style="white-space:normal">${esc(C.company.memo)}</div></details>` : '');
+  const W = [...((C&&TVIEW!=='app')?C.warnings:[]).map(w=>'Claude: '+w), ...((A&&TVIEW!=='claude')?A.warnings:[]).map(w=>'앱: '+w)];
+  $('#t-warn').innerHTML = W.length ? `<details><summary style="color:var(--warn)">⚠ 기계 검사 경고 ${W.length}건</summary><ul class="muted" style="margin:2px 0">${W.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></details>` : '<span class="muted">기계 검사 10개 통과</span>';
+  tAgree();
+}
+function tAgree(){
+  const a = HJ.agree_company||{}, g = HJ.agree_all||{}, pc = x => x==null ? '–' : Math.round(x*100)+'%';
+  $('#t-agree').innerHTML = `<b>Claude 조사와 앱 판정 일치율</b>(대표 판정, 같은 노드끼리): 이 회사 ${a.nodes?`${a.same}/${a.nodes} (${pc(a.rate)})`:'–'} · 전체 ${g.nodes?`${g.same}/${g.nodes} (${pc(g.rate)}) · 한 칸 차이(우호↔중립·역풍↔중립)까지 ${pc(g.close_rate)} · 회사 ${g.companies}곳`:'–'} · Claude 조사 ${HJ.n_claude}곳 · 앱 판정 ${HJ.n_app}곳`;
+  const M = HJ.claude_not_in_db||[];
+  $('#t-missing').innerHTML = M.length ? `<div class="muted">Claude 조사는 있는데 앱 DB에 없는 회사 ${M.length}곳 — 올리면 숫자 근거·앱 판정·검사 8번(숫자 대조)이 됩니다. <button id="t-addmiss">이 회사들 DB에 올리기(${M.length}곳)</button></div>` : '';
+  const b = $('#t-addmiss'); if (b) b.onclick = () => { const U = Object.fromEntries((D.universe||[]).map(u=>[u.code,u.name])); uStartBatch(M.map(c=>({code:c, name:U[c]||c})), 'Claude 조사 회사'); };
+}
+async function tPost(url, body, ctype){
+  const r = await fetch(url, {method:'POST', headers: ctype?{'Content-Type':ctype}:{}, body}); const j = await r.json().catch(()=>({error:'응답을 읽지 못함('+r.status+')'})); if (j.error) throw new Error(j.error); return j; }
+$('#t-run').onclick = async () => { if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#t-run').disabled = true; $('#t-msg').textContent = '근거를 모으고 다시 계산하는 중…(1~2분)';
+  try { const j = await tPost(`/api/hj/run?code=${D.company.code}&base_year=${BY}`); $('#t-msg').textContent = `끝났습니다(경고 ${j.warnings.length}건${j.note?' · '+j.note:''}) — 3초 뒤 새로 고침`; setTimeout(()=>location.reload(), 3000); }
+  catch(e){ $('#t-msg').textContent = '실패: ' + e.message; } $('#t-run').disabled = false; };
+$('#t-runall').onclick = async () => { if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#t-runall').disabled = true; $('#t-msg').textContent = '전체 다시 계산 중…(수집 없이 DB 자료로)';
+  try { const j = await tPost(`/api/hj/run_all?base_year=${BY}`); $('#t-msg').textContent = `${j.n}곳 계산 · 실패 ${j.failed.length} · 전체 일치율 ${j.agree.rate==null?'–':Math.round(j.agree.rate*100)+'%'} — 3초 뒤 새로 고침`; setTimeout(()=>location.reload(), 3000); }
+  catch(e){ $('#t-msg').textContent = '실패: ' + e.message; } $('#t-runall').disabled = false; };
+async function tExport(scope){ if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#t-msg').textContent = '만드는 중…';
+  try { const t = await (await fetch(`/api/hj/export?scope=${scope}&code=${D.company.code}&base_year=${BY}`)).text(); const j = JSON.parse(t);
+    if (!j.companies.length){ $('#t-msg').textContent = '다시 조사 필요한 회사가 없습니다.'; return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], {type:'application/json'})); a.download = `노드4년_조사요청_${scope==='one'?D.company.code:'다시조사'+j.companies.length+'곳'}_${new Date().toISOString().slice(0,10)}.json`; a.click();
+    $('#t-msg').innerHTML = `파일을 받았습니다(${j.companies.length}곳). claude.ai 대화에 올리고 <b>"파일 안 instructions대로 조사해서 JSON만 답해줘"</b>라고 쓰세요. 답을 아래에 붙여 넣으면 됩니다.`; }
+  catch(e){ $('#t-msg').textContent = '실패: ' + e.message; } }
+$('#t-exp1').onclick = () => tExport('one');
+$('#t-expst').onclick = () => tExport('stale');
+async function tImport(body, ctype){ $('#t-save').disabled = true; $('#t-msg2').textContent = '넣는 중…';
+  try { const j = await tPost('/api/hj/import', body, ctype);
+    const s = j.zip ? `작업 폴더 zip: ${j.zip.companies}곳 옮김(검사 경고 ${j.zip.warnings}건${j.zip.skipped.length?', 건너뜀 '+j.zip.skipped.length:''})` : `${Object.keys(j.saved||{}).length}곳 저장` + ((j.notes||[]).length ? ` · 정리: ${j.notes.slice(0,5).join(' / ')}` : '');
+    $('#t-msg2').textContent = s + ' — 5초 뒤 새로 고침'; setTimeout(()=>location.reload(), 5000); }
+  catch(e){ $('#t-msg2').textContent = '넣지 못했습니다: ' + e.message; } $('#t-save').disabled = false; }
+$('#t-save').onclick = () => { if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  const f = $('#t-file').files[0]; if (f){ f.arrayBuffer().then(b=>tImport(b, 'application/octet-stream')); return; }
+  const t = $('#t-text').value.trim(); if (!t){ $('#t-text').focus(); return; } tImport(t, 'application/json'); };
 $('#r-exp1').onclick = () => rExport('one');
 $('#r-expall').onclick = () => rExport('all');
 $('#r-revsave').onclick = async () => {
@@ -2087,7 +2191,7 @@ $('#r-revsave').onclick = async () => {
   $('#r-revsave').disabled = false; };
 ['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderKiwoom(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderT(); renderKiwoom(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
@@ -2235,7 +2339,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

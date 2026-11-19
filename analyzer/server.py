@@ -179,6 +179,22 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/job":
                 with JOB_LOCK:
                     return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
+            if u.path == "/api/hj/export":
+                from . import hanjang
+                hanjang.ensure(conn)
+                P = config.periods(by)
+                scope = q.get("scope", ["one"])[0]
+                if scope == "stale":
+                    codes = []
+                    for r in conn.execute("SELECT h.code, h.asof FROM hj_company h WHERE h.origin='claude' AND EXISTS "
+                                          "(SELECT 1 FROM facts f WHERE f.stock_code=h.code)"):
+                        trig = " ".join(x["triggers"] or "" for x in conn.execute("SELECT triggers FROM hj_node WHERE code=? AND origin='claude'", (r["code"],)))
+                        if hanjang.stale_reasons(conn, r["code"], r["asof"], trig):
+                            codes.append(r["code"])
+                    codes = codes[:15]                     # 한 번에 너무 많으면 Claude가 다 못 함 — 15곳씩
+                else:
+                    codes = [q.get("code", [""])[0]]
+                return self._send(200, json.dumps(hanjang.export(conn, codes, P), ensure_ascii=False, indent=1), "application/json")
             if u.path == "/api/nodes/export":
                 from . import nodeview
                 P = config.periods(by)
@@ -261,6 +277,66 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps({"error": "넣을 내용이 없습니다", "notes": notes}, ensure_ascii=False), "application/json")
             total = nodeview.save_review(clean)
             return self._send(200, json.dumps({"saved": got, "total": total, "notes": notes}, ensure_ascii=False), "application/json")
+        if u.path in ("/api/hj/run", "/api/hj/run_all", "/api/hj/import"):
+            # 화면 T「노드 4년 판정」: 근거 모으기·앱 판정 · 전체 다시 계산 · Claude 조사 결과(JSON·zip) 넣기
+            from . import hanjang, lan
+            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(n) if 0 < n < 30_000_000 else b""
+            if u.path == "/api/hj/import" and not lan.is_local(self.client_address[0]):
+                return self._send(403, json.dumps({"error": "PC에서만 넣을 수 있습니다"}, ensure_ascii=False), "application/json")
+            P = config.periods(int(q["base_year"][0]) if q.get("base_year") else None)
+            conn = db.connect()
+            try:
+                if u.path == "/api/hj/run":
+                    code = q.get("code", [""])[0]
+                    if not (code.isalnum() and len(code) == 6):
+                        return self._send(400, json.dumps({"error": "종목코드 오류"}, ensure_ascii=False), "application/json")
+                    with JOB_LOCK:
+                        busy = JOB.get("running")
+                    note = None
+                    if q.get("collect", ["1"])[0] == "1" and not busy:
+                        try:
+                            pipeline.analyze(code, P["base_year"], conn=conn)       # 빠진 자료·새 공시·뉴스만 받음
+                        except Exception as e:     # noqa: BLE001
+                            note = f"수집 일부 실패: {type(e).__name__}: {e}"[:200]
+                    doc, warns = hanjang.run_app(conn, code, P, collect_news=q.get("collect", ["1"])[0] == "1")
+                    return self._send(200, json.dumps({"ok": True, "warnings": warns, "note": note}, ensure_ascii=False), "application/json")
+                if u.path == "/api/hj/run_all":
+                    codes = [r["stock_code"] for r in conn.execute("SELECT c.stock_code FROM companies c WHERE EXISTS "
+                                                                   "(SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code)")]
+                    bad = []
+                    for c in codes:
+                        try:
+                            hanjang.run_app(conn, c, P)
+                        except Exception as e:     # noqa: BLE001
+                            bad.append(f"{c}: {type(e).__name__}")
+                    return self._send(200, json.dumps({"ok": True, "n": len(codes), "failed": bad, "agree": hanjang.agreement(conn)},
+                                                      ensure_ascii=False), "application/json")
+                # 넣기: zip(작업 폴더 한장조사) 또는 JSON(Claude 결과 — 앞뒤 설명 글은 걷어 냄)
+                if raw[:2] == b"PK":
+                    rep = hanjang.import_zip(conn, raw)
+                    from . import hj_learn
+                    rep["learn"] = hj_learn.train(conn)
+                    return self._send(200, json.dumps({"ok": True, "zip": rep}, ensure_ascii=False), "application/json")
+                t = raw.decode("utf-8-sig", "replace")
+                i, j = min([x for x in (t.find("{"), t.find("[")) if x >= 0] or [-1]), max(t.rfind("}"), t.rfind("]"))
+                try:
+                    obj = json.loads(t[i:j + 1]) if i >= 0 and j > i else None
+                except ValueError as e:
+                    return self._send(200, json.dumps({"error": f"JSON을 읽지 못했습니다: {e}"}, ensure_ascii=False), "application/json")
+                if obj is None:
+                    return self._send(200, json.dumps({"error": "넣을 내용이 없습니다"}, ensure_ascii=False), "application/json")
+                docs, notes = hanjang.validate_claude(obj)
+                saved = {}
+                for d in docs:
+                    saved[d["code"]] = hanjang.save(conn, d, "claude", "Claude 조사 결과 넣기", "Claude")
+                if docs:
+                    from . import hj_learn
+                    hj_learn.train(conn)                   # 새 Claude 판정으로 다시 학습
+                return self._send(200, json.dumps({"ok": bool(docs), "saved": {k: len(v) for k, v in saved.items()}, "notes": notes,
+                                                   "warnings": saved}, ensure_ascii=False), "application/json")
+            finally:
+                conn.close()
         if u.path == "/api/companies/delete":
             # 'DB에 있는 기업' 지우기(PC에서만). 지우기 전에 DB 파일을 backup\ 에 통째로 복사한다
             from . import lan
