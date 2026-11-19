@@ -582,6 +582,7 @@ FRESH_RULES = {
     "news": ("뉴스", "관심도(점수 아님)", 14, 45, "3일마다 받음 → 2주 넘게 새 기사가 없으면 주의"),
     "knowledge": ("지식 사전(세계 경제 흐름)", "구조 점수", 120, 240, "저절로 바뀌지 않음 → 4개월 넘으면 Claude 검토 권함"),
     "review": ("Claude 검토", "흐름 갱신·판정 의견", 90, 180, "검토 결과는 90일 유효 → 지나면 다시 검토 권함"),
+    "flows": ("수급(키움)", "참고 표시(점수 아님)", 5, 14, "거래일마다 받음 → 5일 넘으면 주의, 2주 넘으면 오래됨"),
 }
 
 
@@ -608,11 +609,17 @@ def freshness(conn, code, P, res, K, today=None):
     hist = conn.execute("SELECT MAX(as_of) d FROM consensus_history WHERE stock_code=?", (code,)).fetchone()
     news = conn.execute("SELECT MAX(published) d FROM news WHERE stock_code=?", (code,)).fetchone()
     rv = K.get("review") or {}
-    dates = {"consensus": D.cons_asof(), "cons_hist": hist["d"] if hist else None, "mix": res.get("mix_as_of"),
+    fl = None
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='kiwoom_flows'").fetchone():
+        r = conn.execute("SELECT MAX(dt) d FROM kiwoom_flows WHERE stock_code=?", (code,)).fetchone()
+        fl = f"{r['d'][:4]}-{r['d'][4:6]}-{r['d'][6:]}" if r and r["d"] else None
+    dates = {"flows": fl, "consensus": D.cons_asof(), "cons_hist": hist["d"] if hist else None, "mix": res.get("mix_as_of"),
              "profile": pf.get("wr_at"), "news": news["d"] if news else None,
              "knowledge": _load(os.path.join(KDIR, "nodes.json")).get("as_of"), "review": rv.get("as_of")}
     out = []
     for k, (nm, role, warn, old, rule) in FRESH_RULES.items():
+        if k == "flows" and dates.get(k) is None:          # 키움을 쓰지 않는 PC에서는 칸을 만들지 않음
+            continue
         d, age = dates.get(k), _age(dates.get(k), today)
         lvl = "none" if d is None else "old" if age is not None and age > old else "warn" if age is not None and age > warn else "ok"
         hint = {"none": "자료 없음" + (" — 이 기업을 갱신하세요" if k not in ("knowledge", "review") else " — R 탭 아래 Claude 검토로 넣을 수 있음"),

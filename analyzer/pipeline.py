@@ -356,14 +356,31 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
 
     # 5) 주가: 빠진 연말 종가 또는 기준일 주가
     if need["price_years"] or need["asof_price"]:
-        try:
-            stats.req("Naver")
-            pdata = prices.fetch_naver_daily(code, count=260 * (len(P["past"]) + 2))
-            ingest_prices(conn, code, pdata, P["current"], stats)
-            db.log_fetch(conn, "price", f"{code}:asof", code, True, len(pdata["rows"]))
-        except prices.PriceUnavailable as e:
-            db.log_fetch(conn, "price", f"{code}:asof", code, False, 0, str(e))
-            stats.notes.append(f"주가 미확보: {e}")
+        got = False
+        from .collectors import kiwoom
+        if not offline and kiwoom.find_cli():      # 1순위: 키움 수정주가 일봉(키움 CLI가 있을 때, 조회만)
+            try:
+                stats.req("Kiwoom")
+                old_years = [y for y in need["price_years"] if y < P["current"] - 2]
+                pages = min(6, 2 + (P["current"] - min(old_years)) // 2) if old_years else 1     # 한 쪽 약 600거래일
+                import datetime as _d
+                pdata = kiwoom.daily(code, _d.date.today().strftime("%Y%m%d"), pages=pages)
+                ingest_prices(conn, code, pdata, P["current"], stats)
+                db.log_fetch(conn, "price", f"{code}:asof", code, True, len(pdata["rows"]), "키움")
+                db.log_fetch(conn, "kiwoom_daily", code, code, True, len(pdata["rows"]))
+                got = True
+            except kiwoom.KiwoomUnavailable as e:
+                db.log_fetch(conn, "kiwoom_daily", code, code, False, 0, str(e)[:200])
+                stats.notes.append(f"키움 주가 실패 → 네이버로: {e}")
+        if not got:
+            try:
+                stats.req("Naver")
+                pdata = prices.fetch_naver_daily(code, count=260 * (len(P["past"]) + 2))
+                ingest_prices(conn, code, pdata, P["current"], stats)
+                db.log_fetch(conn, "price", f"{code}:asof", code, True, len(pdata["rows"]))
+            except prices.PriceUnavailable as e:
+                db.log_fetch(conn, "price", f"{code}:asof", code, False, 0, str(e))
+                stats.notes.append(f"주가 미확보: {e}")
 
     # 6) 컨센서스: OpenDART에는 컨센서스가 없다. WiseReport(네이버 기업정보, 3년) → FnGuide → 네이버 금융 순서로 시도.
     #    성공한 뒤 7일 동안은 다시 받지 않고, 실패하면 다음 실행 때 다시 시도한다. 시점별로 새 스냅숏을 쌓는다.
@@ -446,6 +463,11 @@ def collect_business(conn, code, stats, has_key=False, corp_fn=None):
         except wisereport.ConsensusUnavailable as e:
             db.log_fetch(conn, "segments", code, code, False, 0, str(e))
             stats.notes.append(f"사업부 구성 미확보: {e}")
+    try:                                   # 키움 종목정보·투자자별 순매수(키움 CLI가 있을 때, 하루 1번, 조회만)
+        from . import kiwoom_store
+        kiwoom_store.collect(conn, code, stats)
+    except Exception as e:                 # noqa: BLE001
+        stats.notes.append(f"키움 자료 미확보: {type(e).__name__}")
     try:                                   # 회사 정의(WiseReport 기업개요 30일마다 · DART 사업보고서 「사업의 내용」 새 보고서마다)
         from . import profile
         profile.collect(conn, code, has_key, stats)

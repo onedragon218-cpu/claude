@@ -817,6 +817,39 @@ class T(unittest.TestCase):
             self.assertEqual((cat["log_day"], cat["n_companies"]), ("2026-11-18", 1))
             conn.close()
 
+    def test_kiwoom_cli_readonly(self):
+        import sys
+        from unittest import mock
+        from analyzer import kiwoom_store
+        from analyzer.collectors import kiwoom
+        self.assertEqual((kiwoom.num("+9810"), kiwoom.num("-6220", True), kiwoom.num("1,480"), kiwoom.num("")), (9810.0, 6220.0, 1480.0, None))
+        for bad in (["domestic", "orders", "buy"], ["domestic", "accounts", "balance"], ["domestic", "stocks", "info", "--confirm"]):
+            with self.assertRaises(kiwoom.KiwoomUnavailable):              # 조회 외 명령은 막음
+                kiwoom._call(bad)
+        with tempfile.TemporaryDirectory() as d:
+            fake = os.path.join(d, "kiwoomcli")
+            with open(fake, "w", encoding="utf-8") as f:
+                f.write("#!" + sys.executable + "\nimport sys, json\na = sys.argv[1:]\n"
+                        "if a[:3] == ['domestic','stocks','info']: print(json.dumps({'상장주식':'23801','현재가':'-6220','외인소진률':'+5.73','시가총액':'1480','return_code':0}))\n"
+                        "elif a[:3] == ['domestic','candles','daily']: print(json.dumps({'stk_dt_pole_chart_qry':[{'dt':'20261119','cur_prc':'6220'},{'dt':'20251230','cur_prc':'8310'}],'return_code':0}))\n"
+                        "elif a[:3] == ['domestic','candles','by-stock']: print(json.dumps({'종목별투자자기관별차트':[{'일자':'20261119','외국인투자자':'-120','기관계':'+50','개인투자자':'+70'}],'return_code':0}))\n"
+                        "else:\n    print('단말기 인증에 실패했습니다 (8050): IP가 등록되지 않았습니다', file=sys.stderr); sys.exit(1)\n")
+            os.chmod(fake, 0o755)
+            with mock.patch.dict(os.environ, {"KIWOOM_CLI": fake}):
+                info = kiwoom.stock_info("213500")
+                self.assertEqual((info["shares_listed"], info["price"], info["foreign_ratio"]), (23801000.0, 6220.0, 5.73))
+                self.assertEqual(kiwoom.daily("213500", "20261119")["rows"][1], ("20251230", 8310.0, None))
+                self.assertEqual(kiwoom.flows("213500", "20261119")[0]["foreign"], -120.0)
+                with self.assertRaises(kiwoom.KiwoomUnavailable) as cm:
+                    kiwoom._call(["doctor"])
+                self.assertIn("API 사용신청", str(cm.exception))                # 8050이면 IP 등록 안내
+                conn = db.connect(os.path.join(d, "t.db"))
+                kiwoom_store.collect(conn, "213500")
+                sm = kiwoom_store.summary(conn, "213500")
+                self.assertEqual(sm["flows"]["d20"]["foreign_net"], -1.2)       # 백만 원 → 억 원
+                self.assertEqual(sm["flows"]["label"], "외국인 순매도 · 기관 순매수")
+                conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

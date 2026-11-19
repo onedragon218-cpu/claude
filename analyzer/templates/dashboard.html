@@ -189,6 +189,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 <section id="B">
   <div class="tiles" id="tiles"></div>
   <div class="card" style="margin-top:16px" id="rfcard"></div>
+  <div class="card" style="margin-top:16px" id="kwcard"></div>
   <div class="card" style="margin-top:16px">
     <h2>지표별 확보 현황</h2>
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
@@ -523,6 +524,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div class="tablewrap" style="margin-top:12px"><table id="r-table"></table></div>
     <p class="muted" id="r-rules" style="margin:8px 0 0"></p>
   </div>
+  <div class="card" id="r-flows" style="display:none"></div>
   <div class="card">
     <h2 style="margin:0 0 6px">이 회사와 관련된 세계 경제 흐름</h2>
     <div class="tablewrap"><table id="r-themes"></table></div>
@@ -2049,6 +2051,28 @@ function sNodes(){
   $('#s-note').innerHTML = `연결된 회사 = 매일 분석할 때 남기는 판정 기록(회사별 마지막 날${NC.log_day?`, 가장 최근 ${esc(NC.log_day)}`:''}, ${NC.n_companies}곳) + 지금 보는 회사. 기록은 갱신(자동 수집·전체 갱신)이 돌 때 쌓이므로, 처음에는 지금 보는 회사만 보일 수 있습니다. 흐름 이름을 누르면 그 흐름의 영향을 받는 노드만 봅니다.`;
 }
 ['#s-q','#s-group','#s-theme','#s-sort','#s-linked'].forEach(id=>$(id).addEventListener('input', sNodes));
+
+// ---------------- 키움(조회만): R 탭 수급 표시 · B 탭 연결 상태 ----------------
+const KW = D.kiwoom || {};
+function renderKiwoom(){
+  const L = KW.last || {}, I = KW.info, F = KW.flows, eok = v => v==null ? '–' : (v>0?'+':'') + v.toLocaleString('ko-KR', {maximumFractionDigits:1}) + '억';
+  const st = x => !x ? '<span class="muted">기록 없음</span>' : x.ok ? `<span class="badge b-OK">성공</span> <span class="muted">${esc(x.fetched_at)}</span>` : `<span class="badge b-ERROR">실패</span> <span class="muted">${esc(x.fetched_at)} · ${esc(x.note||'')}</span>`;
+  const sh = I && I.shares_listed, ds = KW.dart_shares;
+  $('#kwcard').innerHTML = `<h2 style="margin:0 0 6px">키움증권(조회만)</h2>` +
+    (KW.error ? `<div class="muted">상태를 읽지 못함: ${esc(KW.error)}</div>` :
+    `<div>${KW.cli ? '<span class="badge b-OK">키움 CLI 있음</span>' : '<span class="badge" style="background:var(--info-bg);color:var(--text-muted)">키움 CLI 없음</span> <span class="muted">— 없으면 주가는 네이버에서 받습니다</span>'}</div>` +
+    `<table style="margin-top:6px"><tr><td class="l">수정주가 일봉(주가 1순위)</td><td class="l">${st(L.kiwoom_daily)}</td></tr><tr><td class="l">종목 기본정보</td><td class="l">${st(L.kiwoom_info)}</td></tr><tr><td class="l">투자자별 순매수</td><td class="l">${st(L.kiwoom_flows)}</td></tr></table>` +
+    (I ? `<div class="muted" style="margin-top:6px">기준일 ${esc(I.as_of)} · 현재가 ${fmt(I.price,'원')}원 · 상장주식 ${sh?Math.round(sh).toLocaleString('ko-KR')+'주':'–'}${ds?` (${esc(ds.label||'DART')} ${ds.year}년 ${Math.round(ds.value).toLocaleString('ko-KR')}주${sh?`, 차이 ${((sh/ds.value-1)*100).toFixed(1)}%`:''})`:''} · 시가총액 ${fmt(I.market_cap,'억원')}억 · 유통비율 ${I.float_ratio??'–'}% · 외인소진률 ${I.foreign_ratio??'–'}%</div>` : '') +
+    `<div class="muted" style="font-size:12px;margin-top:4px">키·토큰은 키움 CLI가 Windows 자격 증명 관리자에 보관합니다. 앱은 조회 명령만 실행합니다(주문·계좌 명령 없음). 실패(예: 8050 = IP 미등록)하면 네이버 주가로 넘어갑니다.</div>`);
+  if (!F){ $('#r-flows').style.display = 'none'; return; }
+  const row = (lab, o) => `<tr><td class="l">${lab}</td><td style="color:${(o.foreign_net||0)>0?'var(--good)':(o.foreign_net||0)<0?'var(--bad)':'inherit'}">${eok(o.foreign_net)}</td><td style="color:${(o.inst_net||0)>0?'var(--good)':(o.inst_net||0)<0?'var(--bad)':'inherit'}">${eok(o.inst_net)}</td><td>${eok(o.indiv_net)}</td></tr>`;
+  const d = s => `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6)}`;
+  $('#r-flows').style.display = '';
+  $('#r-flows').innerHTML = `<h2 style="margin:0 0 6px">수급 <span class="muted" style="font-size:14px;font-weight:400">키움 · 투자자별 순매수 금액 · 화면 표시만(판정 점수에는 넣지 않음)</span></h2>` +
+    `<div style="margin-bottom:6px"><b>${esc(F.label)}</b> <span class="muted">(최근 20거래일 기준 · 마지막 ${d(F.last_dt)} · ${F.n}일치)</span>${I&&I.foreign_ratio!=null?` · 외인소진률 ${I.foreign_ratio}%`:''}</div>` +
+    `<table><tr><th class="l">기간</th><th>외국인</th><th>기관</th><th>개인</th></tr>${row('최근 20거래일', F.d20)}${row(`최근 ${Math.min(60,F.n)}거래일`, F.d60)}</table>` +
+    `<details style="margin-top:6px"><summary class="muted">최근 5거래일</summary><table><tr><th class="l">일자</th><th>종가</th><th>외국인</th><th>기관</th><th>개인</th></tr>${F.recent.map(r=>`<tr><td class="l">${d(r.dt)}</td><td>${fmt(r.price,'원')}</td><td>${eok(r.foreign_net==null?null:r.foreign_net/100)}</td><td>${eok(r.inst_net==null?null:r.inst_net/100)}</td><td>${eok(r.indiv_net==null?null:r.indiv_net/100)}</td></tr>`).join('')}</table></details>`;
+}
 $('#r-exp1').onclick = () => rExport('one');
 $('#r-expall').onclick = () => rExport('all');
 $('#r-revsave').onclick = async () => {
@@ -2063,7 +2087,7 @@ $('#r-revsave').onclick = async () => {
   $('#r-revsave').disabled = false; };
 ['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderKiwoom(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
