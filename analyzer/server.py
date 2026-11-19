@@ -277,6 +277,27 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps({"error": "넣을 내용이 없습니다", "notes": notes}, ensure_ascii=False), "application/json")
             total = nodeview.save_review(clean)
             return self._send(200, json.dumps({"saved": got, "total": total, "notes": notes}, ensure_ascii=False), "application/json")
+        if u.path in ("/api/hj/folder", "/api/hj/sync"):
+            # 화면 T: 작업 폴더 지정(PC에서만) · 지금 읽기
+            from . import hanjang, lan
+            if not lan.is_local(self.client_address[0]):
+                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                d = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 < n < 100_000 else {}
+            except ValueError:
+                d = {}
+            conn = db.connect()
+            try:
+                if u.path == "/api/hj/folder":
+                    try:
+                        hanjang.folder_set(d.get("path", ""))
+                    except (ValueError, OSError) as e:
+                        return self._send(200, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+                rep = hanjang.sync_folder(conn, force=bool(d.get("force")) or u.path == "/api/hj/folder")
+                return self._send(200, json.dumps(rep, ensure_ascii=False, default=str), "application/json")
+            finally:
+                conn.close()
         if u.path in ("/api/hj/run", "/api/hj/run_all", "/api/hj/import"):
             # 화면 T「노드 4년 판정」: 근거 모으기·앱 판정 · 전체 다시 계산 · Claude 조사 결과(JSON·zip) 넣기
             from . import hanjang, lan

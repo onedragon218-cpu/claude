@@ -567,6 +567,17 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   </div>
 </section>
 <section id="T">
+  <div class="card" id="t-foldercard">
+    <h2 style="margin:0 0 6px">작업 폴더(한장조사) · 조사 신선도</h2>
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="t-folder" style="flex:1;min-width:260px" placeholder="예: C:\Users\이름\claude 작업\한장조사  (탐색기 주소창을 복사해 붙여 넣기)">
+      <button class="primary" id="t-fsave">폴더 지정·읽기</button>
+      <button id="t-fsync">지금 다시 읽기</button>
+      <span class="muted" id="t-fmsg"></span>
+    </div>
+    <div class="muted" id="t-fstat" style="margin:6px 0"></div>
+    <div id="t-over"></div>
+  </div>
   <div class="card">
     <p style="margin:0 0 6px;font-weight:600;color:var(--warn)">판정은 조사 결과(해석)이며 계산값이 아님 · 매수 조건 아님 · 리서치 참고자료이며 투자자문이 아님</p>
     <h2 style="margin:0">질문 1 · 무엇으로 버나 — 노드별 4년(2026~2029) 우호 판정 <span class="muted" style="font-size:14px;font-weight:400" id="t-meta"></span></h2>
@@ -2107,7 +2118,7 @@ function renderKiwoom(){
 
 // ---------------- T. 노드 4년 판정 (analyzer/hanjang.py) ----------------
 const HJ = D.hanjang || {error:'자료 없음'};
-let TVIEW = uiGet('tview', 'both');
+let TVIEW = uiGet('tview', 'claude');
 const hjCell = (c, other) => !c || !c.judgment ? '<span class="muted">–</span>' :
   `<span class="hj hj-${esc(c.judgment)}${/원천 1/.test(c.basis||'')?' one':''}${other&&other.judgment&&other.judgment!==c.judgment?' diff':''}" title="${esc((c.stage?c.stage+' · ':'')+(c.basis||''))}">${esc(c.judgment)}</span>`;
 function renderT(){
@@ -2119,7 +2130,10 @@ function renderT(){
   document.querySelectorAll('#t-view button').forEach(b=>b.onclick=()=>{ TVIEW = b.dataset.k; uiSet('tview', TVIEW); renderT(); });
   const base = (TVIEW==='app' ? A : C) || A || C;
   $('#t-meta').textContent = base ? `${base.company.name||''} · 조사일 ${base.company.asof||'–'} · ${base.company.status||''}` : '';
-  $('#t-stale').innerHTML = (HJ.stale||[]).length ? `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg);margin:0 0 8px"><b>다시 조사 필요</b> — ${HJ.stale.map(esc).join(' · ')}</div>` : '';
+  const FR = HJ.fresh;
+  $('#t-stale').innerHTML = !FR ? '' : FR.state==='ok' ? `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg);margin:0 0 8px"><b>Claude 조사 최신</b> — 조사 ${FR.age}일 전${FR.season?' · '+esc(FR.season)+'(14일 넘으면 노랑)':''}</div>` :
+    `<div class="warnbox" style="border-left-color:var(--${FR.state==='old'?'bad':'warn'});background:var(--${FR.state==='old'?'bad':'warn'}-bg);margin:0 0 8px"><b>${FR.state==='old'?'다시 조사 필요':'주의'}</b> — ${(FR.reasons||[]).map(esc).join(' · ')}${FR.season?' · <span class="muted">'+esc(FR.season)+'</span>':''}</div>`;
+  tFolder();
   if (!base){ $('#t-table').innerHTML = '<tr><td class="l">이 회사의 판정이 없습니다. 아래 [근거 모으기·앱 판정 다시 계산]을 누르거나, Claude 조사 결과를 넣으세요.</td></tr>'; $('#t-verdict').innerHTML=''; tAgree(); return; }
   const nodes = base.nodes, other = TVIEW==='both' ? (base===C ? A : C) : null;
   const om = {}; (other ? other.nodes : []).forEach(n=>om[n.node_id]=n);
@@ -2143,6 +2157,30 @@ function renderT(){
   $('#t-warn').innerHTML = W.length ? `<details><summary style="color:var(--warn)">⚠ 기계 검사 경고 ${W.length}건</summary><ul class="muted" style="margin:2px 0">${W.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></details>` : '<span class="muted">기계 검사 10개 통과</span>';
   tAgree();
 }
+function tFolder(){
+  const F = HJ.folder||{}, O = HJ.overview||{counts:{},lists:{}};
+  if (document.activeElement !== $('#t-folder')) $('#t-folder').value = F.folder||'';
+  const c = F.counts||{}, L = F.last;
+  $('#t-fstat').innerHTML = !F.folder ? '폴더를 지정하면 그 안의 <b>{종목코드}.json</b>(옛 한장조사 모양 · 연도별 새 모양 모두)을 읽어 Claude 조사로 연결합니다. 그 뒤로는 매일 갱신 때 <b>바뀐 파일만</b> 자동으로 다시 읽습니다.' :
+    `읽은 파일 ${c.ok||0}개${c.err?` · <span style="color:var(--bad)">읽지 못함 ${c.err}개</span>`:''}${c.skip?` · 한장조사 아님 ${c.skip}개`:''} · 마지막 확인 ${esc((L&&L.fetched_at)||'–').slice(0,16)} · 매일 갱신 때 바뀐 파일만 자동으로 읽음` +
+    ((F.errors||[]).length ? `<details><summary>읽지 못한 파일</summary><ul style="margin:2px 0">${F.errors.map(e=>`<li>${esc(e.path)} — ${esc(e.msg)}</li>`).join('')}</ul></details>` : '');
+  const n = O.counts||{}, tot = (n.ok||0)+(n.warn||0)+(n.old||0)+(n.none||0);
+  if (!tot){ $('#t-over').innerHTML = ''; return; }
+  const chip = (k, lab, col) => `<span class="badge" style="background:var(--${col}-bg);color:var(--${col})">${lab} ${n[k]||0}</span>`;
+  const li = (k) => (O.lists[k]||[]).map(x=>`<li><a href="${companyUrl(x.code)}">${esc(x.name||x.code)}</a> <span class="muted">${esc(x.code)} · 조사 ${esc(x.asof||'–')}${x.why?' · '+esc(x.why):''}</span></li>`).join('');
+  $('#t-over').innerHTML = `<div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">Claude 조사 ${tot}곳: ${chip('old','다시 조사','bad')} ${chip('warn','주의','warn')} ${chip('ok','최신','good')}` +
+    `<span class="muted">기준: 한 달(실적 시즌엔 14일) 넘으면 노랑 · 분기(90일) 넘거나 조사 뒤 실적 공시·보고서 기한이 지나면 빨강${O.season?' · 지금 <b>'+esc(O.season)+'</b>':''}</span></div>` +
+    ((n.old||0)+(n.warn||0) ? `<details style="margin-top:4px"><summary>다시 조사·주의 회사 목록</summary>${n.old?`<div style="color:var(--bad);margin-top:4px">다시 조사</div><ul style="margin:2px 0">${li('old')}</ul>`:''}${n.warn?`<div style="color:var(--warn)">주의</div><ul style="margin:2px 0">${li('warn')}</ul>`:''}</details>` : '');
+}
+async function tFolderPost(url, body){ if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#t-fmsg').textContent = '읽는 중…';
+  try { const j = await tPost(url, JSON.stringify(body), 'application/json');
+    if (j.error) throw new Error(j.error);
+    $('#t-fmsg').textContent = `파일 ${j.files}개 확인 · 새로 읽음 ${j.changed}개(${[...new Set(j.codes)].length}곳)${j.errors.length?' · 읽지 못함 '+j.errors.length:''} — 3초 뒤 새로 고침`;
+    setTimeout(()=>location.reload(), 3000); }
+  catch(e){ $('#t-fmsg').textContent = '실패: ' + e.message; } }
+$('#t-fsave').onclick = () => { const v = $('#t-folder').value.trim(); if (!v){ $('#t-folder').focus(); return; } tFolderPost('/api/hj/folder', {path: v}); };
+$('#t-fsync').onclick = () => tFolderPost('/api/hj/sync', {});
 function tAgree(){
   const a = HJ.agree_company||{}, g = HJ.agree_all||{}, pc = x => x==null ? '–' : Math.round(x*100)+'%';
   $('#t-agree').innerHTML = `<b>Claude 조사와 앱 판정 일치율</b>(대표 판정, 같은 노드끼리): 이 회사 ${a.nodes?`${a.same}/${a.nodes} (${pc(a.rate)})`:'–'} · 전체 ${g.nodes?`${g.same}/${g.nodes} (${pc(g.rate)}) · 한 칸 차이(우호↔중립·역풍↔중립)까지 ${pc(g.close_rate)} · 회사 ${g.companies}곳`:'–'} · Claude 조사 ${HJ.n_claude}곳 · 앱 판정 ${HJ.n_app}곳`;
@@ -2339,7 +2377,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

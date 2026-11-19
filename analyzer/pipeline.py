@@ -45,6 +45,7 @@ class Stats:
 
 
 # ---------------------------------------------------------------- 저장(ingest)
+
 def ingest_statement(conn, code, d, fs_div="CFS", via="OpenDART API", stats=None):
     """DART 재무제표 응답을 관측값으로 저장하고, 연도별 대표값(facts)을 다시 고른다."""
     p = dart.parse_statement(d, fs_div)
@@ -808,6 +809,9 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
         stats.notes.append(f"사업부 우호 판정 기록 실패: {type(e).__name__}")
     try:                                   # 화면 T 앱 판정(규칙) — 갱신 때마다 다시 계산
         from . import hanjang
+        rep = hanjang.sync_folder(conn)          # 작업 폴더(한장조사)에서 바뀐 파일만 읽기(파일 날짜·크기만 비교라 빠름)
+        if rep.get("changed"):
+            stats.notes.append(f"작업 폴더에서 Claude 조사 {rep['changed']}개 파일 읽음")
         from .collectors import news as _nw     # 네이버 키가 있으면 노드별 뉴스도 매일 갱신 때 함께(노드마다 7일에 한 번)
         hanjang.run_app(conn, code, P, collect_news=bool(not offline and _nw.naver_key()))
     except Exception as e:                 # noqa: BLE001

@@ -81,6 +81,8 @@ def ensure(conn):
     CREATE TABLE IF NOT EXISTS hj_verdict (code TEXT NOT NULL, origin TEXT NOT NULL, asof TEXT, text TEXT, PRIMARY KEY(code, origin));
     CREATE TABLE IF NOT EXISTS hj_run_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, origin TEXT, at TEXT, step TEXT, result TEXT, warnings TEXT, model TEXT);
+    CREATE TABLE IF NOT EXISTS hj_files (
+      path TEXT PRIMARY KEY, mtime REAL, size INTEGER, codes TEXT, status TEXT, msg TEXT, synced_at TEXT);
     """)
 
 
@@ -227,6 +229,185 @@ def from_hanjang_json(code, d):
                       "evidence": []})
     return {"code": code, "name": d.get("name"), "asof": str(d.get("asof") or "")[:10] or None, "nodes": nodes,
             "verdict": strip_html(d.get("nodes_verdict")), "memo": strip_html(d.get("sources"))[:4000]}
+
+
+# ---------------------------------------------------------------- 작업 폴더 직접 읽기(사용자 지정, 2026-11-19)
+import os as _os
+
+def _folder_file():
+    from . import config
+    return _os.path.join(config.DATA_DIR, "hj_folder.json")
+
+
+def folder_get():
+    try:
+        with open(_folder_file(), encoding="utf-8") as f:
+            return json.load(f).get("path") or ""
+    except (OSError, ValueError):
+        return ""
+
+
+def folder_set(path):
+    path = (path or "").strip().strip('"')
+    if path and not _os.path.isdir(path):
+        raise ValueError(f"폴더가 없습니다: {path}")
+    with open(_folder_file(), "w", encoding="utf-8") as f:
+        json.dump({"path": path, "set_at": db.now()}, f, ensure_ascii=False)
+    return path
+
+
+def _scan(root, depth=3):
+    """root 아래 .json 파일(숨김 폴더·5MB 넘는 파일 제외, 3단계 깊이까지)"""
+    root = _os.path.abspath(root)
+    base_depth = root.rstrip("\\/").count(_os.sep)
+    for d, dirs, files in _os.walk(root):
+        dirs[:] = [x for x in dirs if not x.startswith((".", "_"))]
+        if d.count(_os.sep) - base_depth >= depth:
+            dirs[:] = []
+        for fn in files:
+            if fn.lower().endswith(".json") and not fn.startswith(("_", ".", "~")):
+                fp = _os.path.join(d, fn)
+                try:
+                    st = _os.stat(fp)
+                except OSError:
+                    continue
+                if st.st_size < 5_000_000:
+                    yield fp, st.st_mtime, st.st_size
+
+
+def docs_from_json(fname, d):
+    """파일 하나 → [doc]. 옛 한장조사 모양({코드}.json, 노드가 줄 목록)과 연도별 새 모양(노드가 dict, years) 모두"""
+    m = re.fullmatch(r"([0-9A-Z]{6})(?:[_\- .].*)?\.json", _os.path.basename(fname))
+    if isinstance(d, dict) and isinstance(d.get("nodes"), list) and d["nodes"] and isinstance(d["nodes"][0], (list, tuple)):
+        if not m:
+            return [], ["파일 이름에 종목코드(6자리)가 없음"]
+        doc = from_hanjang_json(m.group(1), d)
+        return ([doc] if doc["nodes"] else []), ([] if doc["nodes"] else ["노드 없음"])
+    if isinstance(d, dict) and not d.get("code") and m and isinstance(d.get("nodes"), list):
+        d = dict(d, code=m.group(1))
+    if isinstance(d, (dict, list)):
+        return validate_claude(d)
+    return [], ["형식을 알 수 없음"]
+
+
+def sync_folder(conn, force=False):
+    """지정 폴더의 한장조사 파일 중 바뀐 것만 읽어 origin='claude'로 저장. 반환: 요약"""
+    ensure(conn)
+    root = folder_get()
+    rep = {"folder": root, "files": 0, "changed": 0, "codes": [], "errors": [], "at": db.now()}
+    if not root:
+        rep["error"] = "폴더를 아직 지정하지 않았습니다"
+        return rep
+    if not _os.path.isdir(root):
+        rep["error"] = f"폴더를 찾지 못함: {root}"
+        return rep
+    seen = {r["path"]: r for r in conn.execute("SELECT * FROM hj_files")}
+    for fp, mt, sz in _scan(root):
+        rep["files"] += 1
+        old = seen.get(fp)
+        if not force and old and old["mtime"] == mt and old["size"] == sz:
+            continue
+        try:
+            with open(fp, encoding="utf-8-sig") as f:
+                d = json.load(f)
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            msg = f"읽지 못함(쓰는 중이었을 수 있음): {type(e).__name__}"
+            conn.execute("INSERT OR REPLACE INTO hj_files VALUES (?,?,?,?,?,?,?)", (fp, mt, sz, "", "err", msg, db.now()))
+            rep["errors"].append(f"{_os.path.basename(fp)}: {msg}")
+            continue
+        docs, notes = docs_from_json(fp, d)
+        if not docs:          # 한장조사 파일이 아닌 json(설정 등)은 조용히 넘김
+            conn.execute("INSERT OR REPLACE INTO hj_files VALUES (?,?,?,?,?,?,?)", (fp, mt, sz, "", "skip", "; ".join(notes)[:300], db.now()))
+            continue
+        codes = []
+        for doc in docs:
+            save(conn, doc, "claude", "작업 폴더 읽기", "Claude(작업 폴더)")
+            codes.append(doc["code"])
+        conn.execute("INSERT OR REPLACE INTO hj_files VALUES (?,?,?,?,?,?,?)", (fp, mt, sz, ",".join(codes), "ok", "; ".join(notes)[:300], db.now()))
+        rep["changed"] += 1
+        rep["codes"] += codes
+    conn.commit()
+    if rep["changed"]:
+        from . import hj_learn
+        rep["learn"] = hj_learn.train(conn)          # 새 Claude 판정으로 다시 학습
+    if rep["changed"] or rep["errors"] or not db.fetched_recently(conn, "hj_folder", "folder", 1):   # 기록은 바뀜·오류·하루 한 번만
+        db.log_fetch(conn, "hj_folder", "folder", "", not rep["errors"], rep["changed"], "; ".join(rep["errors"])[:200] or None)
+    conn.commit()
+    return rep
+
+
+def folder_status(conn):
+    ensure(conn)
+    r = db.last_fetch(conn, "hj_folder", "folder")
+    c = conn.execute("SELECT status, COUNT(*) n FROM hj_files GROUP BY status").fetchall()
+    errs = [dict(x) for x in conn.execute("SELECT path, msg FROM hj_files WHERE status='err' LIMIT 10")]
+    return {"folder": folder_get(), "last": dict(r) if r else None, "counts": {x["status"]: x["n"] for x in c}, "errors": errs}
+
+
+# ---------------------------------------------------------------- 조사 신선도: 한 달·분기 경과, 실적 발표 경계에서 촘촘히
+# 정기보고서 법정 기한(분기·반기 45일, 사업보고서 90일). 잠정실적은 보통 그 전 2~4주에 나옴
+REPORT_DEADLINES = [((3, 31), "사업보고서(4분기)"), ((5, 15), "1분기 보고서"), ((8, 14), "반기 보고서"), ((11, 14), "3분기 보고서")]
+SEASONS = [((1, 15), (3, 31), "4분기·연간 실적 시즌"), ((4, 10), (5, 15), "1분기 실적 시즌"),
+           ((7, 10), (8, 14), "2분기 실적 시즌"), ((10, 10), (11, 14), "3분기 실적 시즌")]
+FRESH_WARN, FRESH_WARN_SEASON, FRESH_OLD = 30, 14, 90
+
+
+def season_of(day):
+    for (m1, d1), (m2, d2), name in SEASONS:
+        if dt.date(day.year, m1, d1) <= day <= dt.date(day.year, m2, d2):
+            return name
+    return None
+
+
+def claude_fresh(conn, code, asof, triggers_text="", today=None):
+    """반환: {state: ok|warn|old|none, age, season, reasons[]}  — 색: 초록 없음 / 노랑 주의 / 빨강 다시 조사"""
+    today = today or dt.date.today()
+    try:
+        a = dt.date.fromisoformat(str(asof)[:10])
+    except (TypeError, ValueError):
+        return {"state": "none", "age": None, "season": season_of(today), "reasons": ["조사일 없음"]}
+    age = (today - a).days
+    season = season_of(today)
+    warn_d = FRESH_WARN_SEASON if season else FRESH_WARN
+    old, warn = [], []
+    if age > FRESH_OLD:
+        old.append(f"조사 {age}일 지남(분기 넘김)")
+    elif age > warn_d:
+        warn.append(f"조사 {age}일 지남({'실적 시즌이라 14일' if season else '한 달'} 기준)")
+    ymd = a.strftime("%Y%m%d")
+    r = conn.execute("SELECT report_nm, rcept_dt FROM disclosures WHERE stock_code=? AND rcept_dt>? AND reprt_code IN ('11011','11012','11013','11014') "
+                     "ORDER BY rcept_dt DESC LIMIT 1", (code, ymd)).fetchone()
+    if r:
+        old.append(f"조사 뒤 {r['report_nm']} 공시({r['rcept_dt'][:4]}-{r['rcept_dt'][4:6]}-{r['rcept_dt'][6:]}) — 실적 반영 확인")
+    e = conn.execute("SELECT title, rcept_dt FROM events WHERE stock_code=? AND rcept_dt>? AND (title LIKE '%잠정%' OR title LIKE '%매출액또는손익구조%') "
+                     "ORDER BY rcept_dt DESC LIMIT 1", (code, ymd)).fetchone()
+    if e:
+        old.append(f"조사 뒤 실적 공시 '{e['title'][:24]}'({e['rcept_dt'][:4]}-{e['rcept_dt'][4:6]}-{e['rcept_dt'][6:]})")
+    has_disc = conn.execute("SELECT 1 FROM disclosures WHERE stock_code=? LIMIT 1", (code,)).fetchone()
+    if not has_disc:                          # 앱 DB에 공시 자료가 없는 회사는 달력으로: 조사 뒤 보고서 기한이 지났나
+        for y in (a.year, a.year + 1):
+            for (m, d), name in REPORT_DEADLINES:
+                dl = dt.date(y, m, d)
+                if a < dl <= today:
+                    old.append(f"조사 뒤 {name} 기한({dl.isoformat()}) 지남 — 실적 반영 확인")
+    old = list(dict.fromkeys(old))[:3]
+    for x in stale_reasons(conn, code, asof, triggers_text):
+        if x.startswith("'판정을 바꿀 것'"):
+            warn.append(x)
+    state = "old" if old else "warn" if warn else "ok"
+    return {"state": state, "age": age, "season": season, "reasons": old + warn}
+
+
+def fresh_overview(conn, today=None):
+    """Claude 조사 전체 회사의 신선도 묶음(화면 T 위쪽 목록)"""
+    ensure(conn)
+    out = {"ok": [], "warn": [], "old": [], "none": []}
+    for c in conn.execute("SELECT code, name, asof FROM hj_company WHERE origin='claude' ORDER BY asof"):
+        trig = " ".join(r["triggers"] or "" for r in conn.execute("SELECT triggers FROM hj_node WHERE code=? AND origin='claude'", (c["code"],)))
+        f = claude_fresh(conn, c["code"], c["asof"], trig, today)
+        out[f["state"]].append({"code": c["code"], "name": c["name"], "asof": c["asof"], "why": (f["reasons"] or [""])[0]})
+    return {"counts": {k: len(v) for k, v in out.items()}, "lists": out, "season": season_of(today or dt.date.today())}
+
 
 
 def import_zip(conn, data):
@@ -790,10 +971,13 @@ def payload(conn, code, P):
     cl = out["claude"]
     if cl:
         trig = " ".join(n.get("triggers") or "" for n in cl["nodes"])
-        out["stale"] = stale_reasons(conn, code, cl["company"]["asof"], trig)
+        out["fresh"] = claude_fresh(conn, code, cl["company"]["asof"], trig)
+        out["stale"] = out["fresh"]["reasons"]
     missing = [r["code"] for r in conn.execute("SELECT h.code FROM hj_company h WHERE h.origin='claude' AND NOT EXISTS "
                                                "(SELECT 1 FROM facts f WHERE f.stock_code=h.code)")]
     out["claude_not_in_db"] = missing
+    out["folder"] = folder_status(conn)
+    out["overview"] = fresh_overview(conn)
     return out
 
 

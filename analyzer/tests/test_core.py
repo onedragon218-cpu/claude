@@ -900,6 +900,50 @@ class T(unittest.TestCase):
                 self.assertEqual(max(p, key=p.get), want, t)
             conn.close()
 
+    def test_hanjang_folder_and_fresh(self):
+        import datetime as dtm
+        from unittest import mock
+        from analyzer import hanjang, hj_learn
+        old = {"name": "옛", "asof": "2026-10-30", "nodes": [["① 가스", "<span class='tag t-good'>우호</span>", "a", "b", "c", "d"]]}
+        new = {"asof": "2026-11-18", "nodes": [{"name": "칩", "kind": "사업부", "years": {"2026": {"judgment": "우호", "stage": "숫자", "basis": "x"},
+                                                                                       "2027": {"judgment": "역풍", "stage": "확정", "basis": "y"}}}]}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d), mock.patch.object(hj_learn, "train", return_value={}):
+            f = os.path.join(d, "작업", "한장조사")
+            os.makedirs(f)
+            for name, obj in (("111111.json", old), ("222222_노드4년.json", new), ("설정.json", {"a": 1})):
+                with open(os.path.join(f, name), "w", encoding="utf-8") as fh:
+                    json.dump(obj, fh, ensure_ascii=False)
+            with open(os.path.join(f, "333333.json"), "w", encoding="utf-8") as fh:
+                fh.write("{깨진")
+            conn = db.connect(os.path.join(d, "t.db"))
+            self.assertIn("error", hanjang.sync_folder(conn))                    # 폴더 미지정
+            with self.assertRaises(ValueError):
+                hanjang.folder_set(os.path.join(d, "없는폴더"))
+            hanjang.folder_set(os.path.join(d, "작업"))                         # 상위 폴더를 골라도 아래까지 찾음
+            rep = hanjang.sync_folder(conn)
+            self.assertEqual(rep["files"], 4)
+            self.assertEqual(sorted(rep["codes"]), ["111111", "222222"])
+            self.assertEqual(len(rep["errors"]), 1)
+            y = hanjang.load(conn, "222222", "claude")["nodes"][0]["years"]
+            self.assertEqual((y["2026"]["judgment"], y["2027"]["judgment"]), ("우호", "역풍"))
+            self.assertEqual(hanjang.sync_folder(conn)["changed"], 0)            # 안 바뀐 파일은 다시 안 읽음
+            st = hanjang.folder_status(conn)
+            self.assertEqual((st["counts"]["ok"], st["counts"]["err"], st["counts"]["skip"]), (2, 1, 1))
+            # 신선도: 평소 30일·실적 시즌 14일 노랑, 90일·보고서 기한 지나면 빨강
+            F = lambda asof, today: hanjang.claude_fresh(conn, "999999", asof, "", dtm.date.fromisoformat(today))
+            self.assertEqual(F("2026-12-01", "2026-12-20")["state"], "ok")
+            self.assertEqual(F("2026-11-20", "2026-12-25")["state"], "warn")
+            self.assertEqual(F("2027-01-20", "2027-02-10")["state"], "warn")      # 시즌: 21일 > 14일
+            self.assertEqual(F("2026-10-30", "2026-11-19")["state"], "old")       # 3분기 보고서 기한(11/14) 넘김
+            self.assertEqual(F("2026-06-01", "2026-06-20")["state"], "ok")
+            conn.execute("INSERT INTO disclosures(rcept_no, stock_code, rcept_dt, report_nm, reprt_code) VALUES ('1','999999','20260601','반기보고서','11012')")
+            self.assertEqual(F("2026-10-30", "2026-11-19")["state"], "ok")       # 공시 자료가 있으면 달력 대신 실제 공시로
+            conn.execute("INSERT INTO events(rcept_no, stock_code, rcept_dt, title) VALUES ('2','999999','20261110','영업(잠정)실적(공정공시)')")
+            self.assertEqual(F("2026-10-30", "2026-11-19")["state"], "old")
+            ov = hanjang.fresh_overview(conn, dtm.date(2026, 11, 19))
+            self.assertEqual(sum(ov["counts"].values()), 2)
+            conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")
