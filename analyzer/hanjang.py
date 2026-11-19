@@ -538,11 +538,12 @@ def collect_node_news(conn, code, nodes, company, days=183):
         if db.fetched_recently(conn, "hj_news", key, 7):
             continue
         try:
-            src, _, items = _news.fetch(q, since)
-            for it in items:
-                got += conn.execute("INSERT OR IGNORE INTO news(stock_code, published, title, link, press, description, source, query, collected_at) "
-                                    "VALUES (?,?,?,?,?,?,?,?,?)", (code, it["published"], it["title"], it.get("link"), it.get("press"),
-                                                                   it.get("description"), f"{src}(노드 조사)", q, db.now())).rowcount
+            if _news.naver_key():            # 네이버 API: 노드당 최대 2쪽(200건) — 하루 한도 25,000건에 비해 작게
+                _, items = _news.naver(q, since, max_pages=2)
+                src = "네이버 뉴스 API"
+            else:
+                src, _, items = _news.fetch(q, since)
+            got += db.add_news(conn, code, items, f"{src}(노드 조사)", q)
             db.log_fetch(conn, "hj_news", key, code, True, len(items))
         except Exception as e:     # noqa: BLE001
             db.log_fetch(conn, "hj_news", key, code, False, 0, str(e)[:200])
