@@ -1,4 +1,4 @@
-"""화면 T「노드 4년 판정」 — 설계도 '기업 한 장 질문 1 · 무엇으로 버나 — 노드별 4년(2026~2029) 우호 판정'(2026-11-19)을 앱에 옮김
+"""화면 T「노드 현재 판정」(처음엔 4년 판정, 2026-11-19 사용자 결정으로 현재 판정 + 판단 자료로 바꿈) — 설계도 '기업 한 장 질문 1 · 무엇으로 버나 — 노드별 4년(2026~2029) 우호 판정'(2026-11-19)을 앱에 옮김
 
 판정은 조사 결과(해석)이며 계산값이 아님 · 매수 조건 아님 · 리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님
 
@@ -942,8 +942,14 @@ def load(conn, code, origin):
             "warnings": json.loads(log["warnings"]) if log and log["warnings"] else [], "log": dict(log) if log else None}
 
 
+def now_year(today=None):
+    """'현재' 판정에 쓰는 해(YEARS 안으로 자름)"""
+    y = (today or dt.date.today()).year
+    return min(max(y, YEARS[0]), YEARS[-1])
+
+
 def agreement(conn, code=None):
-    """같은 회사·같은 노드 번호·같은 해의 claude 판정과 app 판정 일치율(옛 판정 = 연도 없음은 대표 판정끼리만)"""
+    """같은 회사·같은 노드의 Claude 현재 판정과 앱 현재 판정(올해 칸) 일치율"""
     ensure(conn)
     q = ("SELECT a.code, a.node_id, a.year, a.judgment ja, b.judgment jb FROM hj_node_year a JOIN hj_node_year b "
          "ON a.code=b.code AND a.node_id=b.node_id AND a.year=b.year AND a.origin='claude' AND b.origin='app'")
@@ -952,8 +958,10 @@ def agreement(conn, code=None):
         q += " WHERE a.code=?"
         args = (code,)
     rows = conn.execute(q, args).fetchall()
-    reps = conn.execute("SELECT a.code, a.rep ra, b.rep rb FROM hj_node a JOIN hj_node b ON a.code=b.code AND a.node_id=b.node_id "
-                        "AND a.origin='claude' AND b.origin='app'" + (" WHERE a.code=?" if code else ""), args).fetchall()
+    yr = now_year()
+    reps = conn.execute("SELECT a.code, a.rep ra, COALESCE(y.judgment, b.rep) rb FROM hj_node a JOIN hj_node b ON a.code=b.code AND a.node_id=b.node_id "
+                        "AND a.origin='claude' AND b.origin='app' LEFT JOIN hj_node_year y ON y.code=b.code AND y.origin='app' "
+                        "AND y.node_id=b.node_id AND y.year=?" + (" WHERE a.code=?" if code else ""), (yr,) + args).fetchall()
     n = len(reps)
     same = sum(1 for r in reps if r["ra"] == r["rb"])
     near = {("우호", "중립"), ("중립", "우호"), ("역풍", "중립"), ("중립", "역풍")}
@@ -976,49 +984,161 @@ def payload(conn, code, P):
     missing = [r["code"] for r in conn.execute("SELECT h.code FROM hj_company h WHERE h.origin='claude' AND NOT EXISTS "
                                                "(SELECT 1 FROM facts f WHERE f.stock_code=h.code)")]
     out["claude_not_in_db"] = missing
+    out["db_not_in_claude"] = db_not_in_claude(conn)
+    base = cl or out["app"]
+    try:
+        out["facts"] = node_facts(conn, code, P, base, out["app"], (cl or {}).get("company", {}).get("asof") if cl else None) if base else None
+    except Exception as e:     # noqa: BLE001  판단 자료가 실패해도 화면은 뜨게
+        out["facts"] = {"error": f"{type(e).__name__}: {e}"[:200]}
+    out["now_year"] = now_year()
     out["folder"] = folder_status(conn)
     out["overview"] = fresh_overview(conn)
     return out
 
 
-# ---------------------------------------------------------------- Claude 조사 요청 파일(설계도 6·7-2절 규격)
-INSTRUCTIONS = """당신은 한국 상장기업 한 장의 '질문 1 · 무엇으로 버나 — 노드별 4년(2026~2029) 우호 판정'을 조사해 쓰는 애널리스트입니다.
-아래 evidence(앱이 모은 숫자·공시·뉴스·이전 판정)를 먼저 읽고, 필요하면 공시·뉴스·웹을 더 찾아 판단하세요. 가격·목표가는 판정에 쓰지 마세요.
-규격(반드시 지킴)
-1. 노드 3~6개: 이 회사가 돈을 버는 고리(사업부·제품·고객·원료·사람 층). kind는 사업부|씨앗|원료|고객|사람.
-2. 노드마다 6칸: name, demand(수요 — 위에서 아래: 산업·고객 쪽 힘), share(몫 — 아래에서 위: 그 힘이 이 회사에 오는가), numbers(이미 숫자로 찍힌 것), triggers(판정을 바꿀 사건). 모르면 '모름' + 이유.
-3. years: 2026·2027·2028·2029 네 칸에 judgment(우호|중립|역풍|씨앗|걸림) · stage(말|계획|확정|숫자) · basis(근거 한 줄).
-   2026 = 확정 실적(분기 누적, stage 상한 숫자) / 2027·2028 = 컨센서스(×0.83)·확정 공시(상한 확정) / 2029 = 산업 전망·회사 계획(상한 계획, '컨센 밖·추정').
-4. land(수요가 있는 노드만): 좋은 땅(방향+뿌리+몫) | 가시떨기(매출↑ 이익 정체) | 돌밭(빨리 오르나 반복 근거 없음) | 길가(몫이 남에게 감).
-5. 두 증인: '우호'는 그 해에 확정 이상 원천 2개(서로 독립). 1개면 basis에 '(원천 1)'. '역풍'·'걸림'은 1개로 충분. 회사 가이던스·IR·AI 요약은 증인 아님.
-6. evidence: 각 근거에 date(YYYY-MM-DD) · type(공시|숫자|언론|기관|회사 주장|AI 주장) · stage · dir(+|−) · title · ref(주소 또는 공시번호) · read(본문 확인 true/false). 날짜 없는 사실 금지, 12개월 넘은 사건은 '지난 일'.
-7. verdict: 2~3문장, 방향과 때를 나눠 적음(예: "방향은 맞고, 걸리는 것은 때"). 해석은 (해석)으로 표시.
-돌려줄 것: 아래 모양의 JSON만(설명 글 없이). 여러 회사면 {"companies": [ ... ]}.
-{"code":"6자리","asof":"YYYY-MM-DD","nodes":[{"name":"...","share_pct":숫자|null,"kind":"사업부","demand":"...","share":"...","numbers":"...","triggers":"...","land":"좋은 땅",
- "years":{"2026":{"judgment":"우호","stage":"숫자","basis":"..."},"2027":{...},"2028":{...},"2029":{...}},
- "evidence":[{"year":2026,"date":"2026-08-07","type":"공시","stage":"숫자","dir":"+","title":"잠정실적","ref":"DART 접수번호","read":true}]}],
- "verdict":"..."}"""
+# ---------------------------------------------------------------- 판단 자료(앱이 모음 · 판정 아님)
+def db_not_in_claude(conn):
+    """앱 DB에 있는데(재무 자료 있음) Claude 조사가 없는 회사"""
+    ensure(conn)
+    return [{"code": r["stock_code"], "name": r["name"]} for r in conn.execute(
+        "SELECT c.stock_code, c.name FROM companies c WHERE EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code) "
+        "AND NOT EXISTS (SELECT 1 FROM hj_company h WHERE h.code=c.stock_code AND h.origin='claude') ORDER BY c.name")]
 
 
-def export(conn, codes, P):
-    comps = []
+def _pct(v):
+    return None if v is None else round(v * 100, 1)
+
+
+def node_facts(conn, code, P, base, app, asof=None):
+    """노드마다 판단 자료: 매출 비중·회사 숫자(주력만)·세계 흐름 점수·6개월 공시/뉴스 좋음·나쁨·바꿀 것 낱말 적중·앱 참고 판정.
+    반환: {"company": 회사 숫자, "nodes": {node_id: {...}}, "since_asof": 조사 뒤 새 숫자 한 줄}"""
+    from . import nodeview
+    from .nodeview import structural
+    K = nodeview.knowledge()
+    N = company_numbers(conn, code, P)
+    disc, news = evidence_pool(conn, code)
+    cname = (conn.execute("SELECT name FROM companies WHERE stock_code=?", (code,)).fetchone() or {"name": ""})["name"] or ""
+    nodes = base["nodes"]
+    biz = [n for n in nodes if (n.get("kind") or "사업부") == "사업부"]
+    main_id = max(biz, key=lambda n: (n.get("share_pct") or 0, -n["node_id"]))["node_id"] if biz else None
+    appm = {n["node_id"]: n for n in (app or {}).get("nodes", [])}
+    yr = str(now_year())
+    cy = N["cy"]
+    g1, og1 = _cons_growth(N, cy + 1)
+    comp = {"q": N["q"], "q_growth": _pct(N["q_growth"]), "q_opm": [round(x, 1) for x in N["q_opm"]] if N["q_opm"] else None,
+            "opm": [[y, None if v is None else round(v, 1)] for y, v in sorted(N["opm"].items())],
+            "cons_year": cy + 1, "cons_growth": _pct(g1), "cons_op_growth": _pct(og1), "rev3": N["rev3"].get((cy + 1, "op_income")), "cy": cy}
+    asof_d = str(asof or "")[:10]
+    out = {}
+    for n in nodes:
+        kn_id, _ = _link_name(n["name"], K)
+        kn = K["nodes"].get(kn_id) if kn_id else None
+        s1, parts = structural(kn, K) if kn else (None, [])
+        kws = [k for k in (kn.get("keywords") if kn else []) or [] if len(k) >= 2] + \
+              [w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", n["name"]) if w not in ("사업", "부문", "제품", "기타", "사람", "지배구조", "수요")]
+        hit = lambda t: any(k.lower() in (t or "").lower() for k in kws)
+        main = n["node_id"] == main_id
+        kind = n.get("kind") or "사업부"
+        if kind == "사람":
+            nd = [e for e in disc if e["risk"]]
+            nn = [e for e in news if NEWS_RISK.search(e["title"] or "")]
+        else:
+            nd = [e for e in disc if not e["risk"] and (hit(e["title"]) or main)]
+            nq = node_query(cname, n["name"])
+            nn = [e for e in news if hit(e["title"]) or (e.get("query") and e["query"] == nq)]
+        cnt = lambda xs, d: sum(1 for e in xs if e.get("dir") == d)
+        words = {w for w in re.findall(r"[가-힣A-Za-z]{2,}", n.get("triggers") or "") if len(w) >= 2} - TRIG_STOP
+        trig = None
+        if words and asof_d:
+            for e in sorted(nd + nn, key=lambda e: e["date"] or "", reverse=True):
+                if (e["date"] or "") > asof_d:
+                    hw = [w for w in words if w in (e["title"] or "")]
+                    if hw and len(max(hw, key=len)) >= 2:
+                        trig = {"word": max(hw, key=len), "date": e["date"], "title": e["title"][:60], "ref": e.get("ref")}
+                        break
+        a = appm.get(n["node_id"])
+        aj = ((a or {}).get("years") or {}).get(yr, {}).get("judgment") or (a or {}).get("rep")
+        out[n["node_id"]] = {
+            "share_pct": n.get("share_pct"), "main": main, "kn": kn["name"] if kn else None,
+            "structural": s1, "themes": [[p[0], p[1]] for p in parts[:3]],
+            "disc_pos": cnt(nd, "+"), "disc_neg": cnt(nd, "-"), "news_pos": cnt(nn, "+"), "news_neg": cnt(nn, "-"),
+            "n_disc": len(nd), "n_news": len(nn), "trigger_hit": trig, "app_judgment": aj,
+            "titles": [{k: e.get(k) for k in ("date", "title", "dir", "ref", "type")} for e in sorted(nd + nn, key=lambda e: e["date"] or "", reverse=True)[:8]]}
+    line = None
+    if asof_d and N["q"] and N["q_growth"] is not None:
+        r = conn.execute("SELECT report_nm, rcept_dt FROM disclosures WHERE stock_code=? AND rcept_dt>? AND reprt_code IN ('11011','11012','11013','11014') "
+                         "ORDER BY rcept_dt DESC LIMIT 1", (code, asof_d.replace("-", ""))).fetchone()
+        if r:
+            line = f"조사 뒤 {r['report_nm']}({r['rcept_dt'][:4]}-{r['rcept_dt'][4:6]}-{r['rcept_dt'][6:]}) — {cy} {N['q']} 누적 매출 {N['q_growth'] * 100:+.1f}%" + \
+                   (f" · 영업이익률 {N['q_opm'][1]:.1f}→{N['q_opm'][0]:.1f}%" if N["q_opm"] else "")
+    return {"company": comp, "nodes": out, "since_asof": line}
+
+
+NEWS_RISK = re.compile(r"횡령|배임|소송|분쟁|고소|송치|압수수색|제재|과징금|전환사채|유상증자|최대주주|감사의견")
+TRIG_STOP = {"공시", "확정", "여부", "지연", "회수", "금액", "증가", "감소", "변화", "실적", "매출", "이익", "수요", "확인", "발표", "가능", "이후"}
+
+
+# ---------------------------------------------------------------- Claude 조사 요청 파일(마크다운, 참고 자료만 — 조사 형식·지침은 Claude 쪽 것을 그대로)
+REQUEST_MAX = 10
+
+
+def _eok(v):
+    return "–" if v is None else f"{v:,.0f}억"
+
+
+def request_md(conn, codes, P, purpose="new"):
+    """codes(최대 10곳) → Claude에 올릴 요청 글. 형식 지시는 넣지 않음(작업 폴더의 기존 지침·파일 모양을 따르라고만 함)"""
+    from . import nodeview, profile
+    codes = [c for c in dict.fromkeys(codes) if re.fullmatch(r"[0-9A-Z]{6}", c or "")][:REQUEST_MAX]
+    head = ("# 한장조사 요청 — " + ("새 회사" if purpose == "new" else "다시 조사") + f" {len(codes)}곳 ({db.today()})\n\n"
+            "아래 회사들을 **이 작업 폴더의 기존 조사 지침과 기존 한장조사 파일 모양 그대로** 조사해 주세요.\n"
+            "결과는 기존과 같은 방식으로 같은 폴더에 `{종목코드}.json`으로 저장해 주세요.\n\n"
+            "아래 숫자·공시·뉴스 제목은 재무분석 앱이 모은 **참고 자료**입니다(앱 판정 아님). 조사 출발점으로만 쓰고, 판단은 지침대로 해 주세요.\n")
+    parts = [head]
     for c in codes:
-        N = company_numbers(conn, c, P)
-        disc, news = evidence_pool(conn, c)
-        prev = load(conn, c, "claude")
-        app = load(conn, c, "app")
         name = (conn.execute("SELECT name FROM companies WHERE stock_code=?", (c,)).fetchone() or {"name": None})["name"]
-        from . import profile
+        prev = load(conn, c, "claude")
+        name = name or (prev or {}).get("company", {}).get("name") or c
         pf = profile.get(conn, c) or {}
-        comps.append({"code": c, "name": name, "company_overview": pf.get("wr_lines"), "business_overview_dart": (pf.get("dart_overview") or "")[:1200],
-                      "products_dart": pf.get("dart_products"),
-                      "numbers": {"latest_quarter": N["q"], "quarter_cum_revenue_growth": N["q_growth"], "quarter_op_margin_now_prev": N["q_opm"],
-                                  "revenue_by_year_eok": N["rev"], "op_margin_by_year": N["opm"],
-                                  "consensus_eok": {str(k): v for k, v in N["cons"].items()}, "consensus_3m_revision_pct": {f"{k[0]}_{k[1]}": v for k, v in N["rev3"].items()},
-                                  "consensus_cut": CUT},
-                      "disclosures_6m": [{k: e[k] for k in ("date", "title", "stage", "dir")} for e in disc[:40]],
-                      "news_titles_6m": [f"{e['date']} {e['title']}" for e in news[:60]],
-                      "previous_claude": {"asof": prev["company"]["asof"], "nodes": [{k: n[k] for k in ("name", "kind", "demand", "share", "numbers", "triggers", "rep", "raw_judgment")} for n in prev["nodes"]],
-                                          "verdict": prev["verdict"]} if prev else None,
-                      "app_rule_judgment": {"nodes": [{"name": n["name"], "years": {y: v["judgment"] for y, v in n["years"].items()}, "land": n["land"]} for n in app["nodes"]]} if app else None})
-    return {"instructions": INSTRUCTIONS, "made_at": db.now(), "companies": comps}
+        L = [f"\n---\n\n## {name} ({c})\n"]
+        if prev:
+            fr = claude_fresh(conn, c, prev["company"]["asof"], " ".join(n.get("triggers") or "" for n in prev["nodes"]))
+            L.append(f"- 요청 이유: 다시 조사 — 이전 조사 {prev['company']['asof']}" + (f" · {' · '.join(fr['reasons'][:3])}" if fr["reasons"] else ""))
+        else:
+            L.append("- 요청 이유: 아직 한장조사가 없음")
+        d = nodeview.definition(pf)
+        if d:
+            L.append(f"- 한 줄 정의(기업개요): {d}")
+        try:
+            _, gs, _ = __import__("analyzer.segments", fromlist=["groups"]).groups(conn, c)
+            mix = [f"{g['name']} {g['pct']:.0f}%" for g in gs if g["kind"] == "사업부" and g.get("pct")]
+            if mix:
+                L.append(f"- 매출 구성(최근 공시): {', '.join(mix[:8])}")
+        except Exception:     # noqa: BLE001
+            pass
+        if pf.get("dart_products"):
+            L.append("- 주요 제품(사업보고서): " + ", ".join(str(r[0] if isinstance(r, (list, tuple)) else r.get("name", ""))[:20]
+                                                     for r in pf["dart_products"][:8]))
+        if c in {r["stock_code"] for r in conn.execute("SELECT DISTINCT stock_code FROM facts WHERE stock_code=?", (c,))}:
+            N = company_numbers(conn, c, P)
+            cy = N["cy"]
+            L.append("- 연 매출: " + " · ".join(f"{y} {_eok(v)}" for y, v in sorted(N["rev"].items()) if v is not None))
+            L.append("- 영업이익률: " + " · ".join(f"{y} {v:.1f}%" for y, v in sorted(N["opm"].items()) if v is not None))
+            if N["q"] and N["q_growth"] is not None:
+                L.append(f"- {cy} {N['q']} 누적 매출 전년 대비 {N['q_growth'] * 100:+.1f}%" + (f" · 영업이익률 {N['q_opm'][1]:.1f}→{N['q_opm'][0]:.1f}%" if N["q_opm"] else ""))
+            cs = [f"{y}E 매출 {_eok(v['rev'])} · 영업이익 {_eok(v['op'])}" for y, v in sorted(N["cons"].items()) if v.get("rev")]
+            if cs:
+                L.append("- 컨센서스(증권사 평균, 보정 전): " + " / ".join(cs))
+            disc, news = evidence_pool(conn, c)
+            if disc:
+                L.append("- 최근 6개월 주요 공시:")
+                L += [f"  - {e['date']} {e['title']}" for e in disc[:12]]
+            if news:
+                L.append("- 최근 6개월 뉴스 제목(일부):")
+                L += [f"  - {e['date']} {e['title']}" for e in news[:15]]
+        else:
+            L.append("- (앱 DB에 이 회사 재무 자료가 아직 없음)")
+        if prev:
+            L.append("- 이전 조사 노드(참고): " + " / ".join(f"{n['name']} [{n.get('raw_judgment') or n.get('rep') or ''}]" for n in prev["nodes"]))
+        parts.append("\n".join(L) + "\n")
+    return "".join(parts), codes

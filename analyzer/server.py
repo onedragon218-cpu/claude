@@ -179,22 +179,17 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/job":
                 with JOB_LOCK:
                     return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
-            if u.path == "/api/hj/export":
+            if u.path == "/api/hj/request":
+                # 화면 T: Claude에 올릴 한장조사 요청 글(마크다운, 10곳까지). 작업 폴더에는 쓰지 않고 내려받기로만
                 from . import hanjang
                 hanjang.ensure(conn)
                 P = config.periods(by)
-                scope = q.get("scope", ["one"])[0]
-                if scope == "stale":
-                    codes = []
-                    for r in conn.execute("SELECT h.code, h.asof FROM hj_company h WHERE h.origin='claude' AND EXISTS "
-                                          "(SELECT 1 FROM facts f WHERE f.stock_code=h.code)"):
-                        trig = " ".join(x["triggers"] or "" for x in conn.execute("SELECT triggers FROM hj_node WHERE code=? AND origin='claude'", (r["code"],)))
-                        if hanjang.stale_reasons(conn, r["code"], r["asof"], trig):
-                            codes.append(r["code"])
-                    codes = codes[:15]                     # 한 번에 너무 많으면 Claude가 다 못 함 — 15곳씩
-                else:
-                    codes = [q.get("code", [""])[0]]
-                return self._send(200, json.dumps(hanjang.export(conn, codes, P), ensure_ascii=False, indent=1), "application/json")
+                codes = [c for c in q.get("codes", [""])[0].split(",") if c]
+                purpose = "refresh" if q.get("purpose", ["new"])[0] == "refresh" else "new"
+                text, used = hanjang.request_md(conn, codes, P, purpose)
+                if not used:
+                    return self._send(400, json.dumps({"error": "회사가 없습니다"}, ensure_ascii=False), "application/json")
+                return self._send(200, text, "text/markdown; charset=utf-8")
             if u.path == "/api/nodes/export":
                 from . import nodeview
                 P = config.periods(by)
@@ -299,7 +294,7 @@ class H(BaseHTTPRequestHandler):
             finally:
                 conn.close()
         if u.path in ("/api/hj/run", "/api/hj/run_all", "/api/hj/import"):
-            # 화면 T「노드 4년 판정」: 근거 모으기·앱 판정 · 전체 다시 계산 · Claude 조사 결과(JSON·zip) 넣기
+            # 화면 T「노드 현재 판정」: 근거 모으기·앱 판정 · 전체 다시 계산 · Claude 조사 결과(JSON·zip) 넣기
             from . import hanjang, lan
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(n) if 0 < n < 30_000_000 else b""

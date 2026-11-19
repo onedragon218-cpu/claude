@@ -815,7 +815,7 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
         from .collectors import news as _nw     # 네이버 키가 있으면 노드별 뉴스도 매일 갱신 때 함께(노드마다 7일에 한 번)
         hanjang.run_app(conn, code, P, collect_news=bool(not offline and _nw.naver_key()))
     except Exception as e:                 # noqa: BLE001
-        stats.notes.append(f"노드 4년 판정(앱) 실패: {type(e).__name__}")
+        stats.notes.append(f"노드 판정(앱) 실패: {type(e).__name__}")
     report["items"] += val["checks"]
     for c in val["checks"]:
         report["summary"][c["level"]] = report["summary"].get(c["level"], 0) + 1

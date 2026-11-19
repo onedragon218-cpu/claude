@@ -942,6 +942,18 @@ class T(unittest.TestCase):
             self.assertEqual(F("2026-10-30", "2026-11-19")["state"], "old")
             ov = hanjang.fresh_overview(conn, dtm.date(2026, 11, 19))
             self.assertEqual(sum(ov["counts"].values()), 2)
+            # 요청 파일: 10곳까지 · 중복·잘못된 코드 제외 · 형식 지시 없음 · 작업 폴더에는 쓰지 않음
+            before = sorted(os.listdir(f))
+            P = config.periods(2026)
+            txt, used = hanjang.request_md(conn, ["111111", "111111", "BAD"] + [f"{i:06d}" for i in range(200000, 200015)], P, "refresh")
+            self.assertEqual(len(used), 10)
+            self.assertEqual(used[0], "111111")
+            self.assertIn("기존 조사 지침과 기존 한장조사 파일 모양 그대로", txt)
+            self.assertNotIn("years", txt)
+            self.assertEqual(sorted(os.listdir(f)), before)
+            pl = hanjang.payload(conn, "222222", P)
+            self.assertIn("1", {str(k) for k in (pl["facts"] or {}).get("nodes", {})})
+            self.assertEqual(pl["db_not_in_claude"], [])
             conn.close()
 
     def test_lan_password_and_network_rules(self):
