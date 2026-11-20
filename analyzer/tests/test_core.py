@@ -946,7 +946,7 @@ class T(unittest.TestCase):
             before = {n: open(os.path.join(f, n), "rb").read() for n in os.listdir(f)}
             P = config.periods(2026)
             txt, used = hanjang.request_md(conn, ["111111", "111111", "BAD"] + [f"{i:06d}" for i in range(200000, 200100)], P, "refresh")
-            self.assertEqual(len(used), 70)
+            self.assertEqual(len(used), 101)
             self.assertEqual(used[0], "111111")
             self.assertIn("기존 조사 지침과 기존 한장조사 파일 모양 그대로", txt)
             self.assertIn("_앱요청` 폴더 안에는 저장하지 마세요", txt)
@@ -954,10 +954,14 @@ class T(unittest.TestCase):
             codes = [f"{i:06d}" for i in range(300000, 300150)]
             rep = hanjang.save_requests(conn, codes, P, "new")
             self.assertEqual(rep["dir"], os.path.join(f, "_앱요청"))               # 한장조사 파일이 있는 폴더 안
-            self.assertEqual([n for _, n in rep["files"]], [70, 70, 10])
+            self.assertEqual([n for _, n in rep["files"]], [150])                 # 한 파일 — 나누기는 Claude가 스스로
+            body = open(os.path.join(rep["dir"], rep["files"][0][0]), encoding="utf-8").read()
+            self.assertIn("스스로 확실히 할 수 있는 양만큼 묶음으로 나눠", body)
+            self.assertIn("이미 `{종목코드}.json`이 있는 회사는 건너뛰고", body)
+            self.assertIn("150. 300149 (300149)", body)
             rep2 = hanjang.save_requests(conn, codes[:5], P, "new")                # 같은 날 다시 → 덮어쓰지 않고 (2)
             self.assertNotEqual(rep2["files"][0][0], rep["files"][0][0])
-            self.assertEqual(len(os.listdir(rep["dir"])), 4)
+            self.assertEqual(len(os.listdir(rep["dir"])), 2)
             self.assertEqual({n: open(os.path.join(f, n), "rb").read() for n in os.listdir(f) if n != "_앱요청"}, before)
             self.assertEqual(hanjang.sync_folder(conn)["changed"], 0)              # 요청 파일은 읽어 들이지 않음
             pl = hanjang.payload(conn, "222222", P)

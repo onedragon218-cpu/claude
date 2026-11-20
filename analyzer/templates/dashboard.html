@@ -2178,7 +2178,7 @@ function renderT(){
 async function tRequest(codes, purpose, scope){
   if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
   const msg = $('#t-reqmsg') || $('#t-msg');
-  if ((HJ.folder||{}).folder){      // 작업 폴더가 있으면 그 안 _앱요청 폴더에 새 파일로 저장(70곳씩)
+  if ((HJ.folder||{}).folder){      // 작업 폴더가 있으면 그 안 _앱요청 폴더에 새 파일 하나로 저장(나누기는 Claude가 스스로)
     msg.textContent = '만드는 중…';
     try { const j = await tPost(`/api/hj/request_save?base_year=${BY}`, JSON.stringify({purpose, scope, codes}), 'application/json');
       msg.innerHTML = `${j.n}곳 → 파일 ${j.files.length}개 저장: <b>${esc(j.dir)}</b><br>${j.files.map(f=>`${esc(f[0])} (${f[1]}곳)`).join(' · ')}<br>Claude 쪽에 이 파일을 열어 조사하라고 하시면 됩니다. 저장된 {종목코드}.json은 다음 갱신 때(또는 [지금 다시 읽기]) 자동으로 읽습니다.`;
@@ -2226,8 +2226,7 @@ function tAgree(){
   const M = HJ.claude_not_in_db||[];
   $('#t-missing').innerHTML = M.length ? `<div class="muted">Claude 조사는 있는데 앱 DB에 없는 회사 ${M.length}곳 — 올리면 숫자 근거·앱 판정·검사 8번(숫자 대조)이 됩니다. <button id="t-addmiss">이 회사들 DB에 올리기(${M.length}곳)</button></div>` : '';
   const X = HJ.db_not_in_claude||[];
-  const nf = Math.ceil(X.length/70);
-  $('#t-dbonly').innerHTML = X.length ? `<div>앱 DB에는 있는데 Claude 한장조사가 없는 회사 <b>${X.length}곳</b> <button class="primary" id="t-reqnew">요청 파일 만들기(70곳씩 ${nf}개 → 한장조사 폴더/_앱요청)</button> <span class="muted" id="t-reqmsg"></span><details><summary class="muted">회사 목록</summary><div class="muted" style="white-space:normal">${X.map((x,i)=>`${i+1}. ${esc(x.name||x.code)}(${esc(x.code)})`).join(' · ')}</div></details></div>` : '<div class="muted">앱 DB의 모든 회사에 Claude 한장조사가 있습니다.</div>';
+  $('#t-dbonly').innerHTML = X.length ? `<div>앱 DB에는 있는데 Claude 한장조사가 없는 회사 <b>${X.length}곳</b> <button class="primary" id="t-reqnew">요청 파일 만들기(${X.length}곳 한 파일 → 한장조사 폴더/_앱요청)</button> <span class="muted" id="t-reqmsg"></span><details><summary class="muted">회사 목록</summary><div class="muted" style="white-space:normal">${X.map((x,i)=>`${i+1}. ${esc(x.name||x.code)}(${esc(x.code)})`).join(' · ')}</div></details></div>` : '<div class="muted">앱 DB의 모든 회사에 Claude 한장조사가 있습니다.</div>';
   const bn = $('#t-reqnew'); if (bn) bn.onclick = () => tRequest(null, 'new', 'missing');
   const b = $('#t-addmiss'); if (b) b.onclick = () => { const U = Object.fromEntries((D.universe||[]).map(u=>[u.code,u.name])); uStartBatch(M.map(c=>({code:c, name:U[c]||c})), 'Claude 조사 회사'); };
 }

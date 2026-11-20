@@ -1084,7 +1084,7 @@ TRIG_STOP = {"공시", "확정", "여부", "지연", "회수", "금액", "증가
 
 
 # ---------------------------------------------------------------- Claude 조사 요청 파일(마크다운, 참고 자료만 — 조사 형식·지침은 Claude 쪽 것을 그대로)
-REQUEST_MAX = 70          # 요청 파일 한 개에 담는 회사 수(사용자 결정 2026-11-20)
+REQUEST_MAX = 2000        # 요청 파일 한 개에 담는 회사 수 — 한 파일로 만들고 나누기는 Claude가 스스로(사용자 결정 2026-11-20)
 REQUEST_DIR = "_앱요청"   # 한장조사 폴더 안 하위 폴더 — 앱은 여기에 새 파일만 만든다(기존 파일은 읽기만, 고치거나 지우지 않음)
 
 
@@ -1135,8 +1135,19 @@ def request_md(conn, codes, P, purpose="new"):
             f"결과는 기존과 같은 방식으로 **기존 한장조사 `{{종목코드}}.json` 파일들이 있는 폴더**(이 요청 파일이 든 `{REQUEST_DIR}` 폴더의 바로 위)에 저장해 주세요. "
             f"`{REQUEST_DIR}` 폴더 안에는 저장하지 마세요(앱이 읽지 않음).\n\n"
             "아래 숫자·공시·뉴스 제목은 재무분석 앱이 모은 **참고 자료**입니다(앱 판정 아님). 조사 출발점으로만 쓰고, 판단은 지침대로 해 주세요.\n")
+    if len(codes) > 10:      # 많을 때: 나눠서 하는 방법·이어 하기·회사 목록을 맨 앞에(형식 지시는 아님 — 일하는 순서만)
+        head += ("\n## 진행 방법\n"
+                 "- 회사가 많으니 **한 번에 다 하려 하지 말고, 스스로 확실히 할 수 있는 양만큼 묶음으로 나눠** 차례로 진행해 주세요. 묶음마다 끝나면 바로 저장하고 다음 묶음으로 넘어가 주세요.\n"
+                 "- 이 파일도 한 번에 다 읽지 말고, 지금 묶음의 회사 부분만 찾아 읽어 주세요(회사마다 `## 회사명 (종목코드)` 제목).\n"
+                 "- 시작할 때와 다시 이어 할 때는 한장조사 폴더를 먼저 보고, **이미 `{종목코드}.json`이 있는 회사는 건너뛰고** 남은 회사부터 해 주세요.\n"
+                 "- 대화가 끊기거나 한도에 걸리면 다음에 \"이어서 해 줘\"라고 하면 위 방법대로 남은 회사부터 이어 갑니다.\n"
+                 "- 자료가 너무 적어 조사가 어려운 회사는 건너뛰고, 끝에 건너뛴 회사와 이유를 짧게 알려 주세요.\n"
+                 f"\n## 회사 목록 ({len(codes)}곳)\n")
+        names = {r["stock_code"]: r["name"] for r in conn.execute(
+            f"SELECT stock_code, name FROM companies WHERE stock_code IN ({','.join('?' * len(codes))})", codes)}
+        head += "\n".join(f"{i}. {names.get(c) or c} ({c})" for i, c in enumerate(codes, 1)) + "\n"
     parts = [head]
-    nd, nn = (12, 15) if len(codes) <= 10 else (6, 8)
+    nd, nn = (12, 15) if len(codes) <= 10 else (6, 8) if len(codes) <= 70 else (4, 5)
     for c in codes:
         name = (conn.execute("SELECT name FROM companies WHERE stock_code=?", (c,)).fetchone() or {"name": None})["name"]
         prev = load(conn, c, "claude")
