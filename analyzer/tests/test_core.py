@@ -942,15 +942,24 @@ class T(unittest.TestCase):
             self.assertEqual(F("2026-10-30", "2026-11-19")["state"], "old")
             ov = hanjang.fresh_overview(conn, dtm.date(2026, 11, 19))
             self.assertEqual(sum(ov["counts"].values()), 2)
-            # 요청 파일: 10곳까지 · 중복·잘못된 코드 제외 · 형식 지시 없음 · 작업 폴더에는 쓰지 않음
-            before = sorted(os.listdir(f))
+            # 요청 파일: 70곳씩 · 중복·잘못된 코드 제외 · 형식 지시 없음 · 한장조사 폴더/_앱요청에 새 파일만(기존 파일 그대로)
+            before = {n: open(os.path.join(f, n), "rb").read() for n in os.listdir(f)}
             P = config.periods(2026)
-            txt, used = hanjang.request_md(conn, ["111111", "111111", "BAD"] + [f"{i:06d}" for i in range(200000, 200015)], P, "refresh")
-            self.assertEqual(len(used), 10)
+            txt, used = hanjang.request_md(conn, ["111111", "111111", "BAD"] + [f"{i:06d}" for i in range(200000, 200100)], P, "refresh")
+            self.assertEqual(len(used), 70)
             self.assertEqual(used[0], "111111")
             self.assertIn("기존 조사 지침과 기존 한장조사 파일 모양 그대로", txt)
+            self.assertIn("_앱요청` 폴더 안에는 저장하지 마세요", txt)
             self.assertNotIn("years", txt)
-            self.assertEqual(sorted(os.listdir(f)), before)
+            codes = [f"{i:06d}" for i in range(300000, 300150)]
+            rep = hanjang.save_requests(conn, codes, P, "new")
+            self.assertEqual(rep["dir"], os.path.join(f, "_앱요청"))               # 한장조사 파일이 있는 폴더 안
+            self.assertEqual([n for _, n in rep["files"]], [70, 70, 10])
+            rep2 = hanjang.save_requests(conn, codes[:5], P, "new")                # 같은 날 다시 → 덮어쓰지 않고 (2)
+            self.assertNotEqual(rep2["files"][0][0], rep["files"][0][0])
+            self.assertEqual(len(os.listdir(rep["dir"])), 4)
+            self.assertEqual({n: open(os.path.join(f, n), "rb").read() for n in os.listdir(f) if n != "_앱요청"}, before)
+            self.assertEqual(hanjang.sync_folder(conn)["changed"], 0)              # 요청 파일은 읽어 들이지 않음
             pl = hanjang.payload(conn, "222222", P)
             self.assertIn("1", {str(k) for k in (pl["facts"] or {}).get("nodes", {})})
             self.assertEqual(pl["db_not_in_claude"], [])

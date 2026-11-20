@@ -272,6 +272,29 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps({"error": "넣을 내용이 없습니다", "notes": notes}, ensure_ascii=False), "application/json")
             total = nodeview.save_review(clean)
             return self._send(200, json.dumps({"saved": got, "total": total, "notes": notes}, ensure_ascii=False), "application/json")
+        if u.path == "/api/hj/request_save":
+            # 화면 T: Claude 요청 파일을 한장조사 폴더/_앱요청/에 새 파일로 저장(PC에서만, 70곳씩)
+            from . import hanjang, lan
+            if not lan.is_local(self.client_address[0]):
+                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                d = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 < n < 1_000_000 else {}
+            except ValueError:
+                d = {}
+            conn = db.connect()
+            try:
+                hanjang.ensure(conn)
+                P = config.periods(int(q["base_year"][0]) if q.get("base_year") else None)
+                purpose = "refresh" if d.get("purpose") == "refresh" else "new"
+                codes = [x["code"] for x in hanjang.db_not_in_claude(conn)] if d.get("scope") == "missing" else list(d.get("codes") or [])
+                try:
+                    rep = hanjang.save_requests(conn, codes, P, purpose)
+                except (ValueError, OSError) as e:
+                    return self._send(200, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+                return self._send(200, json.dumps(rep, ensure_ascii=False), "application/json")
+            finally:
+                conn.close()
         if u.path in ("/api/hj/folder", "/api/hj/sync"):
             # 화면 T: 작업 폴더 지정(PC에서만) · 지금 읽기
             from . import hanjang, lan

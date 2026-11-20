@@ -23,6 +23,7 @@ import io
 import json
 import re
 import zipfile
+from collections import Counter
 
 from . import db
 
@@ -1083,7 +1084,42 @@ TRIG_STOP = {"공시", "확정", "여부", "지연", "회수", "금액", "증가
 
 
 # ---------------------------------------------------------------- Claude 조사 요청 파일(마크다운, 참고 자료만 — 조사 형식·지침은 Claude 쪽 것을 그대로)
-REQUEST_MAX = 10
+REQUEST_MAX = 70          # 요청 파일 한 개에 담는 회사 수(사용자 결정 2026-11-20)
+REQUEST_DIR = "_앱요청"   # 한장조사 폴더 안 하위 폴더 — 앱은 여기에 새 파일만 만든다(기존 파일은 읽기만, 고치거나 지우지 않음)
+
+
+def request_dir(conn):
+    """요청 파일을 둘 곳: 읽어 온 한장조사 파일이 가장 많은 폴더 안의 _앱요청. 폴더를 지정하지 않았으면 None"""
+    root = folder_get()
+    if not root or not _os.path.isdir(root):
+        return None
+    dirs = Counter(_os.path.dirname(r["path"]) for r in conn.execute("SELECT path FROM hj_files WHERE status='ok'"))
+    base = next((d for d, _ in dirs.most_common() if _os.path.isdir(d)), root)
+    return _os.path.join(base, REQUEST_DIR)
+
+
+def save_requests(conn, codes, P, purpose="new"):
+    """codes를 70곳씩 나눠 한장조사 폴더/_앱요청/에 새 .md 파일로 저장. 같은 이름이 있으면 덮어쓰지 않고 번호를 붙임.
+    반환: {"dir", "files": [(이름, 회사 수)], "n"}"""
+    d = request_dir(conn)
+    if not d:
+        raise ValueError("작업 폴더를 먼저 지정하세요(화면 T 맨 위)")
+    codes = [c for c in dict.fromkeys(codes) if re.fullmatch(r"[0-9A-Z]{6}", c or "")]
+    if not codes:
+        raise ValueError("요청할 회사가 없습니다")
+    _os.makedirs(d, exist_ok=True)
+    chunks = [codes[i:i + REQUEST_MAX] for i in range(0, len(codes), REQUEST_MAX)]
+    out = []
+    for k, ch in enumerate(chunks, 1):
+        text, used = request_md(conn, ch, P, purpose)
+        stem = f"한장조사_요청_{'새회사' if purpose == 'new' else '재조사'}_{db.today()}_{k}of{len(chunks)}"
+        fn, i = f"{stem}.md", 2
+        while _os.path.exists(_os.path.join(d, fn)):
+            fn, i = f"{stem}({i}).md", i + 1
+        with open(_os.path.join(d, fn), "x", encoding="utf-8") as f:     # 'x' = 새 파일만(있으면 실패) — 기존 파일을 덮어쓰지 않음
+            f.write(text)
+        out.append((fn, len(used)))
+    return {"dir": d, "files": out, "n": len(codes)}
 
 
 def _eok(v):
@@ -1091,14 +1127,16 @@ def _eok(v):
 
 
 def request_md(conn, codes, P, purpose="new"):
-    """codes(최대 10곳) → Claude에 올릴 요청 글. 형식 지시는 넣지 않음(작업 폴더의 기존 지침·파일 모양을 따르라고만 함)"""
+    """codes(최대 REQUEST_MAX곳) → Claude에 올릴 요청 글. 많을 때는 공시·뉴스 줄을 줄여 파일을 가볍게. 형식 지시는 넣지 않음(작업 폴더의 기존 지침·파일 모양을 따르라고만 함)"""
     from . import nodeview, profile
     codes = [c for c in dict.fromkeys(codes) if re.fullmatch(r"[0-9A-Z]{6}", c or "")][:REQUEST_MAX]
     head = ("# 한장조사 요청 — " + ("새 회사" if purpose == "new" else "다시 조사") + f" {len(codes)}곳 ({db.today()})\n\n"
             "아래 회사들을 **이 작업 폴더의 기존 조사 지침과 기존 한장조사 파일 모양 그대로** 조사해 주세요.\n"
-            "결과는 기존과 같은 방식으로 같은 폴더에 `{종목코드}.json`으로 저장해 주세요.\n\n"
+            f"결과는 기존과 같은 방식으로 **기존 한장조사 `{{종목코드}}.json` 파일들이 있는 폴더**(이 요청 파일이 든 `{REQUEST_DIR}` 폴더의 바로 위)에 저장해 주세요. "
+            f"`{REQUEST_DIR}` 폴더 안에는 저장하지 마세요(앱이 읽지 않음).\n\n"
             "아래 숫자·공시·뉴스 제목은 재무분석 앱이 모은 **참고 자료**입니다(앱 판정 아님). 조사 출발점으로만 쓰고, 판단은 지침대로 해 주세요.\n")
     parts = [head]
+    nd, nn = (12, 15) if len(codes) <= 10 else (6, 8)
     for c in codes:
         name = (conn.execute("SELECT name FROM companies WHERE stock_code=?", (c,)).fetchone() or {"name": None})["name"]
         prev = load(conn, c, "claude")
@@ -1136,10 +1174,10 @@ def request_md(conn, codes, P, purpose="new"):
             disc, news = evidence_pool(conn, c)
             if disc:
                 L.append("- 최근 6개월 주요 공시:")
-                L += [f"  - {e['date']} {e['title']}" for e in disc[:12]]
+                L += [f"  - {e['date']} {e['title']}" for e in disc[:nd]]
             if news:
                 L.append("- 최근 6개월 뉴스 제목(일부):")
-                L += [f"  - {e['date']} {e['title']}" for e in news[:15]]
+                L += [f"  - {e['date']} {e['title']}" for e in news[:nn]]
         else:
             L.append("- (앱 DB에 이 회사 재무 자료가 아직 없음)")
         if prev:

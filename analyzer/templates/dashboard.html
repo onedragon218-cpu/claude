@@ -2149,9 +2149,9 @@ function renderT(){
   const C = HJ.claude, A = HJ.app, base = C || A, FA = (HJ.facts && !HJ.facts.error) ? HJ.facts : null;
   $('#t-meta').textContent = base ? `${base.company.name||D.company.name||''} · ${C?'Claude 조사 '+(C.company.asof||'–'):'Claude 조사 없음 — 앱이 뽑은 노드'}` : '';
   const FR = HJ.fresh;
-  $('#t-stale').innerHTML = !C ? `<div class="warnbox" style="margin:0 0 8px">이 회사는 Claude 한장조사가 없습니다. 아래 표는 앱이 뽑은 노드와 판단 자료입니다. <button id="t-req1">이 회사 Claude 조사 요청 파일 받기</button></div>` :
+  $('#t-stale').innerHTML = !C ? `<div class="warnbox" style="margin:0 0 8px">이 회사는 Claude 한장조사가 없습니다. 아래 표는 앱이 뽑은 노드와 판단 자료입니다. <button id="t-req1">이 회사 Claude 조사 요청 파일 만들기</button></div>` :
     FR.state==='ok' ? `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg);margin:0 0 8px"><b>● 최신</b> — Claude 조사 ${esc(C.company.asof)} (${FR.age}일 전)${FR.season?' · '+esc(FR.season)+'(14일 넘으면 노랑)':''}</div>` :
-    `<div class="warnbox" style="border-left-color:var(--${FR.state==='old'?'bad':'warn'});background:var(--${FR.state==='old'?'bad':'warn'}-bg);margin:0 0 8px"><b>● ${FR.state==='old'?'다시 조사':'주의'}</b> — Claude 조사 ${esc(C.company.asof||'–')}${FR.age!=null?' ('+FR.age+'일 전)':''} · ${(FR.reasons||[]).map(esc).join(' · ')} <button id="t-req1">이 회사 재조사 요청 파일 받기</button></div>`;
+    `<div class="warnbox" style="border-left-color:var(--${FR.state==='old'?'bad':'warn'});background:var(--${FR.state==='old'?'bad':'warn'}-bg);margin:0 0 8px"><b>● ${FR.state==='old'?'다시 조사':'주의'}</b> — Claude 조사 ${esc(C.company.asof||'–')}${FR.age!=null?' ('+FR.age+'일 전)':''} · ${(FR.reasons||[]).map(esc).join(' · ')} <button id="t-req1">이 회사 재조사 요청 파일 만들기</button></div>`;
   const rb = $('#t-req1'); if (rb) rb.onclick = () => tRequest([D.company.code], C ? 'refresh' : 'new');
   tFolder();
   if (!base){ $('#t-table').innerHTML = '<tr><td class="l">이 회사의 노드가 없습니다. 위 작업 폴더를 지정하거나, 아래 [근거 모으기·앱 판정 다시 계산]을 누르세요.</td></tr>'; $('#t-verdict').innerHTML=''; $('#t-warn').innerHTML=''; tAgree(); return; }
@@ -2175,8 +2175,18 @@ function renderT(){
   $('#t-warn').innerHTML = W.length ? `<details><summary class="muted">파일 점검 메모 ${W.length}건</summary><ul class="muted" style="margin:2px 0">${W.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></details>` : '';
   tAgree();
 }
-async function tRequest(codes, purpose){
+async function tRequest(codes, purpose, scope){
   if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  const msg = $('#t-reqmsg') || $('#t-msg');
+  if ((HJ.folder||{}).folder){      // 작업 폴더가 있으면 그 안 _앱요청 폴더에 새 파일로 저장(70곳씩)
+    msg.textContent = '만드는 중…';
+    try { const j = await tPost(`/api/hj/request_save?base_year=${BY}`, JSON.stringify({purpose, scope, codes}), 'application/json');
+      msg.innerHTML = `${j.n}곳 → 파일 ${j.files.length}개 저장: <b>${esc(j.dir)}</b><br>${j.files.map(f=>`${esc(f[0])} (${f[1]}곳)`).join(' · ')}<br>Claude 쪽에 이 파일을 열어 조사하라고 하시면 됩니다. 저장된 {종목코드}.json은 다음 갱신 때(또는 [지금 다시 읽기]) 자동으로 읽습니다.`;
+      if (!$('#t-reqmsg')) alert(`${j.n}곳 요청 파일 ${j.files.length}개를 저장했습니다.\n${j.dir}`);
+    } catch(e){ msg.textContent = '저장하지 못했습니다: ' + e.message; }
+    return;
+  }
+  if (!codes){ alert('작업 폴더를 먼저 지정하세요(화면 T 맨 위). 지정하지 않으면 10곳씩 내려받기만 됩니다.'); return; }
   try { const r = await fetch(`/api/hj/request?purpose=${purpose}&codes=${codes.join(',')}&base_year=${BY}`); const t = await r.text();
     if (!r.ok) throw new Error((()=>{ try { return JSON.parse(t).error; } catch(e){ return '응답 '+r.status; } })());
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], {type:'text/markdown'}));
@@ -2196,10 +2206,10 @@ function tFolder(){
   const li = (k) => (O.lists[k]||[]).map(x=>`<li><label><input type="checkbox" class="t-pick" value="${esc(x.code)}"> </label><a href="${companyUrl(x.code)}">${esc(x.name||x.code)}</a> <span class="muted">${esc(x.code)} · 조사 ${esc(x.asof||'–')}${x.why?' · '+esc(x.why):''}</span></li>`).join('');
   $('#t-over').innerHTML = `<div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">Claude 조사 ${tot}곳: ${chip('old','다시 조사','bad')} ${chip('warn','주의','warn')} ${chip('ok','최신','good')}` +
     `<span class="muted">기준: 한 달(실적 시즌엔 14일) 넘으면 노랑 · 분기(90일) 넘거나 조사 뒤 실적 공시·보고서 기한이 지나면 빨강${O.season?' · 지금 <b>'+esc(O.season)+'</b>':''}</span></div>` +
-    ((n.old||0)+(n.warn||0) ? `<details style="margin-top:4px"><summary>다시 조사·주의 회사 목록 — 체크해서 재조사 요청 파일 받기</summary>${n.old?`<div style="color:var(--bad);margin-top:4px">다시 조사</div><ul style="margin:2px 0;list-style:none;padding-left:4px">${li('old')}</ul>`:''}${n.warn?`<div style="color:var(--warn)">주의</div><ul style="margin:2px 0;list-style:none;padding-left:4px">${li('warn')}</ul>`:''}<button id="t-reqpick">체크한 회사 재조사 요청 파일 받기(10곳까지)</button> <span class="muted" id="t-pickn"></span></details>` : '');
+    ((n.old||0)+(n.warn||0) ? `<details style="margin-top:4px"><summary>다시 조사·주의 회사 목록 — 체크해서 재조사 요청 파일 받기</summary>${n.old?`<div style="color:var(--bad);margin-top:4px">다시 조사</div><ul style="margin:2px 0;list-style:none;padding-left:4px">${li('old')}</ul>`:''}${n.warn?`<div style="color:var(--warn)">주의</div><ul style="margin:2px 0;list-style:none;padding-left:4px">${li('warn')}</ul>`:''}<button id="t-reqpick">체크한 회사 재조사 요청 파일 만들기(→ _앱요청)</button> <span class="muted" id="t-pickn"></span></details>` : '');
   const pick = () => [...document.querySelectorAll('.t-pick:checked')].map(x=>x.value);
-  document.querySelectorAll('.t-pick').forEach(x=>x.onchange=()=>{ const k = pick().length; $('#t-pickn').textContent = k ? `${k}곳 체크${k>10?' — 10곳까지만 담깁니다':''}` : ''; });
-  const bp = $('#t-reqpick'); if (bp) bp.onclick = () => { const p = pick(); if (!p.length){ alert('회사를 체크하세요.'); return; } tRequest(p.slice(0,10), 'refresh'); };
+  document.querySelectorAll('.t-pick').forEach(x=>x.onchange=()=>{ const k = pick().length; $('#t-pickn').textContent = k ? `${k}곳 체크` : ''; });
+  const bp = $('#t-reqpick'); if (bp) bp.onclick = () => { const p = pick(); if (!p.length){ alert('회사를 체크하세요.'); return; } tRequest(p, 'refresh'); };
 }
 async function tFolderPost(url, body){ if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
   $('#t-fmsg').textContent = '읽는 중…';
@@ -2216,8 +2226,9 @@ function tAgree(){
   const M = HJ.claude_not_in_db||[];
   $('#t-missing').innerHTML = M.length ? `<div class="muted">Claude 조사는 있는데 앱 DB에 없는 회사 ${M.length}곳 — 올리면 숫자 근거·앱 판정·검사 8번(숫자 대조)이 됩니다. <button id="t-addmiss">이 회사들 DB에 올리기(${M.length}곳)</button></div>` : '';
   const X = HJ.db_not_in_claude||[];
-  $('#t-dbonly').innerHTML = X.length ? `<div>앱 DB에는 있는데 Claude 한장조사가 없는 회사 <b>${X.length}곳</b> — 10곳씩 요청 파일 받기: ${Array.from({length: Math.ceil(X.length/10)}, (_, k)=>`<button class="t-reqnew" data-k="${k}">${k*10+1}~${Math.min(X.length,(k+1)*10)}번</button>`).join(' ')}<details><summary class="muted">회사 목록</summary><div class="muted" style="white-space:normal">${X.map((x,i)=>`${i+1}. ${esc(x.name||x.code)}(${esc(x.code)})`).join(' · ')}</div></details></div>` : '<div class="muted">앱 DB의 모든 회사에 Claude 한장조사가 있습니다.</div>';
-  document.querySelectorAll('.t-reqnew').forEach(b=>b.onclick=()=>{ const k = +b.dataset.k; tRequest(X.slice(k*10, k*10+10).map(x=>x.code), 'new'); });
+  const nf = Math.ceil(X.length/70);
+  $('#t-dbonly').innerHTML = X.length ? `<div>앱 DB에는 있는데 Claude 한장조사가 없는 회사 <b>${X.length}곳</b> <button class="primary" id="t-reqnew">요청 파일 만들기(70곳씩 ${nf}개 → 한장조사 폴더/_앱요청)</button> <span class="muted" id="t-reqmsg"></span><details><summary class="muted">회사 목록</summary><div class="muted" style="white-space:normal">${X.map((x,i)=>`${i+1}. ${esc(x.name||x.code)}(${esc(x.code)})`).join(' · ')}</div></details></div>` : '<div class="muted">앱 DB의 모든 회사에 Claude 한장조사가 있습니다.</div>';
+  const bn = $('#t-reqnew'); if (bn) bn.onclick = () => tRequest(null, 'new', 'missing');
   const b = $('#t-addmiss'); if (b) b.onclick = () => { const U = Object.fromEntries((D.universe||[]).map(u=>[u.code,u.name])); uStartBatch(M.map(c=>({code:c, name:U[c]||c})), 'Claude 조사 회사'); };
 }
 async function tPost(url, body, ctype){
@@ -2400,7 +2411,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync','#t-reqnew','#t-reqpick','#t-req1'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';
