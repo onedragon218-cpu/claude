@@ -719,10 +719,14 @@ def collect_node_news(conn, code, nodes, company, days=183):
         if db.fetched_recently(conn, "hj_news", key, 7):
             continue
         try:
+            items = None
             if _news.naver_key():            # 네이버 API: 노드당 최대 2쪽(200건) — 하루 한도 25,000건에 비해 작게
-                _, items = _news.naver(q, since, max_pages=2)
-                src = "네이버 뉴스 API"
-            else:
+                try:
+                    _, items = _news.naver(q, since, max_pages=2)
+                    src = "네이버 뉴스 API"
+                except _news.NaverAuthError:   # 키 거절 → 구글로
+                    items = None
+            if items is None:
                 src, _, items = _news.fetch(q, since)
             got += db.add_news(conn, code, items, f"{src}(노드 조사)", q)
             db.log_fetch(conn, "hj_news", key, code, True, len(items))

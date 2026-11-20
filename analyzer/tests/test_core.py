@@ -956,6 +956,33 @@ class T(unittest.TestCase):
             self.assertEqual(pl["db_not_in_claude"], [])
             conn.close()
 
+    def test_naver_401_falls_back_to_google(self):
+        import datetime as dt, io, urllib.error
+        from unittest import mock
+        from analyzer.collectors import news
+        news._NAVER_BAD.clear()
+        calls = []
+        def fake_open(req, timeout=30):
+            calls.append(req.full_url)
+            if "openapi.naver.com" in req.full_url:
+                raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {},
+                                             io.BytesIO('{"errorMessage":"Authentication failed","errorCode":"024"}'.encode()))
+            body = "<rss><channel><item><title>가짜 뉴스 - 언론</title><link>http://x</link><pubDate>Tue, 10 Nov 2026 00:00:00 GMT</pubDate><source>언론</source></item></channel></rss>"
+            return mock.MagicMock(__enter__=lambda s: mock.MagicMock(read=lambda: body.encode()), __exit__=lambda *a: False)
+        with mock.patch.dict(os.environ, {"NAVER_CLIENT_ID": "id", "NAVER_CLIENT_SECRET": "sec"}), \
+                mock.patch("urllib.request.urlopen", fake_open):
+            with self.assertRaises(news.NaverAuthError) as cm:
+                news.naver("삼성전자", dt.date(2026, 11, 1))
+            self.assertIn("401", str(cm.exception))
+            self.assertIn("024", str(cm.exception))
+            self.assertNotIn("sec", str(cm.exception))                    # 키 값은 문구에 없음
+            self.assertIsNone(news.naver_key())                           # 거절된 키는 이번 실행에서 다시 안 씀
+            src, n, items = news.fetch("삼성전자", dt.date(2026, 11, 1))
+            self.assertTrue(src.startswith("구글 뉴스 RSS"))
+            self.assertIn("네이버 키 거절됨", src)
+            self.assertEqual(sum("openapi.naver.com" in c for c in calls), 1)  # 네이버는 한 번만 시도
+        news._NAVER_BAD.clear()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

@@ -519,6 +519,8 @@ def collect_business(conn, code, stats, has_key=False, corp_fn=None):
         db.log_fetch(conn, "news", code, code, ok, got, "; ".join(errs)[:300] or None)
         stats.notes.append(f"뉴스 제목: 새로 저장 {got}건({', '.join(sorted(src_used)) or '출처 없음'})" +
                            (f" · 실패 {len(errs)}건" if errs else ""))
+        if news.naver_problem():                # 네이버가 키를 거절하면 구글로 받았어도 사유를 남김(키 값은 담지 않음)
+            stats.notes.append(f"네이버 뉴스 API: {news.naver_problem()}")
 
 
 def record_cross_check(conn, code, actuals, url):
@@ -813,7 +815,7 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
         if rep.get("changed"):
             stats.notes.append(f"작업 폴더에서 Claude 조사 {rep['changed']}개 파일 읽음")
         from .collectors import news as _nw     # 네이버 키가 있으면 노드별 뉴스도 매일 갱신 때 함께(노드마다 7일에 한 번)
-        hanjang.run_app(conn, code, P, collect_news=bool(not offline and _nw.naver_key()))
+        hanjang.run_app(conn, code, P, collect_news=bool(not offline and (_nw.naver_key() or _nw.naver_problem())))  # 키가 거절돼도 구글로
     except Exception as e:                 # noqa: BLE001
         stats.notes.append(f"노드 판정(앱) 실패: {type(e).__name__}")
     report["items"] += val["checks"]

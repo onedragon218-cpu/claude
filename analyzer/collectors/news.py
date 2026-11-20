@@ -12,6 +12,7 @@ import html
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -24,6 +25,13 @@ class NewsUnavailable(Exception):
     pass
 
 
+class NaverAuthError(NewsUnavailable):
+    """네이버가 키를 거절함(401 인증 실패·403 권한 없음). 이 프로그램이 도는 동안은 네이버를 건너뛰고 구글로."""
+
+
+_NAVER_BAD = {}       # {키 묶음: 사유} — 거절된 키는 같은 실행 중 다시 쓰지 않음(파일이 바뀌면 새 키로 다시 시도)
+
+
 def key_file():
     base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
     return os.path.join(base, "corp-analyzer", "naver_api_key.txt")
@@ -32,15 +40,22 @@ def key_file():
 def naver_key():
     cid, sec = os.environ.get("NAVER_CLIENT_ID"), os.environ.get("NAVER_CLIENT_SECRET")
     if cid and sec:
-        return cid.strip(), sec.strip()
+        k = (cid.strip(), sec.strip())
+        return None if k in _NAVER_BAD else k
     try:
         with open(key_file(), encoding="utf-8-sig") as f:
             lines = [x.strip() for x in f.read().splitlines() if x.strip()]
         if len(lines) >= 2:
-            return lines[0], lines[1]
+            k = (lines[0], lines[1])
+            return None if k in _NAVER_BAD else k
     except OSError:
         pass
     return None
+
+
+def naver_problem():
+    """거절된 네이버 키 사유(없으면 None) — 화면·기록용, 키 값은 담지 않음"""
+    return next(iter(_NAVER_BAD.values()), None)
 
 
 def clean(s):
@@ -67,6 +82,19 @@ def _get(url, headers=None):
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            d = json.loads(e.read().decode("utf-8", "replace") or "{}")
+            body = f" {d.get('errorCode', '')} {d.get('errorMessage', '')}".rstrip()
+        except Exception:     # noqa: BLE001
+            pass
+        if "openapi.naver.com" in url and e.code in (401, 403):
+            why = ("네이버 키 인증 실패(401" + (f",{body}" if body else "") + ") — Client ID·Secret이 맞지 않음: 「재무분석 인증키 설정」 3번으로 다시 넣기"
+                   if e.code == 401 else
+                   "네이버 API 권한 없음(403" + (f",{body}" if body else "") + ") — 네이버 개발자센터 내 애플리케이션 → API 설정에 '검색' 추가")
+            raise NaverAuthError(why) from None
+        raise NewsUnavailable(f"뉴스 접속 실패: HTTP {e.code}{body}") from None
     except Exception as e:
         raise NewsUnavailable(f"뉴스 접속 실패: {e}") from e
 
@@ -83,6 +111,9 @@ def naver(query, since, key=None, max_pages=5):
         n += 1
         try:
             d = json.loads(_get(url, {"X-Naver-Client-Id": key[0], "X-Naver-Client-Secret": key[1]}))
+        except NaverAuthError as e:
+            _NAVER_BAD[tuple(key)] = str(e)
+            raise
         except ValueError as e:
             raise NewsUnavailable("네이버 응답을 읽지 못함") from e
         items = d.get("items") or []
@@ -143,7 +174,8 @@ def fetch(query, since):
             errs.append(f"네이버: {e}")
     try:
         n, items = google(query, since)
-        return "구글 뉴스 RSS", n, items
+        bad = naver_problem()
+        return ("구글 뉴스 RSS" + (" (네이버 키 거절됨 — B탭 메모 참고)" if bad else "")), n, items
     except NewsUnavailable as e:
         errs.append(f"구글: {e}")
     raise NewsUnavailable("; ".join(errs))

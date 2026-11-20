@@ -31,6 +31,23 @@ function Test-Dart([string]$v) {
     } catch { return 'DART 접속 확인 실패(인터넷 연결 확인). 일단 저장합니다' }
 }
 
+function Test-Naver([string]$id, [string]$sec) {
+    # 네이버 뉴스 검색을 1건만 요청해 키가 맞는지 본다(이 PC → openapi.naver.com 직접). 오류 문구에 키 값은 내지 않는다.
+    try {
+        $h = @{ 'X-Naver-Client-Id' = $id; 'X-Naver-Client-Secret' = $sec }
+        $r = Invoke-RestMethod -Uri 'https://openapi.naver.com/v1/search/news.json?query=%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90&display=1' -Headers $h -TimeoutSec 20
+        if ($null -ne $r.total) { return '확인 완료(네이버 응답 정상)' }
+        return '네이버 응답을 해석하지 못했습니다'
+    } catch {
+        $code = 0
+        try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+        if ($code -eq 401) { return '인증 실패(401): Client ID·Secret이 맞지 않습니다. 네이버 개발자센터에서 두 값을 다시 복사해 넣어 주세요(순서: ID 먼저, Secret 다음)' }
+        if ($code -eq 403) { return "권한 없음(403): 네이버 개발자센터 → 내 애플리케이션 → API 설정에 '검색'을 추가해 주세요" }
+        if ($code -eq 429) { return '하루 호출 한도 초과(429): 내일 다시 됩니다' }
+        return '네이버 접속 확인 실패(인터넷 연결 확인). 일단 저장합니다'
+    }
+}
+
 Write-Host '=== 재무분석 인증키 설정 ===' -ForegroundColor Cyan
 Write-Host "  저장 위치: $KeyDir (이 PC 사용자 계정만 읽기 가능)"
 Repair-Secrets
@@ -38,9 +55,16 @@ Clear-OldInstallLog
 while ($true) {
     Write-Host ''
     Show-State
-    Write-Host '  고르기: 1~3 = 넣기·바꾸기, d1~d3 = 지우기, Enter = 닫기'
+    Write-Host '  고르기: 1~3 = 넣기·바꾸기, d1~d3 = 지우기, t3 = 저장된 네이버 키 확인만, Enter = 닫기'
     $c = "$(Read-Host '번호')".Trim()
     if (-not $c) { break }
+    if ($c -eq 't3') {
+        $nf = Join-Path $KeyDir 'naver_api_key.txt'
+        if (-not (Test-Path $nf)) { Write-Host '  저장된 네이버 키가 없습니다.' -ForegroundColor Yellow; continue }
+        $ln = @((Get-Content $nf -ErrorAction SilentlyContinue) | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+        if ($ln.Count -lt 2) { Write-Host '  저장된 네이버 키가 두 줄(ID·Secret)이 아닙니다. 3번으로 다시 넣어 주세요.' -ForegroundColor Yellow; continue }
+        Write-Host "  네이버 키 확인: $(Test-Naver $ln[0] $ln[1])"; $ln = $null; continue
+    }
     $del = $c.StartsWith('d'); $id = $c.TrimStart('d')
     if (-not $Keys.Contains($id)) { Write-Host '  잘못 고르셨습니다.' -ForegroundColor Yellow; continue }
     $f = Join-Path $KeyDir $Keys[$id].file
@@ -51,8 +75,10 @@ while ($true) {
     if ($id -eq '3') {
         $a = Read-Secret '  Client ID (입력은 *로 보임)'; if (-not $a) { continue }
         $b = Read-Secret '  Client Secret (입력은 *로 보임)'; if (-not $b) { continue }
+        if ($a -match '\s' -or $b -match '\s') { Write-Host '  값 중간에 빈칸이 있습니다. 다시 복사해 넣어 주세요.' -ForegroundColor Yellow; continue }
+        $msg = Test-Naver $a $b
         Save-Secret $f "$a`r`n$b"; $a = $null; $b = $null
-        Write-Host '  저장했습니다.' -ForegroundColor Green; continue
+        Write-Host "  저장했습니다 · $msg" -ForegroundColor Green; continue
     }
     $v = Read-Secret "  $($Keys[$id].name)를 붙여 넣으세요(Ctrl+V 또는 마우스 오른쪽 클릭, 입력은 *로 보임)"
     if (-not $v) { Write-Host '  비어 있어 바꾸지 않았습니다.'; continue }
