@@ -347,8 +347,13 @@ def last_fetch(conn, source, key):
                         (source, key)).fetchone()
 
 
+FORCE = set()     # B탭 [다시 받기]: 여기 든 출처는 기다리는 기간을 무시하고 이번 실행에서 다시 받음
+
+
 def fetched_recently(conn, source, key, ttl_days, ok_only=False):
     """ok_only=True면 '성공해서 값을 받은' 요청만 센다(실패는 다음 실행 때 다시 시도)."""
+    if source in FORCE:
+        return False
     if ok_only:
         r = conn.execute("SELECT * FROM fetch_log WHERE source=? AND key=? AND ok=1 AND n_items>0 "
                          "ORDER BY id DESC LIMIT 1", (source, key)).fetchone()

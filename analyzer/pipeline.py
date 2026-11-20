@@ -824,3 +824,33 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
     if own:
         conn.close()
     return {"periods": P, "stats": stats.as_dict(), "need": need, "validation": report, "had_data": existed > 0}
+
+
+# B탭 [다시 받기]: 수집 기록의 출처 이름 → 기다리는 기간을 무시할 출처(fetched_recently에 쓰는 이름)
+REFETCH = {"news": ["news"], "price": ["price"], "kiwoom_daily": ["price"], "consensus": ["consensus"], "consensus_src": ["consensus"],
+           "consensus_hist": ["consensus_hist"], "segments": ["segments"], "dart_events": ["dart_events"], "dart_disclosures": ["dart_disclosures"],
+           "dart_company": ["dart_company"], "dart_report": ["dart_report"], "dart_shares": ["dart_shares"], "dart_xbrl": ["dart_xbrl"],
+           "kiwoom_info": ["kiwoom_info"], "kiwoom_flows": ["kiwoom_flows"], "profile_wr": ["profile_wr"], "profile_dart": ["profile_dart"],
+           "hj_news": ["hj_news"], "ecos_rf": ["ecos_rf"], "value5_xbrl": ["value5_xbrl"]}
+
+
+def refetch(code, sources, base_year=None, conn=None):
+    """고른 출처만 기다리는 기간을 무시하고 지금 다시 받기(나머지는 평소대로). 반환: {출처: 새 기록 요약}"""
+    force = {f for s in sources for f in REFETCH.get(s, [])}
+    if not force:
+        raise ValueError("다시 받을 수 있는 출처가 없습니다")
+    own = conn is None
+    conn = conn or db.connect()
+    start = conn.execute("SELECT COALESCE(MAX(id), 0) FROM fetch_log").fetchone()[0]
+    db.FORCE.update(force)
+    try:
+        analyze(code, base_year, conn=conn)
+    finally:
+        db.FORCE.difference_update(force)
+    res = {}
+    for r in conn.execute("SELECT source, key, ok, n_items, note FROM fetch_log WHERE id>? AND stock_code=? ORDER BY id", (start, code)):
+        if r["source"] in sources:
+            res[r["source"]] = {"ok": bool(r["ok"]), "n": r["n_items"], "note": (r["note"] or "")[:150]}
+    if own:
+        conn.close()
+    return res

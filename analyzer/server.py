@@ -272,6 +272,31 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps({"error": "넣을 내용이 없습니다", "notes": notes}, ensure_ascii=False), "application/json")
             total = nodeview.save_review(clean)
             return self._send(200, json.dumps({"saved": got, "total": total, "notes": notes}, ensure_ascii=False), "application/json")
+        if u.path == "/api/refetch":
+            # B탭 [다시 받기]: 실패한 출처만 기다리는 기간을 무시하고 지금 다시 받기(PC에서만)
+            from . import lan
+            n = int(self.headers.get("Content-Length") or 0)
+            if not lan.is_local(self.client_address[0]):
+                self._drain()
+                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
+            try:
+                d = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if 0 < n < 100_000 else {}
+            except ValueError:
+                d = {}
+            code = str(d.get("code") or "")
+            if not (code.isalnum() and len(code) == 6):
+                return self._send(400, json.dumps({"error": "종목코드 오류"}, ensure_ascii=False), "application/json")
+            with JOB_LOCK:
+                if JOB.get("running"):
+                    return self._send(200, json.dumps({"error": "전체 갱신이 돌고 있습니다. 끝난 뒤 눌러 주세요"}, ensure_ascii=False), "application/json")
+            srcs = [x for x in (d.get("sources") or []) if x in pipeline.REFETCH]
+            if not srcs:
+                return self._send(200, json.dumps({"error": "다시 받을 수 있는 출처가 아닙니다"}, ensure_ascii=False), "application/json")
+            try:
+                res = pipeline.refetch(code, srcs, int(q["base_year"][0]) if q.get("base_year") else None)
+            except Exception as e:     # noqa: BLE001
+                return self._send(200, json.dumps({"error": f"{type(e).__name__}: {e}"[:200]}, ensure_ascii=False), "application/json")
+            return self._send(200, json.dumps({"ok": True, "result": res}, ensure_ascii=False), "application/json")
         if u.path == "/api/hj/request_save":
             # 화면 T: Claude 요청 파일을 한장조사 폴더/_앱요청/에 새 파일로 저장(PC에서만, 70곳씩)
             from . import hanjang, lan

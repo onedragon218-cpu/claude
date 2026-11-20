@@ -996,6 +996,28 @@ class T(unittest.TestCase):
             self.assertEqual(sum("openapi.naver.com" in c for c in calls), 1)  # 네이버는 한 번만 시도
         news._NAVER_BAD.clear()
 
+    def test_refetch_forces_only_chosen_sources(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            conn = db.connect(os.path.join(d, "t.db"))
+            db.log_fetch(conn, "news", "123456", "123456", True, 5)
+            db.log_fetch(conn, "consensus", "123456", "123456", True, 3)
+            self.assertTrue(db.fetched_recently(conn, "news", "123456", 3, ok_only=True))
+            seen = {}
+            def fake_analyze(code, base_year=None, conn=None, **kw):
+                seen["news"] = db.fetched_recently(conn, "news", code, 3, ok_only=True)
+                seen["consensus"] = db.fetched_recently(conn, "consensus", code, 7, ok_only=True)
+                db.log_fetch(conn, "news", code, code, True, 9)
+            with mock.patch.object(pipeline, "analyze", fake_analyze):
+                res = pipeline.refetch("123456", ["news"], conn=conn)
+            self.assertEqual(seen, {"news": False, "consensus": True})          # 고른 출처만 기간 무시
+            self.assertEqual(res, {"news": {"ok": True, "n": 9, "note": ""}})
+            self.assertEqual(db.FORCE, set())                                   # 끝나면 원래대로
+            self.assertTrue(db.fetched_recently(conn, "news", "123456", 3, ok_only=True))
+            with self.assertRaises(ValueError):
+                pipeline.refetch("123456", ["parse"], conn=conn)
+            conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

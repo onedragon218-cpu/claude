@@ -206,7 +206,8 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
     <div class="tablewrap"><table id="coverage"></table></div>
   </div>
-  <div class="card"><h2>최근 수집 기록</h2><p class="muted">같은 자료를 다시 요청하지 않았는지 이 기록으로 확인할 수 있습니다.</p>
+  <div class="card"><h2>최근 수집 기록</h2><p class="muted">같은 자료를 다시 요청하지 않았는지 이 기록으로 확인할 수 있습니다. 실패한 출처는 [다시 받기]로 기다리는 기간(뉴스 3일 등)을 무시하고 지금 다시 받을 수 있습니다(기록은 지우지 않고 새 줄이 위에 생김).</p>
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:6px"><button id="b-refall" style="display:none"></button><span class="muted" id="b-refmsg"></span></div>
     <div class="tablewrap"><table id="fetchlog"></table></div></div>
 </section>
 
@@ -999,8 +1000,16 @@ function renderStatic(){
     const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};
     let sym = ''; if(p){ sym = p.kind==='전망'?'◇': p.kind==='실적'? (p.p.status==='VERIFIED'?'●':'◐') : '△'; } else if (y===BY && s.partial) sym='△';
     return `<td style="text-align:center" title="${p?esc(p.kind+' '+(p.p.status||'')):'미확보'}">${sym}</td>`; }).join('')+'</tr>').join('');
-  $('#fetchlog').innerHTML = '<tr><th class="l">시각</th><th class="l">출처</th><th class="l">대상</th><th class="l">결과</th><th>항목 수</th><th class="l">메모</th></tr>' +
-    D.fetch_log.map(r=>`<tr><td class="l">${esc(r.fetched_at)}</td><td class="l">${esc(r.source)}</td><td class="l">${esc(r.key)}</td><td class="l">${r.ok?badge('OK'):badge('MISSING')}</td><td>${r.n_items}</td><td class="l">${esc(String(r.note||'').slice(0,90))}</td></tr>`).join('');
+  // 출처·대상마다 가장 최근 기록이 실패(또는 메모에 오류)면 [다시 받기]
+  const RF = new Set(D.refetchable||[]), seenF = new Set(), failSrc = new Set();
+  const isFail = r => !r.ok || /실패|Error|오류|40[13]|8050|시간 초과|timed out/i.test(String(r.note||''));
+  const latestFail = D.fetch_log.map(r=>{ const k = r.source+'|'+r.key; const first = !seenF.has(k); seenF.add(k);
+    const f = first && isFail(r) && RF.has(r.source); if (f) failSrc.add(r.source); return f; });
+  $('#fetchlog').innerHTML = '<tr><th class="l">시각</th><th class="l">출처</th><th class="l">대상</th><th class="l">결과</th><th>항목 수</th><th class="l">메모</th><th></th></tr>' +
+    D.fetch_log.map((r,i)=>`<tr><td class="l">${esc(r.fetched_at)}</td><td class="l">${esc(r.source)}</td><td class="l">${esc(r.key)}</td><td class="l">${r.ok?badge('OK'):badge('MISSING')}</td><td>${r.n_items}</td><td class="l">${esc(String(r.note||'').slice(0,90))}</td><td>${latestFail[i]?`<button class="b-ref" data-s="${esc(r.source)}">다시 받기</button>`:''}</td></tr>`).join('');
+  const ba = $('#b-refall'); ba.style.display = failSrc.size ? '' : 'none'; ba.textContent = `실패 항목 모두 다시 받기(${failSrc.size}개 출처)`;
+  ba.onclick = () => bRefetch([...failSrc]);
+  document.querySelectorAll('.b-ref').forEach(b=>b.onclick=()=>bRefetch([b.dataset.s]));
   // E consensus
   $('#cons').innerHTML = D.consensus.length ? '<tr><th class="l">수집 기준일</th><th>대상 연도</th><th class="l">지표</th><th>값</th><th class="l">단위</th><th class="l">증권사</th><th>추정 개수</th><th class="l">제공기관</th><th class="l">기준</th></tr>' +
     D.consensus.map(c=>`<tr><td class="l">${esc(c.as_of)}</td><td>${c.target_year}</td><td class="l">${esc(MNAME[c.metric]||CONS_NAME[c.metric]||c.metric)}</td><td>${fmt(c.value,c.unit)}</td><td class="l">${esc(c.unit)}</td><td class="l">${esc(c.broker)}</td><td>${c.n_estimates??'–'}</td><td class="l">${esc(c.provider)}</td><td class="l">${esc(c.basis)}</td></tr>`).join('')
@@ -2262,6 +2271,17 @@ $('#r-revsave').onclick = async () => {
   $('#r-revsave').disabled = false; };
 ['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
+async function bRefetch(sources){
+  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  document.querySelectorAll('.b-ref,#b-refall').forEach(b=>b.disabled=true);
+  $('#b-refmsg').textContent = `다시 받는 중… (${sources.join(', ')})`;
+  try { const r = await fetch(`/api/refetch?base_year=${BY}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code: D.company.code, sources})});
+    const j = await r.json(); if (j.error) throw new Error(j.error);
+    const R = j.result||{}, ks = Object.keys(R);
+    $('#b-refmsg').innerHTML = (ks.length ? ks.map(k=>`${esc(k)}: ${R[k].ok?'<b style="color:var(--good)">성공</b>':'<b style="color:var(--bad)">실패</b>'} ${R[k].n}건${R[k].note?' · '+esc(R[k].note):''}`).join('<br>') : '새로 받을 것이 없었습니다(이미 최신이거나 조건이 안 맞음)') + '<br>3초 뒤 새로 고칩니다.';
+    setTimeout(()=>location.reload(), 3000);
+  } catch(e){ $('#b-refmsg').textContent = '실패: ' + e.message; document.querySelectorAll('.b-ref,#b-refall').forEach(b=>b.disabled=false); } }
+
 function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderQ(); renderR(); renderS(); renderT(); renderKiwoom(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
@@ -2410,7 +2430,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync','#t-reqnew','#t-reqpick','#t-req1'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync','#t-reqnew','#t-reqpick','#t-req1','#b-refall'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

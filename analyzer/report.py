@@ -108,6 +108,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "status_counts": status,
         "missing": missing,
         "fetch_log": fetches,
+        "refetchable": sorted(__import__("analyzer.pipeline", fromlist=["REFETCH"]).REFETCH),
         "last_collect": last_collect, "last_verify": last_verify,
         "companies": companies,
         "last_run": last_run,
