@@ -7,8 +7,8 @@
    - 고른 지표의 작년 실적이나 컨센서스가 하나라도 없으면 '자료 부족'으로 따로 모아 보여 준다(2026-11-13 변경, 예전에는 제외).
 2) 가격 판정: 적정가 = ROE(%) × 1/10 × 보정(앱 공통 규칙 ×0.83, 급하향 ×0.73, 기본 켬) × BPS(컨센서스 그해 값) > 현재 주가
    1차 = 내후년 기준, 2차 = 내년 기준, 3차 = 올해 기준. 화면에는 '몇 년 뒤 기준부터 싼가' 한 칸과 안전 여유(적정가 ÷ 주가 − 1)를 함께 보여 준다.
-3) min PBR 분류(사용자 지시 2026-11-22): min PBR 주가 = 최근 10개 연도 연말 PBR(화면 N 표) 중 가장 낮은 값 × 최근 결산 실제 BPS.
-   우상향 통과 기업 중 min PBR 주가 > 현재 주가이면 'min PBR' 분류(1·2·3차와 서로 독립).
+3) 화면 U「우상향 저평가(min PBR)」(사용자 지시 2026-11-22): 화면 P와 같되 적정가 = 최근 10개 연도 연말 PBR(화면 N 표) 중
+   가장 낮은 값 × BPS(그해 컨센서스). '기업의 가장 나빴던 평가로도 지금 주가가 싼가'를 본다. rows()의 minpbr 값을 함께 쓴다.
 리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님
 """
 from . import db
@@ -98,6 +98,10 @@ def classify(row, use=("op_margin", "roe", "revenue", "eps"), th=None, factor=Tr
         return {"status": "자료 부족", "why": "주가 또는 ROE·BPS 컨센서스 없음"}
     margin = [v / row["price"] - 1 for v in fair]
     tier = next((i for i in (0, 1, 2) if fair[i] > row["price"]), None)
-    mp = (row.get("minpbr") or {}).get("price")
-    return {"status": "통과", "tier": tier, "fair": fair, "margin": margin, "cheap": [v > row["price"] for v in fair],
-            "minpbr_margin": None if mp is None else mp / row["price"] - 1, "minpbr_cheap": mp is not None and mp > row["price"]}
+    return {"status": "통과", "tier": tier, "fair": fair, "margin": margin, "cheap": [v > row["price"] for v in fair]}
+
+
+def minpbr_fair(row):
+    """화면 U: 그해 적정가 = 10년 최저 연말 PBR × BPS(그해 컨센서스) — 올해·내년·내후년"""
+    m = (row.get("minpbr") or {}).get("pbr")
+    return [None if m is None or b is None else m * b for b in row["bps"]]

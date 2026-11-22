@@ -574,13 +574,11 @@ class T(unittest.TestCase):
         self.assertEqual(upvalue.classify(row)["status"], "우상향 아님")
         row["series"]["roe"] = [10, 11, 12, 13]
         self.assertEqual(upvalue.classify(row, use=("roe",))["status"], "통과")
-        # min PBR: 우상향 통과 + (10년 최저 연말 PBR × 최근 결산 BPS) > 현재 주가
-        row["minpbr"] = {"price": 12000.0}
-        c = upvalue.classify(row, use=("roe",))
-        self.assertTrue(c["minpbr_cheap"])
-        self.assertAlmostEqual(c["minpbr_margin"], 0.2)
-        row["minpbr"] = {"price": 9000.0}
-        self.assertFalse(upvalue.classify(row, use=("roe",))["minpbr_cheap"])
+        # 화면 U: 그해 적정가 = 10년 최저 PBR × BPS(그해 컨센서스)
+        row["minpbr"] = {"pbr": 0.9}
+        self.assertEqual([round(v) for v in upvalue.minpbr_fair(row)], [9000, 9900, 10800])
+        row["minpbr"] = None
+        self.assertEqual(upvalue.minpbr_fair(row), [None, None, None])
 
     def test_min_pbr_from_year_end(self):
         from analyzer import goodco
