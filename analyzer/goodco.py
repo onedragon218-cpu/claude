@@ -329,6 +329,37 @@ def quarters(D):
     return out[-12:]
 
 
+def year_pbr(D, y):
+    """연말 PBR = 연말 시가총액(억) ÷ 지배주주 자본(억). 화면 N 표와 화면 P 'min PBR'이 같은 값을 쓴다."""
+    mc, eqo = D.v(y, "market_cap"), D.eok(y, "acc_eq_owner")
+    return mc / eqo if mc and eqo and eqo > 0 else None
+
+
+def min_pbr(D):
+    """최근 10개 연도(화면 N 표와 같은 범위)의 가장 낮은 연말 PBR × 최근 결산 실제 BPS.
+    BPS = DART 계산값(bps), 없으면 그해 연말 주가 ÷ 연말 PBR. 반환: dict 또는 None"""
+    cy = D.cy
+    pb = [(y, year_pbr(D, y)) for y in D.years if y >= cy - 10]
+    pb = [(y, v) for y, v in pb if v is not None and v > 0]
+    if not pb:
+        return None
+    y0, v0 = min(pb, key=lambda x: (x[1], -x[0]))
+    bps = by = None
+    for y in reversed(D.years):
+        b = D.v(y, "bps")
+        if b is None:
+            p, v = D.v(y, "price_close"), year_pbr(D, y)
+            b = p / v if p and v else None
+        if b is not None and b > 0:
+            bps, by = b, y
+            break
+    if bps is None:
+        return {"pbr": v0, "year": y0, "n": len(pb), "bps": None, "bps_year": None, "price": None,
+                "unverified": D.st(y0, "market_cap") == "UNVERIFIED"}
+    return {"pbr": round(v0, 4), "year": y0, "n": len(pb), "bps": bps, "bps_year": by, "price": v0 * bps,
+            "unverified": D.st(y0, "market_cap") == "UNVERIFIED" or D.st(by, "bps") == "UNVERIFIED"}
+
+
 def shape(conn, code, P):
     from .report import consensus_trend
     D = Data(conn, code, P)
@@ -337,9 +368,8 @@ def shape(conn, code, P):
     rows = []
     for y in past:
         rev, op, ocf = D.eok(y, "acc_revenue"), D.eok(y, "acc_op"), D.eok(y, "acc_ocf")
-        mc, eqo = D.v(y, "market_cap"), D.eok(y, "acc_eq_owner")
         rows.append({"year": y, "revenue": rev, "op": op, "margin": op / rev * 100 if rev and op is not None else None,
-                     "ocf": ocf, "pbr": mc / eqo if mc and eqo and eqo > 0 else None,
+                     "ocf": ocf, "pbr": year_pbr(D, y),
                      "pbr_unverified": D.st(y, "market_cap") == "UNVERIFIED", "roe": D.v(y, "roe")})
     per = D.latest_interim()
     partial = None

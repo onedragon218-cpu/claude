@@ -574,6 +574,34 @@ class T(unittest.TestCase):
         self.assertEqual(upvalue.classify(row)["status"], "우상향 아님")
         row["series"]["roe"] = [10, 11, 12, 13]
         self.assertEqual(upvalue.classify(row, use=("roe",))["status"], "통과")
+        # min PBR: 우상향 통과 + (10년 최저 연말 PBR × 최근 결산 BPS) > 현재 주가
+        row["minpbr"] = {"price": 12000.0}
+        c = upvalue.classify(row, use=("roe",))
+        self.assertTrue(c["minpbr_cheap"])
+        self.assertAlmostEqual(c["minpbr_margin"], 0.2)
+        row["minpbr"] = {"price": 9000.0}
+        self.assertFalse(upvalue.classify(row, use=("roe",))["minpbr_cheap"])
+
+    def test_min_pbr_from_year_end(self):
+        from analyzer import goodco
+        class FakeD:
+            cy = 2026
+            years = list(range(2014, 2026))                    # 2014~2025 — 최근 10개 연도는 2016~2025
+            pb = {2014: 0.2, 2015: 0.3, 2018: 0.5, 2020: 0.6, 2025: 0.9}
+            def v(self, y, k, per="FY"):
+                if k == "market_cap":
+                    return self.pb.get(y, 1.0) * 100.0        # 억
+                if k == "bps":
+                    return 20000.0 if y == 2025 else None
+                return None
+            def eok(self, y, k, per="FY"):
+                return 100.0 if k == "acc_eq_owner" else None
+            def st(self, y, k, per="FY"):
+                return "VERIFIED"
+        m = goodco.min_pbr(FakeD())
+        self.assertEqual((m["pbr"], m["year"], m["n"]), (0.5, 2018, 10))   # 2014·2015는 10년 밖
+        self.assertEqual((m["bps"], m["bps_year"]), (20000.0, 2025))
+        self.assertAlmostEqual(m["price"], 10000.0)
 
     def test_year_rollover_and_rf_override(self):
         import datetime as _d, json as _j, tempfile
