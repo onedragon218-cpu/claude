@@ -2,6 +2,8 @@
 import datetime as dt
 import os
 import sqlite3
+import threading
+import time
 
 from . import config
 
@@ -336,7 +338,31 @@ def add_events(conn, code, items, kind):
     return n
 
 
+_TL = threading.local()     # 갱신 단계별 시간(이 스레드에서 analyze가 도는 동안만)
+
+
+def timing_start():
+    _TL.acc, _TL.t = {}, time.time()
+
+
+def timing_mark(name):
+    """앞 표시 뒤로 흐른 시간을 name에 더함(수집 기록을 남길 때마다 그 출처 이름으로 자동 호출)"""
+    acc = getattr(_TL, "acc", None)
+    if acc is None:
+        return
+    now = time.time()
+    acc[name] = acc.get(name, 0.0) + now - _TL.t
+    _TL.t = now
+
+
+def timing_end():
+    acc = getattr(_TL, "acc", None) or {}
+    _TL.acc = None
+    return {k: round(v, 2) for k, v in sorted(acc.items(), key=lambda x: -x[1])}
+
+
 def log_fetch(conn, source, key, code, ok, n_items=0, note=None):
+    timing_mark(source)
     conn.execute("INSERT INTO fetch_log (source,key,stock_code,fetched_at,ok,n_items,note) VALUES (?,?,?,?,?,?,?)",
                  (source, key, code, now(), 1 if ok else 0, n_items, note))
     conn.commit()

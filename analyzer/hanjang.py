@@ -975,29 +975,33 @@ def agreement(conn, code=None):
             "year_cells": len(rows), "companies": len({r["code"] for r in reps})}
 
 
-def payload(conn, code, P):
+def global_payload(conn):
+    """모든 회사에 걸친 부분(화면 자료 저장본으로 재사용)"""
+    ensure(conn)
+    return {"agree_all": agreement(conn),
+            "n_claude": conn.execute("SELECT COUNT(*) FROM hj_company WHERE origin='claude'").fetchone()[0],
+            "n_app": conn.execute("SELECT COUNT(*) FROM hj_company WHERE origin='app'").fetchone()[0],
+            "claude_not_in_db": [r["code"] for r in conn.execute("SELECT h.code FROM hj_company h WHERE h.origin='claude' AND NOT EXISTS "
+                                                                  "(SELECT 1 FROM facts f WHERE f.stock_code=h.code)")],
+            "db_not_in_claude": db_not_in_claude(conn), "folder": folder_status(conn), "overview": fresh_overview(conn)}
+
+
+def payload(conn, code, P, glob=None):
     ensure(conn)
     out = {"claude": load(conn, code, "claude"), "app": load(conn, code, "app"), "years": YEARS, "judgments": JUDGMENTS,
-           "disclaimer": DISCLAIMER, "agree_company": agreement(conn, code), "agree_all": agreement(conn),
-           "n_claude": conn.execute("SELECT COUNT(*) FROM hj_company WHERE origin='claude'").fetchone()[0],
-           "n_app": conn.execute("SELECT COUNT(*) FROM hj_company WHERE origin='app'").fetchone()[0]}
+           "disclaimer": DISCLAIMER, "agree_company": agreement(conn, code)}
+    out.update(glob if glob is not None else global_payload(conn))
     cl = out["claude"]
     if cl:
         trig = " ".join(n.get("triggers") or "" for n in cl["nodes"])
         out["fresh"] = claude_fresh(conn, code, cl["company"]["asof"], trig)
         out["stale"] = out["fresh"]["reasons"]
-    missing = [r["code"] for r in conn.execute("SELECT h.code FROM hj_company h WHERE h.origin='claude' AND NOT EXISTS "
-                                               "(SELECT 1 FROM facts f WHERE f.stock_code=h.code)")]
-    out["claude_not_in_db"] = missing
-    out["db_not_in_claude"] = db_not_in_claude(conn)
     base = cl or out["app"]
     try:
         out["facts"] = node_facts(conn, code, P, base, out["app"], (cl or {}).get("company", {}).get("asof") if cl else None) if base else None
     except Exception as e:     # noqa: BLE001  판단 자료가 실패해도 화면은 뜨게
         out["facts"] = {"error": f"{type(e).__name__}: {e}"[:200]}
     out["now_year"] = now_year()
-    out["folder"] = folder_status(conn)
-    out["overview"] = fresh_overview(conn)
     return out
 
 

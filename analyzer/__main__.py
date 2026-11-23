@@ -132,9 +132,11 @@ def main(argv=None):
         if not codes:
             raise SystemExit("DB에 기업이 없습니다. 종목코드를 함께 입력하세요. 예: update-all 213500")
         summary = {}
-        for code in codes:
-            res = do_analyze(code, args.base_year, fresh=args.fresh)
-            summary[code] = res["stats"]
+        from . import pcache
+        with pcache.batch():                 # 회사마다 저장하는 화면 파일: 모든 회사 계산은 처음 한 번만
+            for code in codes:
+                res = do_analyze(code, args.base_year, fresh=args.fresh)
+                summary[code] = res["stats"]
         os.makedirs(config.OUTPUT_DIR, exist_ok=True)
         json.dump(summary, open(os.path.join(config.OUTPUT_DIR, "last_update.json"), "w", encoding="utf-8"),
                   ensure_ascii=False, indent=1)

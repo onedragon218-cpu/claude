@@ -29,6 +29,7 @@ class Stats:
         self.new = 0
         self.changed = 0
         self.notes = []
+        self.timing = {}
 
     def req(self, src):
         self.requests[src] = self.requests.get(src, 0) + 1
@@ -41,7 +42,7 @@ class Stats:
 
     def as_dict(self):
         return {"requests": self.requests, "total_requests": sum(self.requests.values()), "reused_facts": self.reused,
-                "new_facts": self.new, "changed_facts": self.changed, "notes": self.notes}
+                "new_facts": self.new, "changed_facts": self.changed, "notes": self.notes, "timing": self.timing}
 
 
 # ---------------------------------------------------------------- 저장(ingest)
@@ -781,6 +782,7 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
     own = conn is None
     conn = conn or db.connect()
     stats = Stats()
+    db.timing_start()                      # 단계별 시간(갱신 결과에 '오래 걸린 단계'로 표시)
     existed = conn.execute("SELECT COUNT(*) FROM facts WHERE stock_code=?", (code,)).fetchone()[0]
     db.ensure_company(conn, code)
     if use_seed and not db.last_fetch(conn, "seed", code) and os.path.isdir(os.path.join(config.SEED_DIR, code)):
@@ -797,18 +799,23 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
     if reparse_cached(conn, code, stats):
         stats.notes.append(f"해석 규칙 v{dart.PARSER_VERSION}로 보관 원본 재해석(외부 요청 없음)")
     stats.reused = existed
+    db.timing_mark("준비")
     need = collect(conn, code, P, stats, offline=offline, fresh=fresh)
+    db.timing_mark("수집(기타)")
     validate.validate_accounts(conn, code, P)
     compute(conn, code, P, stats)
     report = validate.run(conn, code, P)
+    db.timing_mark("계산·검증")
     from . import valuation, rates
     rates.maybe_fetch(conn, offline=offline)
     val = valuation.run(conn, code, P)
+    db.timing_mark("가치평가")
     try:                                   # 화면 R 판정을 하루 한 번 기록(나중에 실제 실적과 맞춰 보는 검증용)
         from . import nodeview
         nodeview.log_today(conn, code, P)
     except Exception as e:                 # noqa: BLE001  판정 기록이 실패해도 분석은 계속
         stats.notes.append(f"사업부 우호 판정 기록 실패: {type(e).__name__}")
+    db.timing_mark("R탭 판정 기록")
     try:                                   # 화면 T 앱 판정(규칙) — 갱신 때마다 다시 계산
         from . import hanjang
         rep = hanjang.sync_folder(conn)          # 작업 폴더(한장조사)에서 바뀐 파일만 읽기(파일 날짜·크기만 비교라 빠름)
@@ -818,6 +825,8 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
         hanjang.run_app(conn, code, P, collect_news=bool(not offline and (_nw.naver_key() or _nw.naver_problem())))  # 키가 거절돼도 구글로
     except Exception as e:                 # noqa: BLE001
         stats.notes.append(f"노드 판정(앱) 실패: {type(e).__name__}")
+    db.timing_mark("T탭 앱 판정")
+    stats.timing = db.timing_end()
     report["items"] += val["checks"]
     for c in val["checks"]:
         report["summary"][c["level"]] = report["summary"].get(c["level"], 0) + 1

@@ -200,7 +200,21 @@ def inputs(conn, code, P, A=None, cal=None, today=None, face=None):
             "beta": beta, "erp": erp, "cons_asof": D.cons_asof()}
 
 
-def payload(conn, code, P):
+def payload(conn, code, P, rows=None):
+    """rows: 모든 회사 입력(all_rows) — 화면 자료 저장본이 있으면 그것을 받음"""
+    A, S = settings()
+    out_rows = rows if rows is not None else all_rows(conn, P)
+    cur = next((r for r in out_rows if r["code"] == code and "data" in r), None)
+    check = None
+    if cur:
+        res = compute(cur["data"])
+        check = {"rows": [{k: r[k] for k in ("y", "per", "tv", "roe")} for r in res["rows"]],
+                 "path": res["path"]["label"], "position": res["position"]["label"]}
+    return {"settings": S, "years": [P["current"]] + list(P["future"]), "rows": out_rows, "code": code,
+            "check": check, "principle": PRINCIPLE, "disclaimer": DISCLAIMER}
+
+
+def all_rows(conn, P):
     A, S = settings()
     from . import calibration
     cal = calibration.load()
@@ -213,11 +227,4 @@ def payload(conn, code, P):
             out_rows.append({"code": c["stock_code"], "name": c["name"], "data": data})
         except Exception as e:     # noqa: BLE001  한 기업이 실패해도 목록은 살린다
             out_rows.append({"code": c["stock_code"], "name": c["name"], "error": f"{type(e).__name__}: {e}"})
-    cur = next((r for r in out_rows if r["code"] == code and "data" in r), None)
-    check = None
-    if cur:
-        res = compute(cur["data"])
-        check = {"rows": [{k: r[k] for k in ("y", "per", "tv", "roe")} for r in res["rows"]],
-                 "path": res["path"]["label"], "position": res["position"]["label"]}
-    return {"settings": S, "years": [P["current"]] + list(P["future"]), "rows": out_rows, "code": code,
-            "check": check, "principle": PRINCIPLE, "disclaimer": DISCLAIMER}
+    return out_rows

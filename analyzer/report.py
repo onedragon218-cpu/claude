@@ -37,8 +37,11 @@ def _safe(fn):
 
 def payload(conn, code, base_year=None, last_run=None):
     P = config.periods(base_year)
-    from . import valuation
-    vres = valuation.run(conn, code, P)      # 가정 파일을 바꿨을 때도 바로 반영되도록 매번 다시 계산(수집 없음)
+    from . import valuation, pcache
+    TM = pcache.Timer()
+    sig = pcache.signature(conn)             # 모든 회사 계산은 DB·데이터 폴더가 그대로면 저장본을 씀(종목 바꿀 때 빠르게)
+    G = lambda name, fn: TM.run(name, fn, cached_name=name, key=P["base_year"], sig=sig)
+    vres = TM.run("가치평가(이 회사)", lambda: valuation.run(conn, code, P))      # 가정 파일을 바꿨을 때도 바로 반영되도록 매번 다시 계산(수집 없음)
     comp = conn.execute("SELECT * FROM companies WHERE stock_code=?", (code,)).fetchone()
     cur = db.facts(conn, code)
     allf = db.facts(conn, code, current_only=False)
@@ -92,9 +95,11 @@ def payload(conn, code, base_year=None, last_run=None):
     fetches = [dict(r) for r in conn.execute("SELECT * FROM fetch_log WHERE stock_code=? ORDER BY id DESC LIMIT 60", (code,))]
     last_collect = conn.execute("SELECT MAX(collected_at) FROM facts WHERE stock_code=? AND source!='derived'", (code,)).fetchone()[0]
     last_verify = conn.execute("SELECT MAX(verified_at) FROM facts WHERE stock_code=?", (code,)).fetchone()[0]
-    companies = [dict(r) for r in conn.execute(
+    companies = G("회사 목록", lambda: [dict(r) for r in conn.execute(
         "SELECT c.stock_code, c.name, c.created_at, COUNT(f.id) n, MAX(f.collected_at) last FROM companies c LEFT JOIN facts f "
-        "ON f.stock_code=c.stock_code AND f.is_current=1 GROUP BY c.stock_code ORDER BY c.name")]
+        "ON f.stock_code=c.stock_code AND f.is_current=1 GROUP BY c.stock_code ORDER BY c.name")])
+    fp_rows = G("Q탭 전체 회사", lambda: __import__("analyzer.fairper", fromlist=["all_rows"]).all_rows(conn, P))
+    hj_glob = G("T탭 전체 현황", lambda: __import__("analyzer.hanjang", fromlist=["global_payload"]).global_payload(conn))
     return {
         "company": {"code": code, "name": comp["name"] if comp else code, "corp_code": comp["corp_code"] if comp else None},
         "periods": P, "years": years, "generated_at": db.now(),
@@ -112,31 +117,32 @@ def payload(conn, code, base_year=None, last_run=None):
         "last_collect": last_collect, "last_verify": last_verify,
         "companies": companies,
         "last_run": last_run,
-        "growth": growth_table(conn, P),
+        "growth": G("J탭 성장 분류(전체)", lambda: growth_table(conn, P)),
         "calibration": calibration_info(P, F),
-        "ctrend": consensus_trend(conn, code, P),
-        "good6": _safe(lambda: __import__("analyzer.goodco", fromlist=["good6"]).good6(conn, code, P)),
-        "shape": _safe(lambda: __import__("analyzer.goodco", fromlist=["shape"]).shape(conn, code, P)),
-        "fairper": _safe(lambda: __import__("analyzer.fairper", fromlist=["payload"]).payload(conn, code, P)),
-        "upvalue": _safe(lambda: __import__("analyzer.upvalue", fromlist=["rows"]).rows(conn, P)),
-        "value5": _safe(lambda: __import__("analyzer.value5", fromlist=["payload"]).payload(conn, code, P, vres["rows"])),
-        "biz": __import__("analyzer.segments", fromlist=["payload"]).payload(conn, code, comp["name"] if comp else code, P),
-        "screen": __import__("analyzer.screener", fromlist=["results"]).results(conn),
-        "universe": [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()],
-        "stability": stability(conn, code, P, vres["rows"], comp),
+        "ctrend": TM.run("K탭 컨센서스 추이", lambda: consensus_trend(conn, code, P)),
+        "good6": TM.run("M탭 좋은 기업", lambda: _safe(lambda: __import__("analyzer.goodco", fromlist=["good6"]).good6(conn, code, P))),
+        "shape": TM.run("N탭 숫자 모양", lambda: _safe(lambda: __import__("analyzer.goodco", fromlist=["shape"]).shape(conn, code, P))),
+        "fairper": TM.run("Q탭", lambda: _safe(lambda: __import__("analyzer.fairper", fromlist=["payload"]).payload(conn, code, P, fp_rows))),
+        "upvalue": G("P·U탭 전체 회사", lambda: _safe(lambda: __import__("analyzer.upvalue", fromlist=["rows"]).rows(conn, P))),
+        "value5": TM.run("O탭 가치 5방법", lambda: _safe(lambda: __import__("analyzer.value5", fromlist=["payload"]).payload(conn, code, P, vres["rows"]))),
+        "biz": TM.run("L탭 사업부", lambda: __import__("analyzer.segments", fromlist=["payload"]).payload(conn, code, comp["name"] if comp else code, P)),
+        "screen": G("I탭 종목 찾기", lambda: __import__("analyzer.screener", fromlist=["results"]).results(conn)),
+        "universe": G("검색 목록", lambda: [{"code": c, "name": n} for c, n in __import__("analyzer.universe", fromlist=["load"]).load()]),
+        "stability": TM.run("H탭 재무 안정성", lambda: stability(conn, code, P, vres["rows"], comp)),
         "app_version": __import__("analyzer").__version__,
         "data_dir": config.DATA_DIR,
-        "hanjang": _safe(lambda: __import__("analyzer.hanjang", fromlist=["payload"]).payload(conn, code, P)),
-        "kiwoom": _safe(lambda: __import__("analyzer.kiwoom_store", fromlist=["summary"]).summary(conn, code)),
-        "nodecat": _safe(lambda: __import__("analyzer.nodeview", fromlist=["catalog"]).catalog(conn)),
-        "nodes": _safe(lambda: __import__("analyzer.nodeview", fromlist=["payload"]).payload(conn, code, P)),
-        "doca_added": _safe(lambda: db.doca_added(conn)),
+        "hanjang": TM.run("T탭(이 회사)", lambda: _safe(lambda: __import__("analyzer.hanjang", fromlist=["payload"]).payload(conn, code, P, hj_glob))),
+        "kiwoom": TM.run("키움", lambda: _safe(lambda: __import__("analyzer.kiwoom_store", fromlist=["summary"]).summary(conn, code))),
+        "nodecat": G("S탭 노드 사전(전체)", lambda: _safe(lambda: __import__("analyzer.nodeview", fromlist=["catalog"]).catalog(conn))),
+        "nodes": TM.run("R탭 사업부 우호", lambda: _safe(lambda: __import__("analyzer.nodeview", fromlist=["payload"]).payload(conn, code, P))),
+        "doca_added": G("추가 표시", lambda: _safe(lambda: db.doca_added(conn))),
         "rf_info": _safe(lambda: dict(__import__("analyzer.rates", fromlist=["info"]).info(
             __import__("analyzer.valuation", fromlist=["load_assumptions"]).load_assumptions(), P["current"]),
             last=(lambda r: dict(r) if r else None)(db.last_fetch(conn, "ecos_rf", "kr10y")),
             meta=__import__("analyzer.rates", fromlist=["load"]).load()[1])),
         "valuation": {"rows": vres["rows"], "assumptions": vres["assumptions"], "base_year": P["base_year"]},
         "total_facts": len(cur), "total_versions": len(allf),
+        "perf": TM.summary(),
     }
 
 

@@ -207,6 +207,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
     <div class="tablewrap"><table id="coverage"></table></div>
   </div>
+  <div class="card"><h2>화면 불러오기 시간</h2><p class="muted" id="b-perf"></p></div>
   <div class="card"><h2>최근 수집 기록</h2><p class="muted">같은 자료를 다시 요청하지 않았는지 이 기록으로 확인할 수 있습니다. 실패한 출처는 [다시 받기]로 기다리는 기간(뉴스 3일 등)을 무시하고 지금 다시 받을 수 있습니다(기록은 지우지 않고 새 줄이 위에 생김).</p>
     <div class="row" style="gap:8px;align-items:center;margin-bottom:6px"><button id="b-refall" style="display:none"></button><span class="muted" id="b-refmsg"></span></div>
     <div class="tablewrap"><table id="fetchlog"></table></div></div>
@@ -1026,6 +1027,9 @@ function renderStatic(){
     const p = pick(m,y,BY); const s=(D.series[m.key]||{})[y]||{};
     let sym = ''; if(p){ sym = p.kind==='전망'?'◇': p.kind==='실적'? (p.p.status==='VERIFIED'?'●':'◐') : '△'; } else if (y===BY && s.partial) sym='△';
     return `<td style="text-align:center" title="${p?esc(p.kind+' '+(p.p.status||'')):'미확보'}">${sym}</td>`; }).join('')+'</tr>').join('');
+  const PF = D.perf;
+  $('#b-perf').innerHTML = PF ? `이 화면 자료를 만드는 데 <b>${PF.total}초</b> 걸렸습니다(서버 계산, 브라우저 그리기 제외). 모든 회사를 훑는 계산 중 저장본을 쓴 칸 ${PF.n_cached}개 — 자료가 갱신된 뒤 첫 화면만 새로 계산하고, 그다음 종목부터는 저장본을 씁니다.<br>오래 걸린 칸: ` +
+    PF.top.slice(0,6).map(x=>`${esc(x.name)} ${x.sec}초${x.cached?'(저장본)':''}`).join(' · ') : '측정값 없음';
   // 출처·대상마다 가장 최근 기록이 실패(또는 메모에 오류)면 [다시 받기]
   const RF = new Set(D.refetchable||[]), seenF = new Set(), failSrc = new Set();
   const isFail = r => !r.ok || /실패|Error|오류|40[13]|8050|시간 초과|timed out/i.test(String(r.note||''));
@@ -2569,14 +2573,19 @@ $('#run').onclick = runAnalyze;
 
 // ---- 전체 갱신 ----
 function renderJob(j){
-  const rows = (j.results||[]).map(r=>`<tr><td class="l">${esc(r.name||'')} (${esc(r.code)})</td><td class="l">${r.ok?badge('OK'):badge('ERROR')}</td><td>${r.ok?r.requests:'–'}</td><td>${r.ok?r.new:'–'}</td><td>${r.ok?r.changed:'–'}</td><td class="l" style="white-space:normal">${esc(r.ok?(r.notes||[]).join(' / '):r.error)}</td></tr>`).join('');
+  const tmTop = r => r.timing ? Object.entries(r.timing).slice(0,3).map(([k,v])=>`${esc(k)} ${v}초`).join(' · ') : '';
+  const rows = (j.results||[]).map(r=>`<tr><td class="l">${esc(r.name||'')} (${esc(r.code)})</td><td class="l">${r.ok?badge('OK'):badge('ERROR')}</td><td>${r.ok?r.requests:'–'}</td><td>${r.ok?r.new:'–'}</td><td>${r.ok?r.changed:'–'}</td><td class="l" style="white-space:nowrap" title="${esc(r.timing?Object.entries(r.timing).map(([k,v])=>k+' '+v+'초').join(', '):'')}">${r.sec!=null?`<b>${r.sec}초</b><br><span class="muted" style="font-size:11px">${tmTop(r)}</span>`:'–'}</td><td class="l" style="white-space:normal">${esc(r.ok?(r.notes||[]).join(' / '):r.error)}</td></tr>`).join('');
+  const agg = {}; let aggN = 0, aggSec = 0;
+  (j.results||[]).forEach(r=>{ if (!r.timing) return; aggN++; aggSec += r.sec||0; Object.entries(r.timing).forEach(([k,v])=>agg[k]=(agg[k]||0)+v); });
+  const aggTxt = aggN ? `<div class="muted" style="margin:6px 0">걸린 시간: ${aggN}곳 합계 ${(aggSec/60).toFixed(1)}분(한 곳 평균 ${(aggSec/aggN).toFixed(1)}초) · 단계별 합계 ` +
+    Object.entries(agg).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,v])=>`${esc(k)} ${v>=60?(v/60).toFixed(1)+'분':Math.round(v)+'초'}(${Math.round(v/aggSec*100)}%)`).join(' · ') + '</div>' : '';
   const kind = j.kind || '전체 갱신';
   const left = j.running && j.done ? Math.ceil((Date.now() - Date.parse(String(j.started_at).replace(' ','T'))) / 60000 / j.done * (j.total - j.done)) : null;
   const head = j.running ? `${esc(kind)} 중… ${j.done} / ${j.total} ${j.current?'· 지금: '+esc(j.current):''}${j.stop?' · 중지 요청됨(지금 기업까지만)':''}${left!=null&&!isNaN(left)?` · 남은 시간 약 ${left}분`:''}`
     : (j.finished_at ? `${esc(kind)} ${j.stopped?'중지됨':'완료'} (${j.done} / ${j.total}, ${esc(j.finished_at)})` : '');
   const tg = (kind==='목록 기업 수집' && j.targets && j.targets.length) ? `<br><span class="muted">대상: ${j.targets.map(esc).join(', ')}${j.total>j.targets.length?` 외 ${j.total-j.targets.length}곳`:''}</span>` : '';
   const html = head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head}${j.fresh?' · 컨센서스·주가 새로 받기':''}${tg}</div>` +
-    (rows ? `<div class="tablewrap" style="max-height:320px;overflow:auto"><table><tr><th class="l">기업</th><th class="l">결과</th><th>외부 요청</th><th>신규 값</th><th>변경 값</th><th class="l">메모</th></tr>${rows}</table></div>` : '') : '';
+    aggTxt + (rows ? `<div class="tablewrap" style="max-height:320px;overflow:auto"><table><tr><th class="l">기업</th><th class="l">결과</th><th>외부 요청</th><th>신규 값</th><th>변경 값</th><th class="l">걸린 시간<br><span class="muted" style="font-weight:400">오래 걸린 단계</span></th><th class="l">메모</th></tr>${rows}</table></div>` : '') : '';
   const isList = kind === '목록 기업 수집';
   $('#ustatus').innerHTML = isList ? (head ? `<div class="warnbox" style="border-left-color:var(--accent)">${head} <span class="muted">(아래 기본 종목 목록에서 진행 상황 보기)</span></div>` : '') : html;
   $('#ujob').innerHTML = isList ? html : '';

@@ -1044,6 +1044,34 @@ class T(unittest.TestCase):
                 pipeline.refetch("123456", ["parse"], conn=conn)
             conn.close()
 
+    def test_payload_cache_and_timing(self):
+        from analyzer import pcache
+        pcache.clear()
+        with tempfile.TemporaryDirectory() as d:
+            conn = db.connect(os.path.join(d, "t.db"))
+            db.ensure_company(conn, "123456", "가짜")
+            calls = []
+            fn = lambda: calls.append(1) or len(calls)
+            s1 = pcache.signature(conn)
+            self.assertEqual(pcache.get("x", 2026, fn, s1), (1, False))
+            self.assertEqual(pcache.get("x", 2026, fn, pcache.signature(conn)), (1, True))      # 그대로면 저장본
+            conn.execute("INSERT INTO validation (stock_code, check_no) VALUES ('123456', 1)")     # 화면 열 때 쓰는 표는 무시
+            conn.commit()
+            self.assertEqual(pcache.get("x", 2026, fn, pcache.signature(conn)), (1, True))
+            db.log_fetch(conn, "news", "123456", "123456", True, 1)                                # 수집하면 새로 계산
+            self.assertEqual(pcache.get("x", 2026, fn, pcache.signature(conn)), (2, False))
+            db.log_fetch(conn, "news", "123456", "123456", True, 1)
+            with pcache.batch():                                                                   # 전체 갱신 중엔 묵은 값 허용
+                self.assertEqual(pcache.get("x", 2026, fn, pcache.signature(conn)), (2, True))
+            self.assertEqual(pcache.get("x", 2026, fn, pcache.signature(conn)), (3, False))       # 끝나면 비움
+            db.timing_start()
+            db.log_fetch(conn, "price", "123456", "123456", True, 1)
+            db.timing_mark("계산")
+            tm = db.timing_end()
+            self.assertEqual(set(tm), {"price", "계산"})
+            conn.close()
+        pcache.clear()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

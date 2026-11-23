@@ -15,6 +15,17 @@ JOB_LOCK = threading.Lock()
 
 
 def _update_all(codes, base_year, fresh):
+    from . import pcache
+    with pcache.batch():
+        _update_loop(codes, base_year, fresh)
+    with JOB_LOCK:
+        JOB["running"] = False
+        JOB["current"] = None
+        JOB["finished_at"] = db.now()
+
+
+def _update_loop(codes, base_year, fresh):
+    import time as _t
     for code, name in codes:
         with JOB_LOCK:
             if JOB.get("stop"):            # 사용자가 중지를 누르면 지금 기업까지만 하고 멈춤
@@ -23,23 +34,24 @@ def _update_all(codes, base_year, fresh):
             JOB["current"] = f"{name or ''}({code})"
         item = {"code": code, "name": name}
         try:
+            t0 = _t.time()
             conn = db.connect()
             res = pipeline.analyze(code, base_year, conn=conn, fresh=fresh)
+            t1 = _t.time()
             report.render(report.payload(conn, code, base_year, last_run=res["stats"]),
                           os.path.join(config.OUTPUT_DIR, f"{code}.html"))
             conn.close()
             st = res["stats"]
+            tm = dict(st.get("timing") or {})
+            tm["화면 파일 저장"] = round(_t.time() - t1, 2)
             item.update(ok=True, requests=st["total_requests"], new=st["new_facts"], changed=st["changed_facts"],
-                        notes=[n for n in st["notes"] if "수집 필요" not in n][:6])
+                        notes=[n for n in st["notes"] if "수집 필요" not in n][:6],
+                        sec=round(_t.time() - t0, 1), timing=dict(sorted(tm.items(), key=lambda x: -x[1])))
         except Exception as e:  # 한 기업이 실패해도 나머지는 계속
             item.update(ok=False, error=repr(e), trace=traceback.format_exc()[-800:])
         with JOB_LOCK:
             JOB["results"].append(item)
             JOB["done"] += 1
-    with JOB_LOCK:
-        JOB["running"] = False
-        JOB["current"] = None
-        JOB["finished_at"] = db.now()
 
 
 class H(BaseHTTPRequestHandler):
