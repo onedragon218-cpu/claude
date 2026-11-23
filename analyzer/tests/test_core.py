@@ -636,14 +636,17 @@ class T(unittest.TestCase):
         from http.server import ThreadingHTTPServer
         from unittest import mock
         from analyzer import server
+        from analyzer import collectlock
         got = []
-        def fake(codes, by, fresh):
+        def fake(codes, by, fresh, mode="full"):
             got.append((codes, fresh))
+            collectlock.release()
             with server.JOB_LOCK:
                 server.JOB["running"] = False
         conn = db.connect(); names = {r["stock_code"]: r["name"] for r in conn.execute("SELECT stock_code, name FROM companies")}; conn.close()
         pick = sorted(names)[:1]
-        with mock.patch.object(server, "_update_all", fake):
+        tmpd = tempfile.mkdtemp()
+        with mock.patch.object(server, "_update_all", fake), mock.patch.object(config, "DATA_DIR", tmpd):
             srv = ThreadingHTTPServer(("127.0.0.1", 0), server.H)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             try:
@@ -1146,6 +1149,62 @@ class T(unittest.TestCase):
             self.assertEqual(called, ["123456"])
             conn.close()
         pcache.clear()
+
+    def test_collect_lock_and_done_today(self):
+        import time as _t
+        from unittest import mock
+        from analyzer import collectlock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            self.assertTrue(collectlock.acquire("background", total=3))
+            self.assertFalse(collectlock.acquire("server"))                    # 살아 있는 잠금이 있으면 못 가져감
+            self.assertEqual(collectlock.status()["who"], "background")
+            self.assertTrue(collectlock.heartbeat(current="가짜(123456)", done=1))
+            with open(collectlock.lock_path(), encoding="utf-8") as f:       # 3분 넘게 신호 없음 = 죽은 잠금
+                st = json.load(f)
+            st["heartbeat"] = _t.time() - 400
+            with open(collectlock.lock_path(), "w", encoding="utf-8") as f:
+                json.dump(dict(st, pid=-1), f)
+            self.assertIsNone(collectlock.status())
+            self.assertTrue(collectlock.acquire("server"))                     # 죽은 잠금은 치우고 가져감
+            collectlock.release()
+            self.assertIsNone(collectlock.status())
+            conn = db.connect(os.path.join(d, "t.db"))
+            collectlock.mark_done(conn, "111111", "백그라운드")
+            self.assertEqual(list(collectlock.done_today(conn)), ["111111"])
+            self.assertEqual(collectlock.todo_order(conn, [("111111", "a"), ("222222", "b")]), [("222222", "b")])
+            conn.execute("UPDATE collect_done SET day='2000-01-01'")
+            self.assertEqual(len(collectlock.todo_order(conn, ["111111", "222222"])), 2)
+            conn.close()
+
+    def test_background_collect_resumes(self):
+        from unittest import mock
+        from analyzer import __main__ as M, collectlock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            path = os.path.join(d, "t.db")
+            conn = db.connect(path)
+            for c in ("111111", "222222", "333333"):
+                db.ensure_company(conn, c, "회사" + c)
+            conn.close()
+            done, cut = [], {"once": True}
+            def fake(code, by=None, quiet=False, **kw):
+                if code == "222222" and cut["once"]:
+                    cut["once"] = False
+                    raise SystemExit("PC 꺼짐")              # 두 번째 곳에서 끊김(처음 한 번)
+                done.append(code)
+            real = db.connect
+            with mock.patch.object(db, "connect", lambda p=None: real(path)), mock.patch.object(M, "do_analyze", fake):
+                with self.assertRaises(SystemExit):
+                    M.background_collect()
+                self.assertIsNone(collectlock.status() if collectlock.mine() else None)
+                first = list(done)
+                M.background_collect()                       # 다시 켬 → 오늘 받은 곳은 건너뛰고 이어서
+                self.assertEqual(sorted(done), ["111111", "222222", "333333"])
+                self.assertEqual(len(done), 3)
+                done.clear()
+                M.background_collect()                       # 오늘 모두 받았으면 아무것도 안 함
+                self.assertEqual(done, [])
+                self.assertEqual(first, ["111111"])         # 끊기기 전 받은 곳은 다시 안 받음
+            self.assertIsNone(collectlock.status())         # 끝나면 잠금 풀림
 
     def test_lan_password_and_network_rules(self):
         from analyzer import lan

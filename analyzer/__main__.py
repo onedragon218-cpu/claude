@@ -25,6 +25,38 @@ def resolve(conn, q):
         raise SystemExit(str(e))
 
 
+def background_collect(base_year=None, wait_max=6 * 3600, poll=60):
+    """PC가 켜지면(로그인·평일 07:13) 작업 스케줄러가 부름. 오늘 아직 안 받은 곳부터 이어서 받고, 꺼지면 다음에 이어서.
+    화면에서 수동 갱신이 돌고 있으면 끝날 때까지 기다림. 받는 주기는 평소 규칙 그대로(주가·공시 매일, 뉴스 3일, 컨센서스 7일)."""
+    import time
+    from . import collectlock, pcache
+    waited = 0
+    while not collectlock.acquire("background", kind="백그라운드 수집"):
+        st = collectlock.status() or {}
+        if st.get("who") == "background" or waited >= wait_max:
+            return                       # 다른 백그라운드가 이미 돌거나 너무 오래 기다림
+        time.sleep(poll)
+        waited += poll
+    try:
+        conn = db.connect()
+        names = {r["stock_code"]: r["name"] for r in conn.execute("SELECT stock_code, name FROM companies")}
+        codes = collectlock.todo_order(conn, list(names))
+        conn.close()
+        with pcache.batch():
+            for i, code in enumerate(codes):
+                if not collectlock.heartbeat(current=f"{names.get(code) or ''}({code})", done=i, total=len(codes), kind="백그라운드 수집"):
+                    return               # 잠금을 다른 쪽이 가져감(오래 잠들었던 경우) → 멈춤, 다음에 이어서
+                try:
+                    do_analyze(code, base_year, quiet=True)
+                    conn = db.connect()
+                    collectlock.mark_done(conn, code, "백그라운드")
+                    conn.close()
+                except Exception:        # noqa: BLE001  한 곳이 실패해도 다음 곳 계속(사유는 수집 기록에)
+                    continue
+    finally:
+        collectlock.release()
+
+
 def do_analyze(code, base_year=None, offline=False, quiet=False, fresh=False):
     conn = db.connect()
     res = pipeline.analyze(code, base_year, offline=offline, conn=conn, fresh=fresh)
@@ -110,6 +142,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("analyze"); a.add_argument("codes", nargs="+"); a.add_argument("--base-year", type=int); a.add_argument("--offline", action="store_true")
     u = sub.add_parser("update-all"); u.add_argument("--base-year", type=int); u.add_argument("--fresh", action="store_true"); u.add_argument("codes", nargs="*")
+    u.add_argument("--background", action="store_true", help="작업 스케줄러용: 오늘 아직 안 받은 곳만 이어서, 화면의 수동 갱신과 겹치지 않게")
     r = sub.add_parser("report"); r.add_argument("code"); r.add_argument("--base-year", type=int)
     s = sub.add_parser("status"); s.add_argument("code")
     c = sub.add_parser("import-consensus"); c.add_argument("code"); c.add_argument("csv")
@@ -125,6 +158,8 @@ def main(argv=None):
         conn = db.connect(); codes = [resolve(conn, c) for c in args.codes]; conn.close()
         for code in codes:   # 여러 종목을 한 번에 추가할 수 있음
             do_analyze(code, args.base_year, args.offline)
+    elif args.cmd == "update-all" and args.background:
+        background_collect(args.base_year)
     elif args.cmd == "update-all":
         conn = db.connect()
         codes = args.codes or [r["stock_code"] for r in conn.execute("SELECT stock_code FROM companies")]

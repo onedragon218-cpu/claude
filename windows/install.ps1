@@ -112,16 +112,19 @@ if ($ek) {
 Repair-Secrets      # 인증키·태블릿 인증서 파일 권한 바로잡기(예전 버전에서 잠겨 못 읽던 경우)
 # 예전 설치 기록은 이번 설치가 시작될 때 새 기록으로 덮어써졌다(키 입력은 이제 기록에 남지 않음)
 
-# 3) 작업 스케줄러: 평일 07:13 자동 수집(꺼져 있던 날은 켜진 뒤 바로 실행)
+# 3) 작업 스케줄러: 백그라운드 수집 — 로그인할 때(2분 뒤) + 평일 07:13(꺼져 있던 날은 켜진 뒤 바로)
+#    오늘 아직 안 받은 기업부터 이어서 받고, PC가 꺼지면 멈췄다가 다음에 켜면 이어서. 화면의 수동 갱신과는 겹치지 않게 기다림(2026-11-23)
 $me = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew   # 기업이 많으면 오래 걸림(끊겨도 다음에 이어서 받음)
-$action = New-ScheduledTaskAction -Execute $pyw -Argument '-m analyzer update-all' -WorkingDirectory $Root
-$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At '07:13'
-Register-ScheduledTask -TaskName $TaskUpdate -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-    -Description '상장기업 재무분석: DB에 없는 값·새 공시·컨센서스·기준일 주가만 수집' -Force | Out-Null
-Write-Host "[3/5] 자동 수집 등록: 평일 07:13 ($TaskUpdate)" -ForegroundColor Green
+    -ExecutionTimeLimit (New-TimeSpan -Hours 12) -MultipleInstances IgnoreNew   # 기업이 많으면 오래 걸림(끊겨도 다음에 이어서 받음)
+$action = New-ScheduledTaskAction -Execute $pyw -Argument '-m analyzer update-all --background' -WorkingDirectory $Root
+$tDaily = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At '07:13'
+$tLogon = New-ScheduledTaskTrigger -AtLogOn -User $me
+$tLogon.Delay = 'PT2M'
+Register-ScheduledTask -TaskName $TaskUpdate -Action $action -Trigger @($tDaily, $tLogon) -Settings $settings -Principal $principal `
+    -Description '상장기업 재무분석 백그라운드 수집: 오늘 아직 안 받은 기업부터 이어서(주가·공시 매일, 뉴스 3일, 컨센서스 7일)' -Force | Out-Null
+Write-Host "[3/5] 백그라운드 수집 등록: 로그인할 때(2분 뒤) + 평일 07:13 ($TaskUpdate)" -ForegroundColor Green
 
 # 4) 작업 스케줄러: 로그인하면 화면 서버 시작(http://localhost:8765)
 $sSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -210,7 +213,7 @@ Write-Host '=== 첫 수집(빠진 값만) ===' -ForegroundColor Cyan
 $bgOk = $false
 try { Start-ScheduledTask -TaskName $TaskUpdate -ErrorAction Stop; $bgOk = $true } catch { }
 if (-not $bgOk) {
-    try { Start-Process -FilePath $pyw -ArgumentList '-m analyzer update-all' -WorkingDirectory $Root -WindowStyle Hidden; $bgOk = $true } catch { }
+    try { Start-Process -FilePath $pyw -ArgumentList '-m analyzer update-all --background' -WorkingDirectory $Root -WindowStyle Hidden; $bgOk = $true } catch { }
 }
 $runLog = Join-Path $DataDir ("logs\run_{0:yyyyMMdd}.log" -f (Get-Date))
 if ($bgOk) {

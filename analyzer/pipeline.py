@@ -863,3 +863,46 @@ def refetch(code, sources, base_year=None, conn=None):
     if own:
         conn.close()
     return res
+
+
+def update_price(code, base_year=None, conn=None):
+    """A탭 [주가만 새로 받기]: 기준일 주가(키움 수정주가 일봉 1순위, 실패하면 네이버)만 받고 시가총액 등 파생값만 다시 계산.
+    공시·컨센서스·뉴스·판정은 건너뜀(빠르게). 반환: {"stats": ...}"""
+    P = config.periods(base_year)
+    own = conn is None
+    conn = conn or db.connect()
+    stats = Stats()
+    db.timing_start()
+    from .collectors import kiwoom
+    import datetime as _d
+    got = False
+    try:
+        if kiwoom.find_cli():
+            try:
+                stats.req("Kiwoom")
+                pdata = kiwoom.daily(code, _d.date.today().strftime("%Y%m%d"), pages=1)
+                ingest_prices(conn, code, pdata, P["current"], stats)
+                db.log_fetch(conn, "price", f"{code}:asof", code, True, len(pdata["rows"]), "키움(주가만)")
+                db.log_fetch(conn, "kiwoom_daily", code, code, True, len(pdata["rows"]))
+                got = True
+            except kiwoom.KiwoomUnavailable as e:
+                db.log_fetch(conn, "kiwoom_daily", code, code, False, 0, str(e)[:200])
+                stats.notes.append(f"키움 주가 실패 → 네이버로: {e}")
+        if not got:
+            try:
+                stats.req("Naver")
+                pdata = prices.fetch_naver_daily(code, count=520)
+                ingest_prices(conn, code, pdata, P["current"], stats)
+                db.log_fetch(conn, "price", f"{code}:asof", code, True, len(pdata["rows"]), "네이버(주가만)")
+                got = True
+            except prices.PriceUnavailable as e:
+                db.log_fetch(conn, "price", f"{code}:asof", code, False, 0, str(e))
+                stats.notes.append(f"주가 미확보: {e}")
+        if got:
+            compute(conn, code, P, stats)          # 시가총액·PER·PBR 같은 파생값(인터넷 없이)
+            db.timing_mark("계산")
+        stats.timing = db.timing_end()
+        return {"stats": stats.as_dict(), "ok": got}
+    finally:
+        if own:
+            conn.close()

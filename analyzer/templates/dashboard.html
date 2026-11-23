@@ -163,9 +163,11 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div class="row" style="justify-content:space-between;align-items:center">
       <h2 style="margin:0">데이터베이스에 있는 기업</h2>
       <div class="row" style="align-items:center">
-        <label style="flex-direction:row;align-items:center;gap:6px" title="[체크한 기업 갱신]·[전체 갱신]에 적용. 체크하지 않으면 빠진 값·새 공시와 기한(컨센서스 7일, 주가 1일)이 지난 자료만 받습니다"><input type="checkbox" id="ufresh"> 컨센서스·주가 지금 새로 받기</label>
+        <button id="uprsel" disabled title="체크한 기업의 기준일 주가만 받음(공시·컨센서스·뉴스는 건너뜀, 빠름)">주가만 새로 받기(체크한 기업)</button>
+        <button id="uprall" title="DB의 모든 기업의 기준일 주가만 받음(빠름)">주가만 새로 받기(전체)</button>
+        <label style="flex-direction:row;align-items:center;gap:6px" title="[체크한 기업 갱신]·[전체 갱신]에 적용. 체크하지 않으면 빠진 값·새 공시와 기한(컨센서스 7일, 주가 1일)이 지난 자료만 받습니다. 체크하면 모든 기업의 컨센서스를 기한과 상관없이 다시 받아 오래 걸립니다"><input type="checkbox" id="ufresh"> 컨센서스 지금 새로 받기(7일 기한 무시, 오래 걸림)</label>
         <button class="primary" id="uupsel" disabled>체크한 기업 갱신</button>
-        <button id="uall" title="DB의 모든 기업(오래 걸림)">전체 갱신</button>
+        <button id="uall" title="오늘 아직 안 받은 기업만(백그라운드 수집이 받은 곳은 건너뜀)">전체 갱신</button>
       </div>
     </div>
     <div class="row" style="align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">
@@ -176,7 +178,8 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <button id="cdel" disabled style="color:var(--bad);border-color:var(--bad)">체크한 기업 삭제</button>
       <span class="muted" id="cselinfo"></span>
     </div>
-    <p class="muted" style="margin:6px 0 10px"><b>체크한 기업 갱신</b>: 왼쪽 체크 상자로 고른 기업만 갱신합니다(맨 위 체크 상자 = 지금 보이는 기업 모두). <b>체크한 기업 삭제</b>: 고른 기업과 그 수집 자료를 DB에서 지웁니다(PC에서만, 지우기 전 DB 자동 백업). 전체 갱신: DB의 모든 기업에 대해 빠진 값, 새 공시·정정 공시, 컨센서스, 기준일 주가를 확인합니다. 이미 검증된 DART 실적은 다시 받지 않습니다.</p>
+    <p class="muted" style="margin:6px 0 10px"><b>체크한 기업 갱신</b>: 왼쪽 체크 상자로 고른 기업만 갱신합니다(맨 위 체크 상자 = 지금 보이는 기업 모두). <b>체크한 기업 삭제</b>: 고른 기업과 그 수집 자료를 DB에서 지웁니다(PC에서만, 지우기 전 DB 자동 백업). <b>전체 갱신</b>: 오늘 아직 안 받은 기업만 빠진 값, 새 공시·정정 공시, 기한 지난 컨센서스(7일)·뉴스(3일), 기준일 주가를 받습니다. 이미 검증된 DART 실적은 다시 받지 않습니다. <b>주가만 새로 받기</b>: 기준일 주가와 시가총액 등만 새로 고칩니다(빠름). <b>백그라운드 수집</b>: PC에 로그인할 때와 평일 07:13에 화면과 따로 자동으로 돌고, 꺼지면 멈췄다가 다음에 켜면 이어서 받습니다. 도는 동안에는 수동 갱신을 시작하지 않습니다(자료가 꼬이지 않게).</p>
+    <div id="bgstatus"></div>
     <div id="ustatus"></div>
     <div class="tablewrap"><table id="comps"></table></div>
     <p class="muted" style="margin:8px 0 0">기업 자료가 저장되는 데이터 폴더: <code id="datadir"></code> <button id="opendata" style="margin-left:6px">폴더 열기</button> <span id="opendatamsg"></span></p>
@@ -2427,11 +2430,13 @@ function cSelInfo(){ const n = cChecked.size;
   $('#cdel').disabled = !n || UJOB_RUNNING; $('#cdel').textContent = `체크한 기업 삭제${n?` (${n}곳)`:''}`;
   if (DOCA_ADDED.size){ $('#csel-doca').style.display = ''; $('#csel-doca').textContent = `가져오기로 들어온 기업 체크 (${DOCA_ADDED.size}곳)`; }
   $('#uupsel').disabled = !n || UJOB_RUNNING; $('#uupsel').textContent = `체크한 기업 갱신${n?` (${n}곳)`:''}`;
-  $('#cselinfo').textContent = n ? `${n}곳 선택 · 예상 소요 약 ${Math.max(1, Math.round(n*1.5))}분(기업당 1~2분, 컨센서스·주가 새로 받기를 켜면 더 걸림)` : ''; }
+  $('#uprsel').disabled = !n || UJOB_RUNNING; $('#uprsel').textContent = `주가만 새로 받기(체크한 기업${n?` ${n}곳`:''})`;
+  $('#cselinfo').textContent = n ? `${n}곳 선택 · 갱신 예상 약 ${Math.max(1, Math.round(n*1.5))}분(기업당 1~2분, 컨센서스 새로 받기를 켜면 더 걸림) · 주가만은 약 ${Math.max(1, Math.round(n*2/60))}분` : ''; }
+let DONE_TODAY = (D.done_today && !D.done_today.error) ? D.done_today : {};
 function renderComps(){
   const V = cVisible(), all = V.length && V.every(c=>cChecked.has(c.stock_code));
   $('#comps').innerHTML = `<tr><th><input type="checkbox" id="cselall" ${all?'checked':''} title="지금 보이는 기업 모두 체크/풀기"></th><th class="l">종목코드</th><th class="l">기업명</th><th>저장된 값</th><th class="l">마지막 수집일</th><th class="l"></th></tr>` +
-    V.map(c=>`<tr class="clickrow ${c.stock_code===D.company.code?'cur':''}" data-code="${esc(c.stock_code)}" tabindex="0" title="눌러서 이 기업 보기"><td><input type="checkbox" class="csel" value="${esc(c.stock_code)}" ${cChecked.has(c.stock_code)?'checked':''}></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.stock_code)}</a></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.name||'')}</a>${DOCA_ADDED.has(c.stock_code)?' <span class="badge b-WARN" title="작업 폴더 가져오기(2026-11-15, 되돌림)로 들어온 것으로 보임">가져오기로 들어옴</span>':''}</td><td>${c.n}</td><td class="l">${esc(c.last||'–')}</td><td class="l">${c.stock_code===D.company.code?'보는 중':'열기 →'}</td></tr>`).join('');
+    V.map(c=>`<tr class="clickrow ${c.stock_code===D.company.code?'cur':''}" data-code="${esc(c.stock_code)}" tabindex="0" title="눌러서 이 기업 보기"><td><input type="checkbox" class="csel" value="${esc(c.stock_code)}" ${cChecked.has(c.stock_code)?'checked':''}></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.stock_code)}</a></td><td class="l"><a class="plain" href="${companyUrl(c.stock_code)}">${esc(c.name||'')}</a>${DOCA_ADDED.has(c.stock_code)?' <span class="badge b-WARN" title="작업 폴더 가져오기(2026-11-15, 되돌림)로 들어온 것으로 보임">가져오기로 들어옴</span>':''}</td><td>${c.n}</td><td class="l">${esc(c.last||'–')}${DONE_TODAY[c.stock_code]?' <span class="badge b-OK" title="오늘 '+esc(DONE_TODAY[c.stock_code])+' 수집 완료">오늘 받음</span>':''}</td><td class="l">${c.stock_code===D.company.code?'보는 중':'열기 →'}</td></tr>`).join('');
   document.querySelectorAll('#comps tr.clickrow').forEach(tr=>{
     const go = ()=>{ location.href = companyUrl(tr.dataset.code); };
     tr.onclick = e => { if (e.target.tagName!=='A' && e.target.tagName!=='INPUT' && !e.target.closest('td:first-child')) go(); };
@@ -2466,7 +2471,7 @@ $('#uupsel').onclick = async () => {
   if (!SERVED){ $('#ustatus').innerHTML = `<div class="warnbox">저장된 화면 파일에서는 갱신할 수 없습니다. '재무분석 열기'로 연 화면에서 누르세요.</div>`; return; }
   const codes = [...cChecked]; if (!codes.length) return;
   const fresh = $('#ufresh').checked, mins = Math.max(1, Math.round(codes.length*1.5));
-  if (!confirm(`체크한 기업 ${codes.length}곳을 갱신합니다${fresh?'(컨센서스·주가 지금 새로 받기)':''}.\n예상 소요: 약 ${mins}분. 진행 중에도 화면은 쓸 수 있고 '중지'로 멈출 수 있습니다.\n진행할까요?`)) return;
+  if (!confirm(`체크한 기업 ${codes.length}곳을 갱신합니다${fresh?'(컨센서스 지금 새로 받기)':''}.\n예상 소요: 약 ${mins}분. 진행 중에도 화면은 쓸 수 있고 '중지'로 멈출 수 있습니다.\n진행할까요?`)) return;
   try {
     const ver = await (await fetch('/api/version')).json().catch(()=>({}));
     if (!DISK_VERSION || ver.version !== DISK_VERSION){
@@ -2515,7 +2520,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync','#t-reqnew','#t-reqpick','#t-req1','#b-refall'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync','#t-reqnew','#t-reqpick','#t-req1','#b-refall','#uprsel','#uprall'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';
@@ -2591,8 +2596,19 @@ function renderJob(j){
   $('#ujob').innerHTML = isList ? html : '';
   $('#ustop').style.display = j.running ? '' : 'none'; $('#ustop').disabled = !!j.stop;
   UJOB_RUNNING = !!j.running;
-  ['#uaddsel','#uaddall','#uall','#uupsel'].forEach(id=>{ if (j.running) $(id).disabled = true; });
+  ['#uaddsel','#uaddall','#uall','#uupsel','#uprsel','#uprall'].forEach(id=>{ if (j.running) $(id).disabled = true; });
+  renderBg(j.collect);
 }
+function renderBg(C){
+  if (!C) return;
+  const L = C.lock;
+  $('#bgstatus').innerHTML = L ? `<div class="warnbox" style="border-left-color:var(--accent)"><b>백그라운드 수집 중</b> — ${L.done||0} / ${L.total||'?'}곳${L.current?' · 지금 '+esc(L.current):''} · 오늘 받은 곳 ${C.done_today} / ${C.total}곳. 끝날 때까지 수동 갱신은 시작하지 않습니다(화면 보기는 그대로 가능).</div>`
+    : `<p class="muted" style="margin:4px 0">오늘 받은 곳 <b>${C.done_today}</b> / ${C.total}곳 · 남은 곳은 [전체 갱신]이 받거나, 다음 로그인·평일 07:13 백그라운드 수집이 이어서 받습니다.</p>`;
+  ['#uall','#uupsel','#uprsel','#uprall'].forEach(id=>{ const b = $(id); if (b && L){ b.disabled = true; b.title = '백그라운드 수집이 끝나면 누를 수 있습니다'; } });
+}
+async function bgPoll(){ if (!SERVED || UJOB_RUNNING) return; try { const j = await (await fetch('/api/job')).json(); if (!j.running) renderBg(j.collect);
+    if (!j.collect || !j.collect.lock){ ['#uall','#uprall'].forEach(id=>{ const b=$(id); if (b && !UJOB_RUNNING){ b.disabled = false; b.title=''; } }); cSelInfo(); } } catch(e){} }
+if (SERVED) setInterval(bgPoll, 30000);
 async function pollJob(){
   try { const j = await (await fetch('/api/job')).json(); renderJob(j);
     if (j.running) setTimeout(pollJob, 1500);
@@ -2600,16 +2616,30 @@ async function pollJob(){
       $('#ustatus').insertAdjacentHTML('beforeend', '<p class="muted">3초 뒤 화면을 새로 고칩니다.</p>'); setTimeout(()=>location.reload(), 3000); }
   } catch(e){ $('#ustatus').textContent = '진행 상황을 읽지 못했습니다: ' + e.message; $('#uall').disabled = false; }
 }
+async function startPrice(codes){
+  if (!SERVED){ $('#ustatus').innerHTML = `<div class="warnbox">저장된 화면 파일에서는 받을 수 없습니다. '재무분석 열기'로 연 화면에서 누르세요.</div>`; return; }
+  const n = codes ? codes.length : D.companies.length;
+  if (!confirm(`${codes ? '체크한 기업' : 'DB의 모든 기업'} ${n}곳의 기준일 주가만 새로 받습니다(공시·컨센서스·뉴스는 건너뜀). 예상 약 ${Math.max(1, Math.round(n*2/60))}분. 진행할까요?`)) return;
+  try { const j = await (await fetch(`/api/update-price?base_year=${BY}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(codes ? {codes} : {})})).json();
+    if (j.error) throw new Error(j.error);
+    if (j.already){ alert('이미 다른 수집·갱신 작업이 진행 중입니다. 끝난 뒤 다시 눌러 주세요.'); return; }
+    if (codes){ cChecked.clear(); renderComps(); }
+    renderJob(j); setTimeout(pollJob, 1000);
+  } catch(e){ $('#ustatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg)">시작 실패: ${esc(e.message)}</div>`; } }
+$('#uprsel').onclick = () => { const c = [...cChecked]; if (c.length) startPrice(c); };
+$('#uprall').onclick = () => startPrice(null);
 $('#uall').onclick = async () => {
   if (!SERVED){ $('#ustatus').innerHTML = `<div class="warnbox">저장된 화면 파일에서는 갱신할 수 없습니다. 바탕화면 '재무분석 지금 갱신.bat'을 실행하거나 '재무분석 열기.bat'으로 연 화면에서 누르세요.</div>`; return; }
-  const n = D.companies.length;
-  if (!confirm(`DB의 기업 ${n}곳을 모두 갱신합니다. 기업 수에 따라 몇 분 걸릴 수 있습니다. 진행할까요?`)) return;
+  const n = D.companies.length, fr = $('#ufresh').checked, left = n - Object.keys(DONE_TODAY).length;
+  if (!confirm(fr ? `DB의 기업 ${n}곳 모두 컨센서스를 기한과 상관없이 다시 받습니다. 오래 걸립니다(기업당 1분 안팎). 진행할까요?`
+                  : `오늘 아직 안 받은 기업 약 ${left}곳을 갱신합니다(오늘 받은 곳은 건너뜀). 진행할까요?`)) return;
   $('#uall').disabled = true; $('#uall').textContent = '갱신 중…';
-  try { const j = await (await fetch(`/api/update-all?base_year=${BY}&fresh=${$('#ufresh').checked?1:0}`, {method:'POST'})).json();
+  try { const j = await (await fetch(`/api/update-all?base_year=${BY}&fresh=${fr?1:0}`, {method:'POST'})).json();
+    if (j.error){ $('#ustatus').innerHTML = `<div class="warnbox">${esc(j.error)}</div>`; $('#uall').disabled = false; $('#uall').textContent = '전체 갱신'; return; }
     renderJob(j); setTimeout(pollJob, 1000);
   } catch(e){ $('#ustatus').textContent = '시작 실패: ' + e.message; $('#uall').disabled = false; $('#uall').textContent = '전체 갱신'; }
 };
-if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } }).catch(()=>{});
+if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } else renderBg(j.collect); }).catch(()=>{});
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
 const UI_KEEP = ['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show',
   '#smkt','#smin','#sshow','#srisk',

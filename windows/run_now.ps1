@@ -5,7 +5,7 @@ $py = Find-Python
 if (-not $py) { Write-Host '파이썬을 찾지 못했습니다. install.bat을 먼저 실행하세요.' -ForegroundColor Red; exit 1 }
 Push-Location $Root
 try {
-    if ($args.Count -gt 0) { & $py -m analyzer analyze @args } else { & $py -m analyzer update-all }
+    if ($args.Count -gt 0) { & $py -m analyzer analyze @args } else { & $py -m analyzer update-all --background }
 } finally { Pop-Location }
 if ((Test-Server) -and -not (Test-ServerVersion).ok) { Stop-Server }   # 옛 버전 서버가 떠 있으면 새 코드로 교체
 if (Start-Server $py) { Start-Process $Url }

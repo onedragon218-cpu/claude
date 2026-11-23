@@ -14,25 +14,46 @@ JOB = {"running": False, "total": 0, "done": 0, "current": None, "results": [], 
 JOB_LOCK = threading.Lock()
 
 
-def _update_all(codes, base_year, fresh):
-    from . import pcache
-    with pcache.batch():
-        _update_loop(codes, base_year, fresh)
+def _update_all(codes, base_year, fresh, mode="full"):
+    from . import pcache, collectlock
+    try:
+        with pcache.batch():
+            _update_loop(codes, base_year, fresh, mode)
+    finally:
+        collectlock.release()
     with JOB_LOCK:
         JOB["running"] = False
         JOB["current"] = None
         JOB["finished_at"] = db.now()
 
 
-def _update_loop(codes, base_year, fresh):
+def _update_loop(codes, base_year, fresh, mode="full"):
     import time as _t
-    for code, name in codes:
+    from . import collectlock
+    for i, (code, name) in enumerate(codes):
         with JOB_LOCK:
             if JOB.get("stop"):            # 사용자가 중지를 누르면 지금 기업까지만 하고 멈춤
                 JOB["stopped"] = True
                 break
             JOB["current"] = f"{name or ''}({code})"
+        collectlock.heartbeat(current=f"{name or ''}({code})", done=i, total=len(codes), kind=JOB.get("kind"))
         item = {"code": code, "name": name}
+        if mode == "price":                # [주가만 새로 받기]: 주가·파생값만
+            try:
+                t0 = _t.time()
+                conn = db.connect()
+                res = pipeline.update_price(code, base_year, conn=conn)
+                conn.close()
+                st = res["stats"]
+                item.update(ok=res["ok"], requests=st["total_requests"], new=st["new_facts"], changed=st["changed_facts"],
+                            notes=st["notes"][:3], sec=round(_t.time() - t0, 1), timing=st.get("timing"),
+                            **({} if res["ok"] else {"error": "; ".join(st["notes"][:2]) or "주가를 받지 못함"}))
+            except Exception as e:  # noqa: BLE001
+                item.update(ok=False, error=repr(e))
+            with JOB_LOCK:
+                JOB["results"].append(item)
+                JOB["done"] += 1
+            continue
         try:
             t0 = _t.time()
             conn = db.connect()
@@ -40,6 +61,7 @@ def _update_loop(codes, base_year, fresh):
             t1 = _t.time()
             report.render(report.payload(conn, code, base_year, last_run=res["stats"]),
                           os.path.join(config.OUTPUT_DIR, f"{code}.html"))
+            collectlock.mark_done(conn, code, "화면")
             conn.close()
             st = res["stats"]
             tm = dict(st.get("timing") or {})
@@ -189,8 +211,14 @@ class H(BaseHTTPRequestHandler):
                 res = screener.results(conn) if q.get("results", ["0"])[0] == "1" else None
                 return self._send(200, json.dumps({"job": job, "results": res}, ensure_ascii=False), "application/json")
             if u.path == "/api/job":
+                from . import collectlock
                 with JOB_LOCK:
-                    return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
+                    j = dict(JOB)
+                bg = collectlock.status()
+                n_all = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+                j["collect"] = {"lock": bg if bg and bg.get("who") == "background" else None,
+                                "done_today": len(collectlock.done_today(conn)), "total": n_all}
+                return self._send(200, json.dumps(j, ensure_ascii=False), "application/json")
             if u.path == "/api/hj/request":
                 # 화면 T: Claude에 올릴 한장조사 요청 글(마크다운, 10곳까지). 작업 폴더에는 쓰지 않고 내려받기로만
                 from . import hanjang
@@ -483,13 +511,38 @@ class H(BaseHTTPRequestHandler):
                     JOB["stop"] = True
                 job = dict(JOB)
             return self._send(200, json.dumps(job, ensure_ascii=False), "application/json")
-        if u.path in ("/api/update-all", "/api/collect-list"):
-            # /api/update-all = 'DB에 있는 기업' 전체 갱신, /api/collect-list = 기본 종목 목록에서 고른 기업만 수집
+        if u.path in ("/api/update-all", "/api/collect-list", "/api/update-price"):
+            # /api/update-all = 'DB에 있는 기업' 전체 갱신(오늘 아직 안 받은 곳만), /api/collect-list = 기본 종목 목록에서 고른 기업만 수집,
+            # /api/update-price = 주가만 새로 받기(체크한 기업 또는 전체)
+            from . import collectlock
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
             with JOB_LOCK:
                 if JOB["running"]:
                     return self._send(200, json.dumps(dict(JOB, already=True), ensure_ascii=False), "application/json")
+                bg = collectlock.status()
+                if bg and bg.get("who") == "background":
+                    return self._send(200, json.dumps({"error": f"백그라운드 수집이 진행 중입니다({bg.get('done', 0)}/{bg.get('total', '?')}곳, 지금 {bg.get('current', '')}). "
+                                                                "끝나면 다시 눌러 주세요 — 동시에 돌면 자료가 꼬일 수 있어 기다립니다."}, ensure_ascii=False), "application/json")
+                mode = "price" if u.path == "/api/update-price" else "full"
+                if mode == "price":
+                    conn = db.connect()
+                    codes = [(r["stock_code"], r["name"]) for r in conn.execute("SELECT stock_code, name FROM companies ORDER BY name")]
+                    conn.close()
+                    pick = body.get("codes")
+                    if pick is not None:
+                        want = {str(c).strip().upper() for c in pick}
+                        codes = [(c, nm) for c, nm in codes if c in want]
+                    if not codes:
+                        return self._send(400, json.dumps({"error": "고른 기업이 없습니다"}, ensure_ascii=False), "application/json")
+                    kind = "주가만 새로 받기" + ("(체크한 기업)" if pick is not None else "(전체)")
+                    by = int(q["base_year"][0]) if q.get("base_year") else None
+                    if not collectlock.acquire("server", kind=kind, total=len(codes)):
+                        return self._send(200, json.dumps({"error": "다른 수집이 진행 중입니다. 잠시 뒤 다시 눌러 주세요"}, ensure_ascii=False), "application/json")
+                    JOB.update(running=True, total=len(codes), done=0, current=None, results=[], started_at=db.now(),
+                               finished_at=None, fresh=False, kind=kind, stop=False, stopped=False, targets=[f"{nm}({c})" for c, nm in codes[:50]])
+                    threading.Thread(target=_update_all, args=(codes, by, False, "price"), daemon=True).start()
+                    return self._send(200, json.dumps(JOB, ensure_ascii=False), "application/json")
                 if u.path == "/api/collect-list":
                     seen, codes = set(), []
                     for it in body.get("codes") or []:
@@ -507,14 +560,25 @@ class H(BaseHTTPRequestHandler):
                     conn.close()
                     kind = "전체 갱신"
                     pick = body.get("codes")          # 'DB에 있는 기업'에서 체크한 곳만 갱신(2026-11-13)
+                    fresh_q = q.get("fresh", ["0"])[0] == "1"
                     if pick is not None:
                         want = {str(c).strip().upper() for c in pick}
                         codes = [(c, nm) for c, nm in codes if c in want]
                         kind = "선택 갱신"
                         if not codes:
                             return self._send(400, json.dumps({"error": "고른 기업이 DB에 없습니다"}, ensure_ascii=False), "application/json")
+                    elif not fresh_q:                 # 전체 갱신은 오늘 아직 안 받은 곳만(백그라운드·앞선 갱신이 받은 곳은 건너뜀)
+                        conn = db.connect()
+                        n_all = len(codes)
+                        codes = collectlock.todo_order(conn, codes)
+                        conn.close()
+                        kind = f"전체 갱신(오늘 아직 안 받은 {len(codes)}곳 / 전체 {n_all}곳)"
+                        if not codes:
+                            return self._send(200, json.dumps({"error": f"오늘은 {n_all}곳 모두 이미 받았습니다. 컨센서스를 새로 받으려면 '컨센서스 지금 새로 받기'를 체크하고 누르세요."}, ensure_ascii=False), "application/json")
                 by = int(q["base_year"][0]) if q.get("base_year") else None
                 fresh = q.get("fresh", ["0"])[0] == "1"
+                if not collectlock.acquire("server", kind=kind, total=len(codes)):
+                    return self._send(200, json.dumps({"error": "다른 수집이 진행 중입니다. 잠시 뒤 다시 눌러 주세요"}, ensure_ascii=False), "application/json")
                 JOB.update(running=True, total=len(codes), done=0, current=None, results=[], started_at=db.now(),
                            finished_at=None, fresh=fresh, kind=kind, stop=False, stopped=False,
                            targets=[f"{nm}({c})" for c, nm in codes[:50]])
