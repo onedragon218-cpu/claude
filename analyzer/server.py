@@ -567,14 +567,15 @@ class H(BaseHTTPRequestHandler):
                         kind = "선택 갱신"
                         if not codes:
                             return self._send(400, json.dumps({"error": "고른 기업이 DB에 없습니다"}, ensure_ascii=False), "application/json")
-                    elif not fresh_q:                 # 전체 갱신은 오늘 아직 안 받은 곳만(백그라운드·앞선 갱신이 받은 곳은 건너뜀)
+                    elif not fresh_q:                 # 전체 갱신 = '갱신 필요'(기한 지난 공시·뉴스·컨센서스가 있는) 기업만
                         conn = db.connect()
                         n_all = len(codes)
-                        codes = collectlock.todo_order(conn, codes)
+                        due = set(collectlock.due_codes(conn))
+                        codes = [x for x in codes if x[0] in due]
                         conn.close()
-                        kind = f"전체 갱신(오늘 아직 안 받은 {len(codes)}곳 / 전체 {n_all}곳)"
+                        kind = f"갱신 필요한 기업 갱신({len(codes)}곳 / 전체 {n_all}곳)"
                         if not codes:
-                            return self._send(200, json.dumps({"error": f"오늘은 {n_all}곳 모두 이미 받았습니다. 컨센서스를 새로 받으려면 '컨센서스 지금 새로 받기'를 체크하고 누르세요."}, ensure_ascii=False), "application/json")
+                            return self._send(200, json.dumps({"error": f"{n_all}곳 모두 기한 안에 받아 둔 상태라 갱신할 것이 없습니다. 주가는 [주가만 새로 받기]로 받으세요."}, ensure_ascii=False), "application/json")
                 by = int(q["base_year"][0]) if q.get("base_year") else None
                 fresh = q.get("fresh", ["0"])[0] == "1"
                 if not collectlock.acquire("server", kind=kind, total=len(codes)):

@@ -117,6 +117,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "last_collect": last_collect, "last_verify": last_verify,
         "companies": companies,
         "done_today": _safe(lambda: __import__("analyzer.collectlock", fromlist=["done_today"]).done_today(conn)),
+        "company_status": TM.run("갱신 필요 표시", lambda: _safe(lambda: __import__("analyzer.collectlock", fromlist=["company_status"]).company_status(conn))),
         "last_run": last_run,
         "growth": G("J탭 성장 분류(전체)", lambda: growth_table(conn, P)),
         "calibration": calibration_info(P, F),

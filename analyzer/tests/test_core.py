@@ -1206,6 +1206,35 @@ class T(unittest.TestCase):
                 self.assertEqual(first, ["111111"])         # 끊기기 전 받은 곳은 다시 안 받음
             self.assertIsNone(collectlock.status())         # 끝나면 잠금 풀림
 
+    def test_company_status_due(self):
+        import datetime as dtm
+        from unittest import mock
+        from analyzer import collectlock
+        from analyzer.collectors import dart as _dart
+        with tempfile.TemporaryDirectory() as d:
+            conn = db.connect(os.path.join(d, "t.db"))
+            db.ensure_company(conn, "111111", "가")
+            db.ensure_company(conn, "222222", "나")
+            ins = lambda src, key, code, t, ok=1, n=5: conn.execute(
+                "INSERT INTO fetch_log(source,key,stock_code,fetched_at,ok,n_items) VALUES (?,?,?,?,?,?)", (src, key, code, t, ok, n))
+            ins("dart_disclosures", "111111", "111111", "2026-11-23 07:00:00")
+            ins("news", "111111", "111111", "2026-11-21 07:00:00")        # 2일 전 → 기한(3일) 안
+            ins("consensus", "111111", "111111", "2026-11-17 07:00:00")   # 6일 전 → 기한(7일) 안
+            ins("news", "222222", "222222", "2026-11-19 07:00:00")        # 4일 전 → 갱신 필요
+            ins("consensus", "222222", "222222", "2026-11-22 07:00:00", ok=0, n=0)   # 실패는 받은 것으로 안 침
+            ins("price", "111111:asof", "111111", "2026-11-23 09:00:00", n=250)
+            conn.commit()
+            with mock.patch.object(_dart, "has_key", lambda: True):
+                st = collectlock.company_status(conn, dtm.date(2026, 11, 23))
+            self.assertEqual(st["111111"]["due"], [])
+            self.assertEqual(st["111111"]["price"], "2026-11-23 09:00:00")
+            self.assertEqual(st["222222"]["due"], ["공시", "뉴스", "컨센서스"])
+            with mock.patch.object(_dart, "has_key", lambda: False):        # DART 키가 없으면 공시는 따지지 않음
+                st = collectlock.company_status(conn, dtm.date(2026, 11, 23))
+            self.assertEqual(st["222222"]["due"], ["뉴스", "컨센서스"])
+            self.assertTrue(st["222222"]["disc_na"])
+            conn.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")
