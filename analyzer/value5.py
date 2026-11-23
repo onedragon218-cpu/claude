@@ -97,8 +97,37 @@ def raw_files(code):
     return fs
 
 
+_MEMO = {}     # 원본 파일 해석 결과(파일 이름·날짜·크기가 같으면 다시 읽지 않음) — 한 화면에서 O·M·N탭·가치평가가 같은 파일을 여러 번 읽던 것(2026-11-23)
+
+
+def _files_sig(files):
+    out = []
+    for f in sorted(files):
+        try:
+            st = os.stat(f)
+            out.append((f, st.st_mtime_ns, st.st_size))
+        except OSError:
+            pass
+    return tuple(out)
+
+
+def _memo(kind, code, files, fn):
+    import copy
+    sig = _files_sig(files)
+    hit = _MEMO.get((kind, code))
+    if hit and hit[0] == sig:
+        return copy.deepcopy(hit[1])
+    v = fn()
+    _MEMO[(kind, code)] = (sig, v)
+    return copy.deepcopy(v)
+
+
 def face_by_year(code):
     """{연도: {계정: 값}} — 그 연도 보고서(당기) > 다음 해 보고서(전기) > 다다음 해(전전기) 순으로 채움"""
+    return _memo("face", code, raw_files(code), lambda: _face_by_year(code))
+
+
+def _face_by_year(code):
     cand = {}
     for f in raw_files(code):
         try:
@@ -202,8 +231,13 @@ def notes_from_xml(xml):
 
 
 def notes_by_year(code):
+    files = glob.glob(os.path.join(config.DATA_DIR, "raw", code, "xbrl_*.zip"))
+    return _memo("notes", code, files, lambda: _notes_by_year(files))
+
+
+def _notes_by_year(files):
     out = {}
-    for p in sorted(glob.glob(os.path.join(config.DATA_DIR, "raw", code, "xbrl_*.zip"))):
+    for p in sorted(files):
         try:
             z = zipfile.ZipFile(p)
             for n in z.namelist():

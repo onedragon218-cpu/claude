@@ -66,16 +66,19 @@ CREATE TABLE IF NOT EXISTS news (
 CREATE TABLE IF NOT EXISTS events (
   rcept_no TEXT PRIMARY KEY, stock_code TEXT, rcept_dt TEXT, title TEXT, kind TEXT, link TEXT, collected_at TEXT
 );
+CREATE INDEX IF NOT EXISTS ix_events_code ON events(stock_code, rcept_dt);
 CREATE TABLE IF NOT EXISTS fetch_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source TEXT, key TEXT, stock_code TEXT, fetched_at TEXT, ok INTEGER, n_items INTEGER, note TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_fetch ON fetch_log(source, key, fetched_at);
+CREATE INDEX IF NOT EXISTS ix_fetch_code ON fetch_log(stock_code, id);
 -- DART 정기공시 목록(정정 공시 탐지용)
 CREATE TABLE IF NOT EXISTS disclosures (
   rcept_no TEXT PRIMARY KEY, stock_code TEXT, report_nm TEXT, rcept_dt TEXT,
   report_year INTEGER, reprt_code TEXT, is_correction INTEGER, seen_at TEXT
 );
+CREATE INDEX IF NOT EXISTS ix_disc_code ON disclosures(stock_code, rcept_dt);
 CREATE TABLE IF NOT EXISTS validation (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   stock_code TEXT, run_at TEXT, check_no INTEGER, check_name TEXT,

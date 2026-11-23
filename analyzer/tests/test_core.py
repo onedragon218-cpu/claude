@@ -1072,6 +1072,33 @@ class T(unittest.TestCase):
             conn.close()
         pcache.clear()
 
+    def test_raw_file_parse_memo(self):
+        import zipfile, time as _t
+        from unittest import mock
+        from analyzer import value5
+        value5._MEMO.clear()
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            os.makedirs(os.path.join(d, "raw", "123456"))
+            zp = os.path.join(d, "raw", "123456", "xbrl_1.zip")
+            with zipfile.ZipFile(zp, "w") as z:
+                z.writestr("a.xbrl", "<x/>")
+            n = {"c": 0}
+            def fake(xml):
+                n["c"] += 1
+                return {2025: {"land": 1.0}}
+            with mock.patch.object(value5, "notes_from_xml", fake):
+                a = value5.notes_by_year("123456")
+                a[2025]["land"] = 99                                   # 받은 값을 고쳐도 저장본은 그대로
+                b = value5.notes_by_year("123456")
+                self.assertEqual(n["c"], 1)                            # 두 번째는 다시 읽지 않음
+                self.assertEqual(b[2025]["land"], 1.0)
+                _t.sleep(0.01)
+                with zipfile.ZipFile(zp, "w") as z:                   # 파일이 바뀌면 다시 읽음
+                    z.writestr("a.xbrl", "<x>새것</x>")
+                value5.notes_by_year("123456")
+                self.assertEqual(n["c"], 2)
+        value5._MEMO.clear()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

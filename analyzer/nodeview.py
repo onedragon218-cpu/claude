@@ -63,6 +63,7 @@ def ensure(conn):
     CREATE TABLE IF NOT EXISTS node_verdict_log (
       day TEXT NOT NULL, stock_code TEXT NOT NULL, segment TEXT NOT NULL, node_id TEXT, verdict TEXT, score REAL,
       confidence TEXT, signals TEXT, UNIQUE(day, stock_code, segment));
+    CREATE INDEX IF NOT EXISTS ix_nvl_code ON node_verdict_log(stock_code, day);
     """)
 
 
