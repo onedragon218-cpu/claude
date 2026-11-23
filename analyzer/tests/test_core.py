@@ -1097,6 +1097,11 @@ class T(unittest.TestCase):
                     z.writestr("a.xbrl", "<x>새것</x>")
                 value5.notes_by_year("123456")
                 self.assertEqual(n["c"], 2)
+                value5._MEMO.clear()                                    # 앱을 다시 켠 것처럼: 디스크 저장본을 씀
+                c = value5.notes_by_year("123456")
+                self.assertEqual(n["c"], 2)
+                self.assertEqual(c, {2025: {"land": 1.0}})                 # 연도는 숫자 그대로
+                self.assertTrue(os.path.exists(os.path.join(d, "cache", "notes_123456.json")))
         value5._MEMO.clear()
 
     def test_lan_password_and_network_rules(self):

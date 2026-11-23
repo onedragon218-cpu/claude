@@ -111,13 +111,37 @@ def _files_sig(files):
     return tuple(out)
 
 
+def _disk(kind, code):
+    return os.path.join(config.DATA_DIR, "cache", f"{kind}_{code}.json")
+
+
 def _memo(kind, code, files, fn):
+    """1) 앱이 켜져 있는 동안의 저장본 2) 디스크 저장본(데이터 폴더 cache\ — 앱을 다시 켜도, 전체 갱신 때 만든 것을 화면에서 그대로)
+    3) 없거나 원본 파일이 바뀌었으면 새로 해석. 값 모양: {연도(int): {계정: 값}}"""
     import copy
     sig = _files_sig(files)
     hit = _MEMO.get((kind, code))
     if hit and hit[0] == sig:
         return copy.deepcopy(hit[1])
-    v = fn()
+    v = None
+    jsig = [list(x) for x in sig]
+    try:
+        with open(_disk(kind, code), encoding="utf-8") as f:
+            d = json.load(f)
+        if d.get("sig") == jsig:
+            v = {int(y): r for y, r in d.get("v", {}).items()}
+    except (OSError, ValueError, TypeError):
+        v = None
+    if v is None:
+        v = fn()
+        try:
+            os.makedirs(os.path.dirname(_disk(kind, code)), exist_ok=True)
+            tmp = _disk(kind, code) + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"sig": jsig, "v": {str(y): r for y, r in v.items()}}, f, ensure_ascii=False)
+            os.replace(tmp, _disk(kind, code))
+        except (OSError, TypeError, ValueError):
+            pass
     _MEMO[(kind, code)] = (sig, v)
     return copy.deepcopy(v)
 
