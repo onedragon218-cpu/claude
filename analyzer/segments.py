@@ -201,12 +201,18 @@ def peers(conn, code, P, gs):
     y = P["current"] - 1
     me = conn.execute("SELECT induty_code FROM companies WHERE stock_code=?", (code,)).fetchone()
     my_ind = me["induty_code"] if me else None
-    others = [dict(r) for r in conn.execute("SELECT c.stock_code, c.name, c.induty_code FROM companies c WHERE c.stock_code!=? "
-                                            "AND EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code)", (code,))]
-    info = {}
-    for o in others:
-        _, ogs, _ = groups(conn, o["stock_code"])
-        info[o["stock_code"]] = (o, ogs)
+    from . import pcache
+
+    def _all():               # 모든 회사의 사업부·낱말 — 회사마다 다시 구하지 않고 저장본(자료가 바뀌면 다시)
+        out = {}
+        for r in conn.execute("SELECT c.stock_code, c.name, c.induty_code FROM companies c WHERE "
+                              "EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code)"):
+            o = dict(r)
+            out[o["stock_code"]] = (o, groups(conn, o["stock_code"])[1])
+        return out
+    allg, _ = pcache.get("L탭 모든 회사 사업부", "all", _all, pcache.signature(conn))
+    info = {c: v for c, v in allg.items() if c != code}
+    others = [v[0] for v in info.values()]
     out = {}
     for g in gs:
         if g["kind"] != "사업부":

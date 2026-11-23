@@ -10,6 +10,13 @@ from analyzer.collectors import dart, fnguide
 SEED = os.path.join(config.SEED_DIR, "213500")
 
 
+def sqlite3_connect(path):
+    import sqlite3
+    c = sqlite3.connect(path)
+    c.row_factory = sqlite3.Row
+    return c
+
+
 class T(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
@@ -1103,6 +1110,42 @@ class T(unittest.TestCase):
                 self.assertEqual(c, {2025: {"land": 1.0}})                 # 연도는 숫자 그대로
                 self.assertTrue(os.path.exists(os.path.join(d, "cache", "notes_123456.json")))
         value5._MEMO.clear()
+
+    def test_warm_after_quiet_minute(self):
+        from unittest import mock
+        from analyzer import pcache, server, report as _r
+        pcache.clear()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.db")
+            conn = db.connect(path)
+            db.ensure_company(conn, "123456", "가짜")
+            conn.execute("CREATE TABLE IF NOT EXISTS zz_empty (a)")                 # 빈 표는 서명에 안 들어감
+            conn.commit()
+            s1 = pcache.signature(conn)
+            conn.execute("CREATE TABLE IF NOT EXISTS zz_empty2 (a)")
+            conn.commit()
+            self.assertEqual(s1, pcache.signature(conn))
+            called = []
+            def fake_payload(c, code, by=None, **kw):
+                called.append(code)
+                pcache.get("x", None, lambda: 1, pcache.signature(c))
+            with mock.patch.object(db, "connect", lambda p=None: sqlite3_connect(path)), mock.patch.object(_r, "payload", fake_payload):
+                st = {}
+                self.assertFalse(server.warm_once(st))          # 처음 본 서명 → 1분 더 지켜봄
+                self.assertTrue(server.warm_once(st))           # 그대로 → 미리 계산
+                self.assertFalse(server.warm_once(st))          # 이미 계산됨
+                c2 = sqlite3_connect(path); db.log_fetch(c2, "news", "123456", "123456", True, 1); c2.close()
+                self.assertFalse(server.warm_once(st))          # 바뀐 직후엔 기다림
+                with server.JOB_LOCK:
+                    server.JOB["running"] = True
+                try:
+                    self.assertFalse(server.warm_once(st))      # 갱신 중엔 안 함
+                finally:
+                    with server.JOB_LOCK:
+                        server.JOB["running"] = False
+            self.assertEqual(called, ["123456"])
+            conn.close()
+        pcache.clear()
 
     def test_lan_password_and_network_rules(self):
         from analyzer import lan

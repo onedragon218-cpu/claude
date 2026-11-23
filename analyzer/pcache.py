@@ -40,9 +40,11 @@ def signature(conn):
             if t in SKIP:
                 continue
             try:
-                parts.append((t, conn.execute(f'SELECT MAX(rowid) FROM "{t}"').fetchone()[0]))
+                m = conn.execute(f'SELECT MAX(rowid) FROM "{t}"').fetchone()[0]
             except Exception:      # noqa: BLE001
-                parts.append((t, None))
+                m = None
+            if m is not None:      # 빈 표는 넣지 않음 — 설치 뒤 빈 표가 새로 생겨도 '자료 바뀜'으로 보지 않게
+                parts.append((t, m))
         parts.append(tuple(conn.execute("SELECT COUNT(*), MAX(updated_at) FROM companies").fetchone()))
     except Exception:      # noqa: BLE001
         parts.append(None)
@@ -59,6 +61,12 @@ def get(name, key, fn, sig):
     with _L:
         _C[(name, key)] = (sig, v)
     return v, False
+
+
+def is_warm(sig):
+    """이 서명으로 저장해 둔 칸이 하나라도 있나"""
+    with _L:
+        return any(v[0] == sig for v in _C.values())
 
 
 class batch:

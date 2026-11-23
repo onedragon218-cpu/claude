@@ -582,6 +582,43 @@ def _https_server(port):
     return TLSServer(("0.0.0.0", port), H, ctx)
 
 
+WARM_EVERY = 60     # 초
+
+
+def warm_once(state):
+    """자료가 바뀐 뒤 1분 동안 더 바뀌지 않으면(갱신이 끝남) 모든 회사 계산을 미리 해 둔다 — 갱신 뒤 첫 화면도 빠르게.
+    state: {'last': 직전 서명}. 반환: 미리 계산했나"""
+    from . import pcache
+    with JOB_LOCK:
+        if JOB.get("running"):
+            state["last"] = None
+            return False
+    conn = db.connect()
+    try:
+        s = pcache.signature(conn)
+        stable, state["last"] = s == state.get("last"), s
+        if not stable or pcache.is_warm(s):
+            return False
+        row = conn.execute("SELECT stock_code FROM companies ORDER BY updated_at DESC LIMIT 1").fetchone()
+        if not row:
+            return False
+        report.payload(conn, row["stock_code"], None)
+        return True
+    finally:
+        conn.close()
+
+
+def _warm_loop():
+    import time
+    state = {}
+    while True:
+        time.sleep(WARM_EVERY)
+        try:
+            warm_once(state)
+        except Exception:      # noqa: BLE001  미리 계산이 실패해도 화면은 평소처럼 연다
+            pass
+
+
 def serve(port=8765):
     """PC용 http(127.0.0.1만)와, 태블릿 접속을 켰으면 https(8766)를 함께 연다.
     포트가 잠깐 잡혀 있으면(이전 서버 종료 중) 최대 15초 동안 다시 시도한다."""
@@ -600,6 +637,7 @@ def serve(port=8765):
         print(f"[오류] {port} 포트를 열 수 없습니다: {last}. 다른 프로그램이 이 포트를 쓰고 있는지 확인하세요.")
         raise SystemExit(2)
     print(f"화면 서버 시작: http://localhost:{port}  버전 {__version__}  데이터 {config.DATA_DIR}  (종료: Ctrl+C)", flush=True)
+    threading.Thread(target=_warm_loop, daemon=True).start()      # 갱신 뒤 첫 화면을 미리 계산
     if lan.enabled():
         tport = port + 1 if port != 8765 else lan.HTTPS_PORT
         try:
