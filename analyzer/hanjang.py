@@ -983,7 +983,15 @@ def global_payload(conn):
             "n_app": conn.execute("SELECT COUNT(*) FROM hj_company WHERE origin='app'").fetchone()[0],
             "claude_not_in_db": [r["code"] for r in conn.execute("SELECT h.code FROM hj_company h WHERE h.origin='claude' AND NOT EXISTS "
                                                                   "(SELECT 1 FROM facts f WHERE f.stock_code=h.code)")],
-            "db_not_in_claude": db_not_in_claude(conn), "folder": folder_status(conn), "overview": fresh_overview(conn)}
+            "db_not_in_claude": db_not_in_claude(conn), "folder": folder_status(conn), "overview": fresh_overview(conn),
+            "app_behind": app_behind(conn)}
+
+
+def app_behind(conn):
+    """Claude 조사가 앱 판정보다 나중에 들어온 회사(또는 앱 판정이 아직 없는 회사) — 앱 판정을 다시 계산하면 Claude 노드에 맞춰짐"""
+    return [r["code"] for r in conn.execute(
+        "SELECT c.code FROM hj_company c LEFT JOIN hj_company a ON a.code=c.code AND a.origin='app' WHERE c.origin='claude' "
+        "AND (a.code IS NULL OR c.updated_at > a.updated_at) AND EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.code)")]
 
 
 def payload(conn, code, P, glob=None):

@@ -629,10 +629,18 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div id="t-agree" class="muted" style="margin-bottom:8px"></div>
     <div id="t-dbonly" style="margin-bottom:10px"></div>
     <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
-      <button class="primary" id="t-run">근거 모으기·앱 판정 다시 계산(이 회사)</button>
+      <button id="t-run">근거 모으기·앱 판정 다시 계산(이 회사)</button>
       <button id="t-runall">앱 판정 전체 다시 계산(DB 회사)</button>
       <span class="muted" id="t-msg"></span>
     </div>
+    <div id="t-runhint" style="margin:6px 0"></div>
+    <details style="margin:4px 0 8px"><summary class="muted">이 두 버튼은 언제 누르나요?</summary>
+      <div class="muted" style="white-space:normal;line-height:1.6;margin-top:4px">
+      <b>평소에는 누르지 않아도 됩니다.</b> 백그라운드 수집(로그인할 때·평일 07:13)과 A탭 갱신이 회사마다 ① 작업 폴더의 새 한장조사 파일 읽기 ② 노드별 뉴스 모으기 ③ 앱 판정(판단 자료 칸·앱 참고 판정) 다시 계산을 자동으로 합니다.<br>
+      <b>[근거 모으기·앱 판정 다시 계산(이 회사)]</b> — 지금 보는 회사만, 빠진 자료·새 공시·뉴스·노드 뉴스를 받은 뒤 앱 판정을 다시 계산(1~2분). 누를 때: 이 회사의 Claude 조사가 방금 들어왔는데 판단 자료 칸을 바로 맞추고 싶을 때, 판단 자료 칸이 비었거나 '판단 자료를 만들지 못함'일 때.<br>
+      <b>[앱 판정 전체 다시 계산(DB 회사)]</b> — 인터넷으로 새로 받지 않고 DB에 있는 자료로 모든 회사의 앱 판정만 다시 계산(몇 분). 누를 때: Claude 조사 파일이 한꺼번에 많이 들어온 뒤 일치율·앱 참고 판정을 바로 보고 싶을 때, 앱을 새 버전으로 바꾼 뒤(판정 규칙이 바뀌었을 수 있음).<br>
+      버튼이 <b style="color:var(--accent)">파란색</b>이면 Claude 조사가 앱 판정보다 나중에 들어와 다시 계산할 거리가 있다는 뜻이고, 회색이면 앱 판정이 이미 최신이라 누를 필요가 없습니다(눌러도 결과는 같음).
+      </div></details>
     <p class="muted" style="margin:8px 0 4px">조사 결과 넣기: Claude가 돌려준 JSON을 붙여 넣거나, 파일(JSON 또는 작업 폴더 한장조사 zip)을 고르세요. 형식 검사와 기계 검사 10개를 거쳐 저장합니다.</p>
     <textarea id="t-text" rows="4" style="width:100%;box-sizing:border-box" placeholder="Claude가 돌려준 JSON(앞뒤 설명 글이 섞여 있어도 됨)"></textarea>
     <div class="row" style="gap:8px;align-items:center;margin-top:6px"><button class="primary" id="t-save">조사 결과 넣기</button><input type="file" id="t-file" accept=".json,.zip,application/json,application/zip"><span class="muted" id="t-msg2"></span></div>
@@ -2316,7 +2324,16 @@ async function tFolderPost(url, body){ if (!SERVED){ alert('「재무분석 열�
   catch(e){ $('#t-fmsg').textContent = '실패: ' + e.message; } }
 $('#t-fsave').onclick = () => { const v = $('#t-folder').value.trim(); if (!v){ $('#t-folder').focus(); return; } tFolderPost('/api/hj/folder', {path: v}); };
 $('#t-fsync').onclick = () => tFolderPost('/api/hj/sync', {});
+function tRunHint(){
+  const C = HJ.claude, A = HJ.app, behind = HJ.app_behind || [];
+  const meBehind = !!C && (!A || String(C.company.updated_at||'') > String(A.company.updated_at||''));
+  $('#t-run').classList.toggle('primary', meBehind); $('#t-runall').classList.toggle('primary', behind.length > 0);
+  $('#t-runall').textContent = `앱 판정 전체 다시 계산(DB 회사)${behind.length ? ` · ${behind.length}곳 계산 필요` : ''}`;
+  $('#t-runhint').innerHTML = (meBehind ? `<span style="color:var(--accent)">● 이 회사: Claude 조사(${esc(C.company.updated_at||'')})가 앱 판정(${esc((A&&A.company.updated_at)||'없음')})보다 새것 → [이 회사] 버튼을 누르면 판단 자료 칸이 Claude 노드에 맞춰집니다(다음 자동 갱신 때도 맞춰짐).</span><br>` : '') +
+    (behind.length ? `<span style="color:var(--accent)">● Claude 조사가 앱 판정보다 새것인 회사 ${behind.length}곳 → [전체] 버튼으로 한 번에 맞출 수 있습니다(인터넷 없이 몇 분).</span>` : (meBehind ? '' : '<span class="muted">앱 판정이 모두 최신입니다 — 지금은 누를 필요가 없습니다.</span>'));
+}
 function tAgree(){
+  tRunHint();
   const a = HJ.agree_company||{}, g = HJ.agree_all||{}, pc = x => x==null ? '–' : Math.round(x*100)+'%';
   $('#t-agree').innerHTML = `<b>Claude 판정과 앱 참고 판정 일치율</b>(현재 판정, 같은 노드끼리): 이 회사 ${a.nodes?`${a.same}/${a.nodes} (${pc(a.rate)})`:'–'} · 전체 ${g.nodes?`${g.same}/${g.nodes} (${pc(g.rate)}) · 한 칸 차이(우호↔중립·역풍↔중립)까지 ${pc(g.close_rate)} · 회사 ${g.companies}곳`:'–'} · Claude 조사 ${HJ.n_claude}곳 · 앱 판정 ${HJ.n_app}곳`;
   const M = HJ.claude_not_in_db||[];
