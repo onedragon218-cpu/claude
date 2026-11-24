@@ -82,6 +82,7 @@ def ensure(conn):
     CREATE TABLE IF NOT EXISTS hj_verdict (code TEXT NOT NULL, origin TEXT NOT NULL, asof TEXT, text TEXT, PRIMARY KEY(code, origin));
     CREATE TABLE IF NOT EXISTS hj_run_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, origin TEXT, at TEXT, step TEXT, result TEXT, warnings TEXT, model TEXT);
+    CREATE TABLE IF NOT EXISTS hj_app_text (code TEXT NOT NULL, node_id INTEGER NOT NULL, text TEXT, at TEXT, PRIMARY KEY(code, node_id));
     CREATE TABLE IF NOT EXISTS hj_files (
       path TEXT PRIMARY KEY, mtime REAL, size INTEGER, codes TEXT, status TEXT, msg TEXT, synced_at TEXT);
     """)
@@ -677,11 +678,16 @@ def learned_view(node, nd, nn):
     p, why = hj_learn.predict(m, text) if m else (None, [])
     cue = hj_learn.cues(" ".join(e["title"] for e in nn[:30]))
     up = sum(1 for e in nn[:30] if hj_learn.cues(e["title"]).count("#증가")) - sum(1 for e in nn[:30] if "#감소" in hj_learn.cues(e["title"]))
-    return {"probs": p, "why": why, "n_titles": len(nn), "net_dir": up, "cues": cue}
+    return {"probs": p, "why": why, "n_titles": len(nn), "net_dir": up, "cues": cue, "text": text}
+
+
+APPLY_LEARNED = False    # 2026-11-24 점검: 낱말 모델이 판정을 덮어써 '씨앗'을 240개 남발(낱말 모델 단독 일치율 7%) → 끔. 확률은 메모에만 남김
 
 
 def apply_learned(years, L, kind, main, disc, cy):
     """학습 모델·방향 낱말을 연도 칸에 반영(규칙 점수와 합침). 근거 글이 적으면 쓰지 않음"""
+    if not APPLY_LEARNED:
+        return
     p = L.get("probs")
     if not p or L["n_titles"] < 2 and kind not in ("사람",):
         return
@@ -864,6 +870,9 @@ def run_app(conn, code, P, collect_news=False):
         kn = K["nodes"].get(n["kn"]) if n.get("kn") else None
         is_main = n["node_id"] == main_id and n["kind"] == "사업부"
         r = judge_node(n, kn, K, N, disc, news, n.get("share_pct"), is_main)
+        if (r.get("learned") or {}).get("text"):      # 앱이 모은 글(노드 이름 + 관련 공시·뉴스 제목) — 낱말 모델 학습용
+            conn.execute("INSERT OR REPLACE INTO hj_app_text(code, node_id, text, at) VALUES (?,?,?,?)",
+                         (code, n["node_id"], r["learned"]["text"][:6000], db.now()))
         doc_nodes.append({"node_id": n["node_id"], "name": n["name"], "share_pct": n.get("share_pct"), "kind": n["kind"], "kn_node": n.get("kn"),
                           "demand": r["demand"], "share": r["share"], "numbers": r["numbers"], "triggers": r["triggers"], "land": r["land"],
                           "raw_judgment": f"{n['from']} · 구조 {r['structural']:+.1f} · 땅 근거: {r['land_why']}" + learned_note(r.get("learned")), "years": r["years"],

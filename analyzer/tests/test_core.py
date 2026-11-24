@@ -1266,6 +1266,16 @@ class T(unittest.TestCase):
             self.assertFalse({x["code"] for x in tr} & {x["code"] for x in te})
         self.assertIn("우호", H.importance(rows))
 
+    def test_nb_multinomial_not_biased_to_rare_label(self):
+        from analyzer import hj_learn
+        rows = [("우호", f"수요 증가 증설 소식{i}", f"{i:06d}") for i in range(60)] + \
+               [("중립", f"보합 유지 소식{i}", f"{i:06d}") for i in range(60)] + \
+               [("씨앗", f"개발 샘플 소식{i}", f"{i:06d}") for i in range(4)]
+        m = hj_learn.train_rows(rows)
+        p, _ = hj_learn.predict(m, "증설 소식 공장")                   # 처음 보는 낱말(공장)이 섞여도 드문 '씨앗'으로 쏠리지 않음
+        self.assertEqual(max(p, key=p.get), "우호")
+        self.assertLess(p["씨앗"], 0.2)
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

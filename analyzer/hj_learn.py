@@ -54,7 +54,8 @@ def node_text(n):
 
 
 def train_rows(rows):
-    """rows: [(라벨, 글) 또는 (라벨, 글, 회사)] → 모델 dict. 3개 회사 이상에 나온 낱말만 씀(회사 이름·고유명사에 끌려가지 않게)"""
+    """rows: [(라벨, 글) 또는 (라벨, 글, 회사)] → 모델 dict. 3개 회사 이상에 나온 낱말만 씀(회사 이름·고유명사에 끌려가지 않게)
+    2026-11-24: 다항 나이브 베이즈로 바꿈 — 예전 식은 문서 수가 적은 판정(씨앗·걸림)일수록 처음 보는 낱말에 높은 확률을 줘 '씨앗'으로 쏠렸음."""
     cnt = {l: Counter() for l in LABELS}
     prior = Counter()
     comp = defaultdict(set)
@@ -68,8 +69,9 @@ def train_rows(rows):
         for t in tk:
             comp[t].add(row[2] if len(row) > 2 else id(row))
     vocab = {w for w in comp if w.startswith("#") or len(comp[w]) >= 3}
-    return {"labels": LABELS, "prior": dict(prior), "counts": {l: {w: c for w, c in cnt[l].items() if w in vocab} for l in LABELS},
-            "n": sum(prior.values()), "vocab": len(vocab)}
+    counts = {l: {w: c for w, c in cnt[l].items() if w in vocab} for l in LABELS}
+    return {"labels": LABELS, "prior": dict(prior), "counts": counts, "totals": {l: sum(counts[l].values()) for l in LABELS},
+            "n": sum(prior.values()), "vocab": len(vocab), "kind": "multinomial"}
 
 
 def predict(model, text):
@@ -78,14 +80,15 @@ def predict(model, text):
         return None, []
     toks = [t for t in set(tokens(text)) if any(t in model["counts"][l] for l in LABELS)]
     V = max(model["vocab"], 1)
+    tot = model.get("totals") or {l: sum(model["counts"][l].values()) for l in LABELS}
     logp = {}
     for l in LABELS:
         nl = model["prior"].get(l, 0)
         if not nl:
             continue
         lp = math.log(nl / model["n"])
-        for t in toks:
-            lp += math.log((model["counts"][l].get(t, 0) + 1) / (nl + 2))      # 베르누이식(문서에 낱말이 있나)
+        for t in toks:     # 다항식: (그 판정 글에 나온 횟수 + 1) ÷ (그 판정 글의 낱말 총수 + 낱말 종류 수)
+            lp += math.log((model["counts"][l].get(t, 0) + 1) / (tot[l] + V))
         logp[l] = lp
     if not logp:
         return None, []
@@ -117,9 +120,20 @@ def lexicon(model, top=12):
 
 
 def train(conn):
-    """DB의 Claude 노드로 학습해 저장 + 회사 빼고 맞혀 보기 교차 검증. 반환: 요약"""
-    rows = conn.execute("SELECT code, rep, name, demand, share, numbers, triggers FROM hj_node WHERE origin='claude' AND rep IS NOT NULL").fetchall()
-    data = [(r["code"], r["rep"], node_text(dict(r))) for r in rows]
+    """Claude 판정을 정답으로 학습해 저장 + 회사 빼고 맞혀 보기 교차 검증. 반환: 요약
+    2026-11-24: 글은 '앱이 그 노드에 모은 글'(노드 이름 + 관련 공시·뉴스 제목, hj_app_text)을 씀 — 실제로 적용하는 글과 같은 종류.
+    (예전: Claude가 쓴 설명 글로 배우고 앱이 모은 짧은 제목에 적용 → 글 성격이 달라 엉뚱한 판정으로 쏠림.) 앱 글이 150개 미만이면 예전 방식."""
+    try:
+        rows = conn.execute("SELECT c.code, c.rep, t.text FROM hj_node c JOIN hj_app_text t ON t.code=c.code AND t.node_id=c.node_id "
+                            "WHERE c.origin='claude' AND c.rep IS NOT NULL AND t.text IS NOT NULL").fetchall()
+    except Exception:      # noqa: BLE001  표가 아직 없으면 예전 방식
+        rows = []
+    source = "앱이 모은 글(노드 이름 + 관련 공시·뉴스 제목)"
+    data = [(r["code"], r["rep"], r["text"]) for r in rows]
+    if len(data) < 150:
+        rows = conn.execute("SELECT code, rep, name, demand, share, numbers, triggers FROM hj_node WHERE origin='claude' AND rep IS NOT NULL").fetchall()
+        data = [(r["code"], r["rep"], node_text(dict(r))) for r in rows]
+        source = "Claude 설명 글(앱 글이 아직 적어서)"
     model = train_rows([(l, t, c) for c, l, t in data])
     by = defaultdict(list)
     for c, l, t in data:
@@ -135,6 +149,7 @@ def train(conn):
                 ok += g == l
                 tot += 1
                 conf[(l, g)] += 1
+    model["source"] = source
     model["cv"] = {"accuracy": ok / tot if tot else None, "n": tot, "companies": len(by),
                    "confusion": {f"{a}→{b}": n for (a, b), n in conf.most_common(12)}}
     model["lexicon"] = lexicon(model)

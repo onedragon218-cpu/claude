@@ -30,6 +30,42 @@ def _f(v, d=0.0):
     return d if v is None else float(v)
 
 
+def seg_link(conn, code):
+    """노드 이름 → DART 사업부(주요제품 매출구성) 비중·1년 변화. 반환: 함수(이름) → (비중%, 1년 변화 %p 또는 None) 또는 None"""
+    import datetime as dt
+    from . import segments
+    hist = segments.mix_history(conn, code)
+    if not hist:
+        return lambda name: None
+    days = sorted({h["as_of"] for h in hist})
+    last = days[-1]
+    snap = {h["name"]: h["pct"] for h in hist if h["as_of"] == last}
+
+    def _d(a):
+        try:
+            return dt.date.fromisoformat(a + "-01" if len(a) == 7 else a[:10])
+        except ValueError:
+            return None
+    ld = _d(last)
+    old = next((d for d in reversed(days) if ld and _d(d) and (ld - _d(d)).days >= 300), None)
+    snap_old = {h["name"]: h["pct"] for h in hist if h["as_of"] == old} if old else {}
+    kw = {n: set(segments.auto_keywords(n)) | set(re.findall(r"[가-힣A-Za-z]{2,}", n)) for n in snap}
+
+    def link(name):
+        words = set(re.findall(r"[가-힣A-Za-z0-9]{2,}", re.sub(r"\(.*?\)", " ", name or ""))) - {"사업", "부문", "제품", "기타", "수요", "판매"}
+        best = None
+        for seg, ks in kw.items():
+            hit = sum(len(w) for w in words for k in ks if len(k) >= 2 and (k in w or w in k))
+            if hit and (best is None or hit > best[1]):
+                best = (seg, hit)
+        if not best:
+            return None
+        seg = best[0]
+        ch = snap[seg] - snap_old[seg] if seg in snap_old and snap[seg] is not None and snap_old[seg] is not None else None
+        return snap[seg], ch
+    return link
+
+
 def features(f, comp):
     """노드 판단 자료(node_facts 한 줄) + 회사 숫자 → {재료: 값}"""
     main = 1.0 if f.get("main") else 0.0
@@ -41,6 +77,11 @@ def features(f, comp):
     for k in KINDS:                      # 종류는 노드 이름으로만 추정(Claude 판정에서 온 종류를 쓰면 답을 보고 푸는 셈)
         x[f"종류={k}"] = 1.0 if f.get("kind_i") == k else 0.0
     x["이름에 새 사업 낱말"] = 1.0 if SEED_WORDS.search(f.get("name") or "") else 0.0
+    sg = f.get("seg")                     # DART 사업부와 연결(주력 아닌 노드에도 숫자)
+    x["사업부 연결 없음"] = 0.0 if sg else 1.0
+    x["연결된 사업부 비중"] = (_f(sg[0]) / 100) if sg else 0.0
+    x["사업부 비중 1년 변화"] = max(-1.0, min(1.0, sg[1] / 10)) if sg and sg[1] is not None else 0.0
+    x["비중 변화 모름"] = 0.0 if sg and sg[1] is not None else 1.0
     q = comp.get("q_opm")
     x["(주력) 분기 누적 매출 성장"] = main * max(-1.0, min(1.0, _f(comp.get("q_growth")) / 100))
     x["(주력) 이익률 변화"] = main * max(-1.0, min(1.0, ((q[0] - q[1]) / 10) if q else 0.0))
@@ -67,14 +108,18 @@ def build_rows(conn, P, progress=None):
             continue
         trig = " ".join(n.get("triggers") or "" for n in cl["nodes"])
         fr = hanjang.claude_fresh(conn, code, cl["company"]["asof"], trig)
+        link = seg_link(conn, code)
+        segs = {n["node_id"]: link(n["name"]) for n in cl["nodes"]}
+        share = lambda n: n.get("share_pct") if n.get("share_pct") is not None else (segs[n["node_id"]] or (None,))[0]
         biz = [n for n in cl["nodes"] if hanjang.guess_kind(n["name"]) == "사업부"]      # 주력도 이름 기준 종류로(Claude 종류 안 씀)
-        main_id = max(biz, key=lambda n: (n.get("share_pct") or 0, -n["node_id"]))["node_id"] if biz else None
+        main_id = max(biz, key=lambda n: (share(n) or 0, -n["node_id"]))["node_id"] if biz else None
         for n in cl["nodes"]:
             f = F["nodes"].get(n["node_id"])
             lab = n.get("rep")
             if not f or lab not in LABELS:
                 continue
-            f = dict(f, name=n["name"], kind_i=hanjang.guess_kind(n["name"]), main=n["node_id"] == main_id)
+            f = dict(f, name=n["name"], kind_i=hanjang.guess_kind(n["name"]), main=n["node_id"] == main_id,
+                     seg=segs[n["node_id"]], share_pct=share(n))
             rows.append({"code": code, "x": features(f, F["company"]), "text": f.get("text") or n["name"], "y": lab,
                          "rule": f.get("app_judgment"), "kind": f["kind_i"], "main": bool(f.get("main")),
                          "valid": fr["state"] != "old" and not f.get("trigger_hit"), "name": n["name"]})

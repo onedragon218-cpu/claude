@@ -429,6 +429,11 @@ class H(BaseHTTPRequestHandler):
                             hanjang.run_app(conn, c, P)
                         except Exception as e:     # noqa: BLE001
                             bad.append(f"{c}: {type(e).__name__}")
+                    try:                           # 앱이 모은 글이 쌓였으니 낱말 모델을 그 글로 다시 배움
+                        from . import hj_learn
+                        hj_learn.train(conn)
+                    except Exception as e:     # noqa: BLE001
+                        bad.append(f"낱말 모델 다시 배우기: {type(e).__name__}")
                     return self._send(200, json.dumps({"ok": True, "n": len(codes), "failed": bad, "agree": hanjang.agreement(conn)},
                                                       ensure_ascii=False), "application/json")
                 # 넣기: zip(작업 폴더 한장조사) 또는 JSON(Claude 결과 — 앞뒤 설명 글은 걷어 냄)
