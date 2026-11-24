@@ -229,7 +229,8 @@ def plan(conn, code, P):
     need["interim"] = "Q3" not in have_interim
     need["asof_price"] = not db.fetched_recently(conn, "price", f"{code}:asof", config.TTL_DAYS["price_asof"], ok_only=True) and \
         _asof_age(conn, code, cur) != 0
-    need["consensus"] = not db.fetched_recently(conn, "consensus", code, config.TTL_DAYS["consensus"], ok_only=True)
+    need["consensus"] = not db.fetched_recently(conn, "consensus", code, config.TTL_DAYS["consensus"], ok_only=True) and \
+        not db.fetched_recently(conn, "consensus_none", code, config.TTL_DAYS["consensus"], ok_only=True)   # 증권사 추정치가 없는 회사는 7일에 한 번만 다시 확인
     return need
 
 
@@ -406,8 +407,12 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
             except mod.ConsensusUnavailable as e:
                 errs.append(f"{name}: {e}")
                 db.log_fetch(conn, "consensus_src", f"{code}:{name}", code, False, 0, str(e))
+        no_est = not got and any(e.startswith("WiseReport: 표는 읽었지만 추정치(E)") or e.startswith("FnGuide: 표는 읽었지만 추정치(E)") for e in errs)
         db.log_fetch(conn, "consensus", code, code, got > 0, got, "; ".join(errs) or None)
-        if not got:
+        if no_est:      # 사이트는 읽혔는데 추정치 열이 없음 = 이 회사를 추정하는 증권사가 없음(실패 아님) → 7일 뒤 다시 확인
+            db.log_fetch(conn, "consensus_none", code, code, True, 1, "증권사 추정치 없음(표에 추정치 열·값 없음)")
+            stats.notes.append("컨센서스: 이 회사를 추정하는 증권사가 없음(WiseReport·FnGuide 표에 추정치 없음) — 7일 뒤 다시 확인")
+        elif not got:
             stats.notes.append("컨센서스 미확보(다음 실행 때 다시 시도): " + " / ".join(errs))
 
     # 7) 컨센서스 추이(상향·하향 확인용): 올해~내후년 매출·영업이익(+EPS·목표주가) 월별 값. 7일에 한 번.
@@ -569,10 +574,15 @@ def ingest_xbrl(conn, code, rcept_no, report_year, values, stats=None):
 def ensure_xbrl(conn, code, P, stats):
     """감가상각비가 없는 연도만 그 연도 보고서의 XBRL을 받는다(한 파일에 당기·전기 2개 연도). 받은 파일은 보관."""
     from .collectors import dart_xbrl
-    jobs = []
+    jobs, skipped = [], []
     for y in sorted(P["past"], reverse=True):
         if not _has_da(conn, code, y, "FY"):
+            if db.current_fact(conn, code, y, "acc_revenue", "FY") is None:     # 그해 재무제표가 아예 없음(상장 전 등) → 보충할 대상이 없음
+                skipped.append(y)
+                continue
             jobs.append((y, "11011"))
+    if skipped:
+        stats.notes.append(f"재무제표가 없는 연도({min(skipped)}~{max(skipped)}, 상장 전 등)는 XBRL 주석을 받지 않음")
     cy = P["current"]
     per = next((p for p in ("Q3", "H1", "Q1") if db.current_fact(conn, code, cy, "acc_revenue", p)), None)
     if per and not _has_da(conn, code, cy, per):

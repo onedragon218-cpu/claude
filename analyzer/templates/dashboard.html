@@ -2465,7 +2465,7 @@ function cStatusCells(code){
   const p = cAge(S.price, null);
   const discCell = S.disc_na ? '<td class="l muted" title="DART 인증키가 없어 공시를 받지 않음">키 없음</td>' : cell(S.disc, 1, '공시');
   return `<td class="l" title="기준일 주가를 마지막으로 받은 때 ${esc(S.price||'없음')}">${p.txt} <button class="cpr" data-code="${esc(code)}" title="이 기업 주가만 지금 받기" style="padding:0 6px">↻</button></td>` +
-    discCell + cell(S.news, 3, '뉴스') + cell(S.cons, 7, '컨센서스'); }
+    discCell + cell(S.news, 3, '뉴스') + (S.cons_none && !(S.due||[]).includes('컨센서스') ? `<td class="l muted" title="증권사 추정치가 없는 회사(WiseReport 표에 추정치 열 없음) — 확인한 때 ${esc(S.cons_none)}, 7일마다 다시 확인">추정 없음</td>` : cell(S.cons, 7, '컨센서스')); }
 function renderComps(){
   const V = cVisible(), all = V.length && V.filter(c=>cCanPick(c.stock_code)).every(c=>cChecked.has(c.stock_code));
   [...cChecked].forEach(c=>{ if (!cCanPick(c)) cChecked.delete(c); });

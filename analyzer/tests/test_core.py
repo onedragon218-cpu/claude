@@ -371,15 +371,6 @@ class T(unittest.TestCase):
             self.assertGreaterEqual(r["tax"], 0.099)            # 법정 한계세율(지방세 포함) — 최저 구간 9%×1.1 이상
             self.assertTrue(any("예상(보수적 추정)" in n for n in r["notes"]))
 
-    def test_fnguide_parser(self):
-        page = """<div id="highlight_D_Y"><table><thead><tr><th>IFRS(연결)</th><th>2024/12</th><th>2025/12</th>
-        <th>2026/12(E)</th><th>2027/12(E)</th></tr></thead><tbody>
-        <tr><th>매출액</th><td>22,158</td><td>22,900</td><td>23,500</td><td>24,100</td></tr>
-        <tr><th>EPS(원)</th><td>-1,278</td><td>163</td><td>900</td><td>1,100</td></tr></tbody></table></div>"""
-        out = fnguide.parse(page)
-        self.assertEqual({(o["target_year"], o["metric"], o["value"]) for o in out},
-                         {(2026, "revenue", 23500.0), (2027, "revenue", 24100.0), (2026, "eps", 900.0), (2027, "eps", 1100.0)})
-
     def test_consensus_trend_revisions(self):
         P = config.periods(2026)
         rows = [(2026, "op_income", "2026-05-29", 100.0, "억원"), (2026, "op_income", "2026-08-31", 120.0, "억원"),
@@ -1234,6 +1225,26 @@ class T(unittest.TestCase):
             self.assertEqual(st["222222"]["due"], ["뉴스", "컨센서스"])
             self.assertTrue(st["222222"]["disc_na"])
             conn.close()
+
+    def test_fnguide_new_page_and_no_estimates(self):
+        from analyzer.collectors import fnguide
+        page = """snapshot.init({ cmp_cd: '123456',
+                 perforTrend: {"data":[{"NAME":"매출액","LVL":1,"VAL1":"100","VAL2":"110","VAL3":"120","VAL4":"130"},
+                   {"NAME":"영업이익","LVL":1,"VAL1":"10","VAL2":"11","VAL3":"12","VAL4":"13"},
+                   {"NAME":"당기순이익(지배)","LVL":1,"VAL3":"9","VAL4":"10"},
+                   {"NAME":"자본총계(지배)","LVL":1,"VAL3":"90","VAL4":"110"},{"NAME":"자본총계","LVL":1,"VAL4":"120"},
+                   {"NAME":"부채총계","LVL":1,"VAL4":"60"},{"NAME":"EPS","UNIT":"(원)","LVL":1,"VAL4":"1,000"},{"NAME":"BPS","UNIT":"(원)","LVL":1,"VAL4":"11000"}],
+                 "header":[{"YYMM":"2023/12","EP_CHK":" ","CD":"VAL1"},{"YYMM":"2024/12","EP_CHK":" ","CD":"VAL2"},{"YYMM":"2025/12","EP_CHK":" ","CD":"VAL3"},{"YYMM":"2026/12","EP_CHK":"E","CD":"VAL4"}]},
+                 perforTrendChart: {}"""
+        it = {(i["metric"], i["target_year"]): i["value"] for i in fnguide.parse(page)}
+        self.assertEqual(it[("revenue", 2026)], 130.0)
+        self.assertAlmostEqual(it[("op_margin", 2026)], 10.0)
+        self.assertAlmostEqual(it[("roe", 2026)], 10.0)          # 10 ÷ 평균(90, 110)
+        self.assertAlmostEqual(it[("debt_ratio", 2026)], 50.0)
+        self.assertEqual(it[("eps", 2026)], 1000.0)
+        self.assertNotIn(("revenue", 2025), it)                  # 실적 열은 넣지 않음
+        with self.assertRaises(fnguide.ConsensusUnavailable):
+            fnguide.parse(page.replace('"EP_CHK":"E"', '"EP_CHK":" "'))
 
     def test_lan_password_and_network_rules(self):
         from analyzer import lan

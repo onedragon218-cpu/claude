@@ -131,6 +131,8 @@ def company_status(conn, today=None):
     for r in conn.execute("SELECT stock_code, source, MAX(fetched_at) t FROM fetch_log WHERE source IN ('dart_disclosures','news','consensus') "
                           "AND (source='dart_disclosures' OR (ok=1 AND n_items>0)) GROUP BY stock_code, source"):
         last[(r["stock_code"], r["source"])] = r["t"]
+    none = {r["stock_code"]: r["t"] for r in conn.execute(
+        "SELECT stock_code, MAX(fetched_at) t FROM fetch_log WHERE source='consensus_none' AND ok=1 GROUP BY stock_code")}
     price = {r["code"]: r["t"] for r in conn.execute(
         "SELECT substr(key, 1, 6) code, MAX(fetched_at) t FROM fetch_log WHERE source='price' AND key LIKE '%:asof' AND ok=1 AND n_items>0 GROUP BY code")}
     out = {}
@@ -146,6 +148,12 @@ def company_status(conn, today=None):
                 age = (now - dt.datetime.fromisoformat(t)).days if t else None
             except ValueError:
                 age = None
+            if k == "cons" and none.get(code) and (not t or none[code] > t):     # 증권사 추정치 없는 회사: 확인한 지 7일 안이면 갱신 필요 아님
+                st["cons_none"] = none[code]
+                try:
+                    age = (now - dt.datetime.fromisoformat(none[code])).days
+                except ValueError:
+                    age = None
             if age is None or age >= ttl:
                 st["due"].append(name)
         out[code] = st
