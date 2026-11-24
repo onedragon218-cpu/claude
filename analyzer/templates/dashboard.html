@@ -2345,13 +2345,18 @@ function tCalib(){
   const pc = x => x==null ? '–' : Math.round(x*100)+'%';
   const row = (name, a, b) => `<tr><td class="l">${esc(name)}</td><td>${a.same}/${a.n} <b>${pc(a.rate)}</b></td><td>${pc(a.close_rate)}</td><td>${b?`${b.same}/${b.n} <b>${pc(b.rate)}</b>`:'–'}</td></tr>`;
   const M = R.methods, V = R.valid_methods, rule = M['지금 규칙 판정'], nm = M['새 모델(배운 무게)'];
-  const better = nm.rate != null && rule.rate != null && nm.rate > rule.rate;
+  const fair = M['규칙(이름 기준 종류 — 공정한 기준)'], thr = M['규칙 + 문턱 맞춤'];
+  const cand = [['규칙 + 문턱 맞춤', thr], ['새 모델(배운 무게)', nm]].filter(c=>c[1] && c[1].rate!=null).sort((a,b)=>b[1].rate-a[1].rate);
+  const bestN = cand.length ? cand[0][0] : '새 모델(배운 무게)', bestM = cand.length ? cand[0][1] : nm;
+  const base = fair && fair.rate!=null ? fair : rule;
+  const better = bestM.rate != null && base.rate != null && bestM.rate > base.rate;
   let h = `<div class="muted">검증 ${esc(R.at||'')} · Claude 판정 노드 ${R.n_rows}개(회사 ${R.n_companies}곳) · 그중 유효한 정답(조사 뒤 실적 공시·바꿀 것 낱말 적중 없음) ${R.n_valid}개 · 판정 분포 ${Object.entries(R.labels).map(([k,v])=>esc(k)+' '+v).join(', ')}</div>`;
-  h += `<div class="warnbox" style="border-left-color:var(--${better?'good':'warn'});background:var(--${better?'good':'warn'}-bg)"><b>${better?'새 모델이 지금 규칙보다 Claude에 더 가깝습니다':'새 모델이 지금 규칙보다 낫지 않습니다'}</b> — 지금 규칙 ${pc(rule.rate)} → 새 모델 ${pc(nm.rate)}${R.confident?` · 새 모델이 확신하는 상위 절반만 보면 ${pc((R.confident['확신 상위 50%']||{}).rate)}, 상위 25%는 ${pc((R.confident['확신 상위 25%']||{}).rate)}`:''}</div>`;
+  h += `<div class="warnbox" style="border-left-color:var(--${better?'good':'warn'});background:var(--${better?'good':'warn'}-bg)"><b>${better?`가장 나은 방법: ${esc(bestN)} ${pc(bestM.rate)}`:'새 방법이 공정한 기준보다 낫지 않습니다'}</b> — 지금 규칙(화면) ${pc(rule.rate)}${fair?` · 공정한 기준(씨앗 누설 뺀 규칙) ${pc(fair.rate)}`:''}${thr?` · 규칙 + 문턱 맞춤 ${pc(thr.rate)}`:''} · 새 모델 ${pc(nm.rate)}${R.confident?` · 새 모델 확신 상위 절반 ${pc((R.confident['확신 상위 50%']||{}).rate)}, 상위 25% ${pc((R.confident['확신 상위 25%']||{}).rate)}`:''}</div>`;
+  if (R.thresholds) h += `<div class="muted">전체 자료로 고른 문턱: 우호 ≥ ${R.thresholds['우호 문턱']} · 역풍 ≤ ${R.thresholds['역풍 문턱']} (지금 1.0 / −1.0) · 묶음별 ${(R.thresholds['묶음별']||[]).map(t=>t.join('/')).join(', ')}${R.weight_power?` · 드문 판정 무게 ${R.weight_power['고른 값']}(0=똑같이, 1=수만큼 보정; 맞힌 수 ${Object.entries(R.weight_power['일치']).map(([k,v])=>k+':'+v).join(' ')})`:''}</div>`;
   h += `<table style="margin-top:6px"><tr><th class="l">판정 방법</th><th>Claude와 같음(전체)</th><th>한 칸 차이까지</th><th>유효한 정답만</th></tr>` + Object.keys(M).map(k=>row(k, M[k], V[k])).join('') + '</table>';
   const kv = o => Object.entries(o||{}).map(([k,v])=>`${esc(k)} ${v.n?`${pc(v.rate)} (${v.n})`:'–'}`).join(' · ');
   h += `<details style="margin-top:6px"><summary>어디서 엇갈리나(진단)</summary><div style="white-space:normal;font-size:13px">` +
-    ['지금 규칙 판정','새 모델(배운 무게)'].map(n=>`<p style="margin:6px 0"><b>${esc(n)}</b><br>자주 엇갈림(Claude→앱): ${Object.entries((R.confusion||{})[n]||{}).slice(0,8).map(([k,v])=>esc(k)+' '+v).join(' · ')}<br>노드 종류별: ${kv((R.by_kind||{})[n])}<br>주력/나머지: ${kv((R.by_main||{})[n])}</p>`).join('') +
+    Object.keys(R.confusion||{}).map(n=>`<p style="margin:6px 0"><b>${esc(n)}</b><br>자주 엇갈림(Claude→앱): ${Object.entries((R.confusion||{})[n]||{}).slice(0,8).map(([k,v])=>esc(k)+' '+v).join(' · ')}<br>노드 종류별: ${kv((R.by_kind||{})[n])}<br>주력/나머지: ${kv((R.by_main||{})[n])}</p>`).join('') +
     `<p style="margin:6px 0"><b>새 모델이 판정마다 크게 본 재료</b>(+는 그 판정 쪽, −는 반대 쪽)<br>${Object.entries(R.importance||{}).map(([l,ws])=>`${esc(l)}: ${ws.map(w=>`${esc(w[0])} ${w[1]>0?'+':''}${w[1]}`).join(', ')}`).join('<br>')}</p></div></details>`;
   if ((R.mismatch_sample||[]).length) h += `<details><summary>지금 규칙이 Claude와 다른 노드(앞 ${R.mismatch_sample.length}개)</summary><table style="font-size:13px"><tr><th class="l">회사</th><th class="l">노드</th><th>Claude</th><th>지금 규칙</th><th class="l">종류</th><th>정답 유효</th></tr>${R.mismatch_sample.map(m=>`<tr><td class="l"><a href="${companyUrl(m.code)}">${esc(m.code)}</a></td><td class="l">${esc(m.node)}</td><td>${esc(m.claude)}</td><td>${esc(m.rule)}</td><td class="l">${esc(m.kind||'')}${m.main?' (주력)':''}</td><td>${m.valid?'○':'낡았을 수 있음'}</td></tr>`).join('')}</table></details>`;
   $('#t-calibres').innerHTML = h;

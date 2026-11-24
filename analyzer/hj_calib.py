@@ -82,12 +82,34 @@ def features(f, comp):
     x["연결된 사업부 비중"] = (_f(sg[0]) / 100) if sg else 0.0
     x["사업부 비중 1년 변화"] = max(-1.0, min(1.0, sg[1] / 10)) if sg and sg[1] is not None else 0.0
     x["비중 변화 모름"] = 0.0 if sg and sg[1] is not None else 1.0
+    rs = f.get("rule_s")                  # 규칙 점수(이름 기준 종류로 다시 계산 — Claude 종류를 안 써서 답이 새지 않음)
+    x["규칙 점수"] = max(-3.0, min(3.0, rs)) if rs is not None else 0.0
+    x["규칙 점수 없음"] = 0.0 if rs is not None else 1.0
+    for t in (0.2, 0.4, 0.6, 0.8, 1.0, 1.5):   # 점수 구간(문턱 모양을 배울 수 있게)
+        x[f"규칙 점수 ≥ {t}"] = 1.0 if rs is not None and rs >= t else 0.0
+        x[f"규칙 점수 ≤ −{t}"] = 1.0 if rs is not None and rs <= -t else 0.0
+    st = f.get("structural")
+    for t in (0.5, 1.0):
+        x[f"세계 흐름 ≥ {t}"] = 1.0 if st is not None and st >= t else 0.0
+        x[f"세계 흐름 ≤ −{t}"] = 1.0 if st is not None and st <= -t else 0.0
+    for l in LABELS:
+        x[f"규칙={l}"] = 1.0 if f.get("rule_i") == l else 0.0
     q = comp.get("q_opm")
     x["(주력) 분기 누적 매출 성장"] = main * max(-1.0, min(1.0, _f(comp.get("q_growth")) / 100))
     x["(주력) 이익률 변화"] = main * max(-1.0, min(1.0, ((q[0] - q[1]) / 10) if q else 0.0))
     x["(주력) 다음 해 컨센 성장"] = main * max(-1.0, min(1.0, _f(comp.get("cons_growth")) / 100))
     x["(주력) 3개월 수정"] = main * max(-1.0, min(1.0, _f(comp.get("rev3")) / 20))
     return x
+
+
+_KC = {}
+
+
+def _K():
+    if "k" not in _KC:
+        from . import nodeview
+        _KC["k"] = nodeview.knowledge()
+    return _KC["k"]
 
 
 def build_rows(conn, P, progress=None):
@@ -108,6 +130,11 @@ def build_rows(conn, P, progress=None):
             continue
         trig = " ".join(n.get("triggers") or "" for n in cl["nodes"])
         fr = hanjang.claude_fresh(conn, code, cl["company"]["asof"], trig)
+        K = _K()
+        N = hanjang.company_numbers(conn, code, P)
+        disc, news = hanjang.evidence_pool(conn, code)
+        cname = (conn.execute("SELECT name FROM companies WHERE stock_code=?", (code,)).fetchone() or {"name": ""})["name"] or ""
+        yr = str(hanjang.now_year())
         link = seg_link(conn, code)
         segs = {n["node_id"]: link(n["name"]) for n in cl["nodes"]}
         share = lambda n: n.get("share_pct") if n.get("share_pct") is not None else (segs[n["node_id"]] or (None,))[0]
@@ -120,8 +147,16 @@ def build_rows(conn, P, progress=None):
                 continue
             f = dict(f, name=n["name"], kind_i=hanjang.guess_kind(n["name"]), main=n["node_id"] == main_id,
                      seg=segs[n["node_id"]], share_pct=share(n))
+            try:                                 # 규칙을 이름 기준 종류로 다시 계산(공정한 기준선 + 새 모델 재료)
+                kn_id, _ = hanjang._link_name(n["name"], K)
+                jr = hanjang.judge_node({"name": n["name"], "kind": f["kind_i"], "company": cname}, K["nodes"].get(kn_id) if kn_id else None,
+                                        K, N, disc, news, f["share_pct"], f["main"] and f["kind_i"] == "사업부")
+                cy = jr["years"].get(yr) or {}
+                f["rule_i"], f["rule_s"] = cy.get("judgment"), cy.get("score")
+            except Exception:      # noqa: BLE001
+                f["rule_i"], f["rule_s"] = None, None
             rows.append({"code": code, "x": features(f, F["company"]), "text": f.get("text") or n["name"], "y": lab,
-                         "rule": f.get("app_judgment"), "kind": f["kind_i"], "main": bool(f.get("main")),
+                         "rule": f.get("app_judgment"), "rule_i": f["rule_i"], "rule_s": f["rule_s"], "kind": f["kind_i"], "main": bool(f.get("main")),
                          "valid": fr["state"] != "old" and not f.get("trigger_hit"), "name": n["name"]})
     return rows
 
@@ -134,7 +169,7 @@ def _softmax(z):
     return [v / s for v in e]
 
 
-def fit(X, Y, names, l2=0.05, iters=400, lr=0.3):
+def fit(X, Y, names, l2=0.05, iters=400, lr=0.3, cw_pow=1.0):
     """X: [{재료: 값}], Y: [라벨]. 반환: 모델 dict(재료 평균·표준편차로 맞춘 뒤 배움)"""
     labs = [l for l in LABELS if l in set(Y)]
     mu = {k: sum(x.get(k, 0.0) for x in X) / len(X) for k in names}
@@ -142,7 +177,7 @@ def fit(X, Y, names, l2=0.05, iters=400, lr=0.3):
     Z = [[(x.get(k, 0.0) - mu[k]) / sd[k] for k in names] + [1.0] for x in X]
     W = [[0.0] * (len(names) + 1) for _ in labs]
     cnt = Counter(Y)
-    cw = {l: len(Y) / (len(labs) * cnt[l]) for l in labs}          # 드문 판정(씨앗·걸림)도 묻히지 않게 무게
+    cw = {l: (len(Y) / (len(labs) * cnt[l])) ** cw_pow for l in labs}   # 드문 판정(씨앗·걸림) 무게: 0 = 똑같이, 1 = 수만큼 보정
     yi = [labs.index(y) for y in Y]
     n = len(Z)
     for _ in range(iters):
@@ -189,21 +224,52 @@ def _folds(rows, k=5, seed=7):
     return [([r for r in rows if g[r["code"]] != f], [r for r in rows if g[r["code"]] == f]) for f in range(k)]
 
 
+GRID_HI = [round(0.1 * i, 1) for i in range(2, 13)]
+GRID_LO = [-v for v in GRID_HI]
+
+
+def thr_pred(r, hi, lo):
+    s = r.get("rule_s")
+    if s is None:
+        return r.get("rule_i")
+    return "우호" if s >= hi else "역풍" if s <= lo else "중립"
+
+
+def best_thr(train):
+    best = None
+    for hi in GRID_HI:
+        for lo in GRID_LO:
+            ok = sum(1 for r in train if thr_pred(r, hi, lo) == r["y"])
+            if best is None or ok > best[0]:
+                best = (ok, hi, lo)
+    return best[1], best[2]
+
+
 def evaluate(rows, k=5):
     """회사 단위 k묶음 검증. 반환: 판정 방법마다 일치율·혼동표·종류별 일치율·확신 상위 절반 일치율"""
     names = sorted({n for r in rows for n in r["x"]}) + [f"낱말 모델: {l}" for l in LABELS]
-    pred_model, pred_nb, conf = {}, {}, {}
+    pred_nb, pred_thr, thr_used = {}, {}, []
+    pw_list = (0.0, 0.5, 1.0)
+    pred_pw = {pw: {} for pw in pw_list}
+    conf_pw = {pw: {} for pw in pw_list}
     for train, test in _folds(rows, k):
         if not train or not test:
             continue
         Xtr, Xte, _ = _with_nb(train, test)
-        m = fit(Xtr, [r["y"] for r in train], names)
+        for pw in pw_list:
+            m = fit(Xtr, [r["y"] for r in train], names, cw_pow=pw)
+            for r, x in zip(test, Xte):
+                p = predict(m, x)
+                pred_pw[pw][id(r)] = max(p, key=p.get)
+                conf_pw[pw][id(r)] = max(p.values())
+        hi, lo = best_thr(train)                 # 문턱은 배우는 묶음으로만 정하고 맞히는 묶음에 적용
+        thr_used.append((hi, lo))
         for r, x in zip(test, Xte):
-            p = predict(m, x)
-            key = id(r)
-            pred_model[key] = max(p, key=p.get)
-            conf[key] = max(p.values())
-            pred_nb[key] = max(LABELS, key=lambda l: x[f"낱말 모델: {l}"])
+            pred_nb[id(r)] = max(LABELS, key=lambda l: x[f"낱말 모델: {l}"])
+            pred_thr[id(r)] = thr_pred(r, hi, lo)
+    acc = {pw: sum(1 for r in rows if pred_pw[pw].get(id(r)) == r["y"]) for pw in pw_list}
+    best_pw = max(pw_list, key=lambda pw: acc[pw])
+    pred_model, conf = pred_pw[best_pw], conf_pw[best_pw]
     major = Counter(r["y"] for r in rows).most_common(1)[0][0]
 
     def score(get, subset):
@@ -213,15 +279,19 @@ def evaluate(rows, k=5):
         close = sum(1 for r in sub if get(r) == r["y"] or (r["y"], get(r)) in near)
         return {"n": len(sub), "same": ok, "rate": ok / len(sub) if sub else None, "close_rate": close / len(sub) if sub else None}
 
-    methods = {"지금 규칙 판정": lambda r: r["rule"], "가장 흔한 판정만(" + major + ")": lambda r: major,
+    methods = {"지금 규칙 판정": lambda r: r["rule"], "규칙(이름 기준 종류 — 공정한 기준)": lambda r: r.get("rule_i"),
+               "규칙 + 문턱 맞춤": lambda r: pred_thr.get(id(r)), "가장 흔한 판정만(" + major + ")": lambda r: major,
                "낱말 모델만": lambda r: pred_nb.get(id(r)), "새 모델(배운 무게)": lambda r: pred_model.get(id(r))}
     valid = [r for r in rows if r["valid"]]
+    full_thr = best_thr(rows)
     out = {"n_rows": len(rows), "n_valid": len(valid), "n_companies": len({r["code"] for r in rows}), "folds": k,
+           "thresholds": {"우호 문턱": full_thr[0], "역풍 문턱": full_thr[1], "지금": [1.0, -1.0], "묶음별": thr_used},
+           "weight_power": {"고른 값": best_pw, "일치": {str(pw): acc[pw] for pw in pw_list}},
            "labels": dict(Counter(r["y"] for r in rows)), "methods": {}, "valid_methods": {}}
     for name, get in methods.items():
         out["methods"][name] = score(get, rows)
         out["valid_methods"][name] = score(get, valid)
-    for name, get in (("지금 규칙 판정", methods["지금 규칙 판정"]), ("새 모델(배운 무게)", methods["새 모델(배운 무게)"])):
+    for name, get in (("지금 규칙 판정", methods["지금 규칙 판정"]), ("규칙 + 문턱 맞춤", methods["규칙 + 문턱 맞춤"]), ("새 모델(배운 무게)", methods["새 모델(배운 무게)"])):
         cm = Counter((r["y"], get(r)) for r in rows if get(r) is not None)
         out.setdefault("confusion", {})[name] = {f"{a}→{b}": n for (a, b), n in cm.most_common(15) if a != b}
         out.setdefault("by_kind", {})[name] = {kd: score(get, [r for r in rows if r["kind"] == kd]) for kd in KINDS if any(r["kind"] == kd for r in rows)}
@@ -233,11 +303,11 @@ def evaluate(rows, k=5):
     return out
 
 
-def importance(rows):
+def importance(rows, cw_pow=1.0):
     """전체로 한 번 배워 판정마다 무게가 큰 재료(설명용)"""
     names = sorted({n for r in rows for n in r["x"]}) + [f"낱말 모델: {l}" for l in LABELS]
     X, _, _ = _with_nb(rows, [])
-    m = fit(X, [r["y"] for r in rows], names)
+    m = fit(X, [r["y"] for r in rows], names, cw_pow=cw_pow)
     out = {}
     for c, lab in enumerate(m["labels"]):
         w = sorted(zip(names, m["W"][c][:len(names)]), key=lambda t: -abs(t[1]))[:6]
@@ -251,7 +321,7 @@ def run(conn, P, progress=None):
         res = {"error": f"자료가 부족합니다(노드 {len(rows)}개, 회사 {len({r['code'] for r in rows})}곳 — 회사 10곳·노드 30개 이상 필요)"}
     else:
         res = evaluate(rows)
-        res["importance"] = importance(rows)
+        res["importance"] = importance(rows, res["weight_power"]["고른 값"])
         mism = [r for r in rows if r["rule"] and r["rule"] != r["y"]]
         res["mismatch_sample"] = [{"code": r["code"], "node": r["name"][:40], "claude": r["y"], "rule": r["rule"], "kind": r["kind"],
                                    "main": r["main"], "valid": r["valid"]} for r in mism[:60]]
