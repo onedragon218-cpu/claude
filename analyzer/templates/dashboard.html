@@ -646,6 +646,12 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div class="row" style="gap:8px;align-items:center;margin-top:6px"><button class="primary" id="t-save">조사 결과 넣기</button><input type="file" id="t-file" accept=".json,.zip,application/json,application/zip"><span class="muted" id="t-msg2"></span></div>
     <div id="t-missing" style="margin-top:10px"></div>
   </div>
+  <div class="card">
+    <h2 style="margin:0 0 6px">점검 — 앱 참고 판정을 Claude 판정에 맞추기 <span class="muted" style="font-size:14px;font-weight:400">(검증만 · 화면 판정은 바꾸지 않음)</span></h2>
+    <p class="muted" style="margin:0 0 8px;white-space:normal">Claude 판정을 정답으로 삼아, 앱이 스스로 모을 수 있는 재료(세계 흐름 점수·회사 숫자·노드 관련 공시/뉴스·낱말 모델 등)에 얼마나 무게를 줄지 배웁니다. 회사를 5묶음으로 나눠 4묶음으로 배우고 나머지 1묶음을 맞혀 보는 방식이라, 배운 회사를 다시 맞히는 착시가 없습니다. <b>지금 규칙 판정보다 좋아질 때만</b> 적용을 검토합니다. 1~3분 걸립니다.</p>
+    <div class="row" style="gap:8px;align-items:center"><button class="primary" id="t-calib">검증 실행</button><span class="muted" id="t-calibmsg"></span></div>
+    <div id="t-calibres" style="margin-top:10px"></div>
+  </div>
 </section>
 
 <section id="F">
@@ -2332,8 +2338,30 @@ function tRunHint(){
   $('#t-runhint').innerHTML = (meBehind ? `<span style="color:var(--accent)">● 이 회사: Claude 조사(${esc(C.company.updated_at||'')})가 앱 판정(${esc((A&&A.company.updated_at)||'없음')})보다 새것 → [이 회사] 버튼을 누르면 판단 자료 칸이 Claude 노드에 맞춰집니다(다음 자동 갱신 때도 맞춰짐).</span><br>` : '') +
     (behind.length ? `<span style="color:var(--accent)">● Claude 조사가 앱 판정보다 새것인 회사 ${behind.length}곳 → [전체] 버튼으로 한 번에 맞출 수 있습니다(인터넷 없이 몇 분).</span>` : (meBehind ? '' : '<span class="muted">앱 판정이 모두 최신입니다 — 지금은 누를 필요가 없습니다.</span>'));
 }
+function tCalib(){
+  const R = D.hj_calib;
+  if (!R){ $('#t-calibres').innerHTML = '<span class="muted">아직 검증하지 않았습니다.</span>'; return; }
+  if (R.error){ $('#t-calibres').innerHTML = `<div class="warnbox">${esc(R.error)}</div>`; return; }
+  const pc = x => x==null ? '–' : Math.round(x*100)+'%';
+  const row = (name, a, b) => `<tr><td class="l">${esc(name)}</td><td>${a.same}/${a.n} <b>${pc(a.rate)}</b></td><td>${pc(a.close_rate)}</td><td>${b?`${b.same}/${b.n} <b>${pc(b.rate)}</b>`:'–'}</td></tr>`;
+  const M = R.methods, V = R.valid_methods, rule = M['지금 규칙 판정'], nm = M['새 모델(배운 무게)'];
+  const better = nm.rate != null && rule.rate != null && nm.rate > rule.rate;
+  let h = `<div class="muted">검증 ${esc(R.at||'')} · Claude 판정 노드 ${R.n_rows}개(회사 ${R.n_companies}곳) · 그중 유효한 정답(조사 뒤 실적 공시·바꿀 것 낱말 적중 없음) ${R.n_valid}개 · 판정 분포 ${Object.entries(R.labels).map(([k,v])=>esc(k)+' '+v).join(', ')}</div>`;
+  h += `<div class="warnbox" style="border-left-color:var(--${better?'good':'warn'});background:var(--${better?'good':'warn'}-bg)"><b>${better?'새 모델이 지금 규칙보다 Claude에 더 가깝습니다':'새 모델이 지금 규칙보다 낫지 않습니다'}</b> — 지금 규칙 ${pc(rule.rate)} → 새 모델 ${pc(nm.rate)}${R.confident?` · 새 모델이 확신하는 상위 절반만 보면 ${pc((R.confident['확신 상위 50%']||{}).rate)}, 상위 25%는 ${pc((R.confident['확신 상위 25%']||{}).rate)}`:''}</div>`;
+  h += `<table style="margin-top:6px"><tr><th class="l">판정 방법</th><th>Claude와 같음(전체)</th><th>한 칸 차이까지</th><th>유효한 정답만</th></tr>` + Object.keys(M).map(k=>row(k, M[k], V[k])).join('') + '</table>';
+  const kv = o => Object.entries(o||{}).map(([k,v])=>`${esc(k)} ${v.n?`${pc(v.rate)} (${v.n})`:'–'}`).join(' · ');
+  h += `<details style="margin-top:6px"><summary>어디서 엇갈리나(진단)</summary><div style="white-space:normal;font-size:13px">` +
+    ['지금 규칙 판정','새 모델(배운 무게)'].map(n=>`<p style="margin:6px 0"><b>${esc(n)}</b><br>자주 엇갈림(Claude→앱): ${Object.entries((R.confusion||{})[n]||{}).slice(0,8).map(([k,v])=>esc(k)+' '+v).join(' · ')}<br>노드 종류별: ${kv((R.by_kind||{})[n])}<br>주력/나머지: ${kv((R.by_main||{})[n])}</p>`).join('') +
+    `<p style="margin:6px 0"><b>새 모델이 판정마다 크게 본 재료</b>(+는 그 판정 쪽, −는 반대 쪽)<br>${Object.entries(R.importance||{}).map(([l,ws])=>`${esc(l)}: ${ws.map(w=>`${esc(w[0])} ${w[1]>0?'+':''}${w[1]}`).join(', ')}`).join('<br>')}</p></div></details>`;
+  if ((R.mismatch_sample||[]).length) h += `<details><summary>지금 규칙이 Claude와 다른 노드(앞 ${R.mismatch_sample.length}개)</summary><table style="font-size:13px"><tr><th class="l">회사</th><th class="l">노드</th><th>Claude</th><th>지금 규칙</th><th class="l">종류</th><th>정답 유효</th></tr>${R.mismatch_sample.map(m=>`<tr><td class="l"><a href="${companyUrl(m.code)}">${esc(m.code)}</a></td><td class="l">${esc(m.node)}</td><td>${esc(m.claude)}</td><td>${esc(m.rule)}</td><td class="l">${esc(m.kind||'')}${m.main?' (주력)':''}</td><td>${m.valid?'○':'낡았을 수 있음'}</td></tr>`).join('')}</table></details>`;
+  $('#t-calibres').innerHTML = h;
+}
+$('#t-calib').onclick = async () => { if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#t-calib').disabled = true; $('#t-calibmsg').textContent = '재료를 모으고 배우는 중…(1~3분)';
+  try { const j = await tPost(`/api/hj/calib?base_year=${BY}`, '{}', 'application/json'); D.hj_calib = j; tCalib(); $('#t-calibmsg').textContent = j.error ? '' : '끝났습니다.'; }
+  catch(e){ $('#t-calibmsg').textContent = '실패: ' + e.message; } $('#t-calib').disabled = false; };
 function tAgree(){
-  tRunHint();
+  tRunHint(); tCalib();
   const a = HJ.agree_company||{}, g = HJ.agree_all||{}, pc = x => x==null ? '–' : Math.round(x*100)+'%';
   $('#t-agree').innerHTML = `<b>Claude 판정과 앱 참고 판정 일치율</b>(현재 판정, 같은 노드끼리): 이 회사 ${a.nodes?`${a.same}/${a.nodes} (${pc(a.rate)})`:'–'} · 전체 ${g.nodes?`${g.same}/${g.nodes} (${pc(g.rate)}) · 한 칸 차이(우호↔중립·역풍↔중립)까지 ${pc(g.close_rate)} · 회사 ${g.companies}곳`:'–'} · Claude 조사 ${HJ.n_claude}곳 · 앱 판정 ${HJ.n_app}곳`;
   const M = HJ.claude_not_in_db||[];
@@ -2555,7 +2583,7 @@ if (SERVED && location.protocol === 'https:'){   // 태블릿 등 다른 기기�
     $('#opendatamsg').innerHTML = ` · 다른 기기에서 접속 중${w.readonly?'(보기 전용)':''} · <a href="/logout">로그아웃</a>`;
     if (!w.readonly) return;
     // 보기 전용: 수집·갱신·저장 버튼을 막는다(서버도 같은 요청을 거부함)
-    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync','#t-reqnew','#t-reqpick','#t-req1','#b-refall','#uprall'].forEach(id=>{ const b = document.querySelector(id);
+    ['#run','#uall','#uupsel','#cdel','#uaddsel','#uaddall','#ustop','#sstart','#sadd','#l-kwsave','#m-save','#r-revsave','#t-run','#t-runall','#t-save','#t-fsave','#t-fsync','#t-reqnew','#t-reqpick','#t-req1','#b-refall','#uprall','#t-calib'].forEach(id=>{ const b = document.querySelector(id);
       if (b){ b.disabled = true; b.title = '태블릿 접속은 보기 전용입니다(PC에서 하세요)'; } });
     UJOB_RUNNING = true;
     const bar = document.createElement('div'); bar.className = 'warnbox'; bar.style.margin = '8px auto'; bar.style.maxWidth = '1200px';

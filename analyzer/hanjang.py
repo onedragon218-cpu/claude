@@ -1026,7 +1026,7 @@ def _pct(v):
     return None if v is None else round(v * 100, 1)
 
 
-def node_facts(conn, code, P, base, app, asof=None):
+def node_facts(conn, code, P, base, app, asof=None, with_text=False):
     """노드마다 판단 자료: 매출 비중·회사 숫자(주력만)·세계 흐름 점수·6개월 공시/뉴스 좋음·나쁨·바꿀 것 낱말 적중·앱 참고 판정.
     반환: {"company": 회사 숫자, "nodes": {node_id: {...}}, "since_asof": 조사 뒤 새 숫자 한 줄}"""
     from . import nodeview
@@ -1081,6 +1081,9 @@ def node_facts(conn, code, P, base, app, asof=None):
             "disc_pos": cnt(nd, "+"), "disc_neg": cnt(nd, "-"), "news_pos": cnt(nn, "+"), "news_neg": cnt(nn, "-"),
             "n_disc": len(nd), "n_news": len(nn), "trigger_hit": trig, "app_judgment": aj,
             "titles": [{k: e.get(k) for k in ("date", "title", "dir", "ref", "type")} for e in sorted(nd + nn, key=lambda e: e["date"] or "", reverse=True)[:8]]}
+        if with_text:          # 학습·검증용(hj_calib): 앱이 모은 글 — 노드 이름 + 관련 공시 10개 + 뉴스 30개 제목
+            out[n["node_id"]]["text"] = " ".join([n["name"]] + [e["title"] for e in nd[:10]] + [e["title"] for e in nn[:30]])
+            out[n["node_id"]]["kind"] = kind
     line = None
     if asof_d and N["q"] and N["q_growth"] is not None:
         r = conn.execute("SELECT report_nm, rcept_dt FROM disclosures WHERE stock_code=? AND rcept_dt>? AND reprt_code IN ('11011','11012','11013','11014') "

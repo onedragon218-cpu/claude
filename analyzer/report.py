@@ -134,6 +134,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "app_version": __import__("analyzer").__version__,
         "data_dir": config.DATA_DIR,
         "hanjang": TM.run("T탭(이 회사)", lambda: _safe(lambda: __import__("analyzer.hanjang", fromlist=["payload"]).payload(conn, code, P, hj_glob))),
+        "hj_calib": _safe(lambda: __import__("analyzer.hj_calib", fromlist=["load"]).load()),
         "kiwoom": TM.run("키움", lambda: _safe(lambda: __import__("analyzer.kiwoom_store", fromlist=["summary"]).summary(conn, code))),
         "nodecat": G("S탭 노드 사전(전체)", lambda: _safe(lambda: __import__("analyzer.nodeview", fromlist=["catalog"]).catalog(conn))),
         "nodes": TM.run("R탭 사업부 우호", lambda: _safe(lambda: __import__("analyzer.nodeview", fromlist=["payload"]).payload(conn, code, P))),

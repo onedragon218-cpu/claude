@@ -1246,6 +1246,26 @@ class T(unittest.TestCase):
         with self.assertRaises(fnguide.ConsensusUnavailable):
             fnguide.parse(page.replace('"EP_CHK":"E"', '"EP_CHK":" "'))
 
+    def test_calib_learns_and_validates_by_company(self):
+        import random
+        from analyzer import hj_calib as H
+        rnd = random.Random(1)
+        rows = []
+        for c in range(60):
+            for k in range(3):
+                s = rnd.uniform(-2, 2)
+                y = "우호" if s > 0.7 else "역풍" if s < -0.7 else "중립"
+                f = {"main": k == 0, "share_pct": 40, "structural": s, "disc_pos": 0, "disc_neg": 0, "news_pos": 1, "news_neg": 1,
+                     "n_news": 5, "trigger_hit": None, "kind_i": "사업부", "name": "노드"}
+                rows.append({"code": f"{c:06d}", "x": H.features(f, {}), "text": "노드 소식", "y": y, "rule": "중립",
+                             "kind": "사업부", "main": k == 0, "valid": True, "name": "노드"})
+        r = H.evaluate(rows)
+        self.assertGreater(r["methods"]["새 모델(배운 무게)"]["rate"], 0.8)          # 세계 흐름 점수로 판정이 갈리는 규칙을 배움
+        self.assertLess(r["methods"]["지금 규칙 판정"]["rate"], 0.6)
+        for tr, te in H._folds(rows):                                                  # 같은 회사가 배우기·맞히기에 함께 들어가지 않음
+            self.assertFalse({x["code"] for x in tr} & {x["code"] for x in te})
+        self.assertIn("우호", H.importance(rows))
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

@@ -337,6 +337,21 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:     # noqa: BLE001
                 return self._send(200, json.dumps({"error": f"{type(e).__name__}: {e}"[:200]}, ensure_ascii=False), "application/json")
             return self._send(200, json.dumps({"ok": True, "result": res}, ensure_ascii=False), "application/json")
+        if u.path == "/api/hj/calib":
+            # 화면 T 점검: 앱 참고 판정을 Claude 판정에 맞추기 — 진단·배우기·검증(검증만, 화면 판정은 바꾸지 않음)
+            from . import hj_calib, lan
+            if not lan.is_local(self.client_address[0]):
+                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
+            self._drain()
+            conn = db.connect()
+            try:
+                P = config.periods(int(q["base_year"][0]) if q.get("base_year") else None)
+                res = hj_calib.run(conn, P)
+            except Exception as e:     # noqa: BLE001
+                return self._send(200, json.dumps({"error": f"{type(e).__name__}: {e}"[:300]}, ensure_ascii=False), "application/json")
+            finally:
+                conn.close()
+            return self._send(200, json.dumps(res, ensure_ascii=False), "application/json")
         if u.path == "/api/hj/request_save":
             # 화면 T: Claude 요청 파일을 한장조사 폴더/_앱요청/에 새 파일로 저장(PC에서만, 70곳씩)
             from . import hanjang, lan
