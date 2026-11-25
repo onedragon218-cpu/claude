@@ -9,7 +9,7 @@ from .collectors import kiwoom
 
 
 def ensure(conn):
-    conn.executescript("""
+    db.ensure_tables(conn, """
     CREATE TABLE IF NOT EXISTS kiwoom_info (stock_code TEXT PRIMARY KEY, data TEXT, as_of TEXT, collected_at TEXT);
     CREATE TABLE IF NOT EXISTS kiwoom_flows (
       stock_code TEXT NOT NULL, dt TEXT NOT NULL, price REAL, foreign_net REAL, inst_net REAL, indiv_net REAL, collected_at TEXT,

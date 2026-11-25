@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 data/logs/
 data/cache/
+data/analyzer.db-wal
+data/analyzer.db-shm

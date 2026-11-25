@@ -1,6 +1,7 @@
 """SQLite 저장소. 값은 덮어쓰지 않고 버전으로 쌓는다."""
 import datetime as dt
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -95,12 +96,40 @@ def today():
     return dt.date.today().isoformat()
 
 
-def connect(path=None):
+_SCHEMA_OK = {}
+
+
+def ensure_tables(conn, script):
+    """'없으면 만들기' 묶음을 실제로 없는 표·색인이 있을 때만 실행(2026-11-25).
+    SQLite는 이미 있는 표라도 CREATE … IF NOT EXISTS를 실행하면 쓰기 잠금을 잡아, 수집이 쓰는 중이면 화면이 'database is locked'로 멈췄음."""
+    names = re.findall(r"CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)", script, re.I)
+    try:
+        path = next((r[2] for r in conn.execute("PRAGMA database_list") if r[1] == "main"), "")
+    except sqlite3.Error:
+        path = ""
+    key = (path, hash(script))
+    if _SCHEMA_OK.get(key):
+        return
+    have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','index')")}
+    if not all(n in have for n in names):
+        conn.executescript(script)
+    if path and path != ":memory:":
+        _SCHEMA_OK[key] = True
+
+
+def connect(path=None, timeout=30):
+    """timeout: 다른 프로그램(백그라운드 수집 등)이 쓰는 중이면 기다리는 최대 초(화면은 짧게).
+    2026-11-25: WAL 방식 — 수집이 쓰는 동안에도 화면이 읽을 수 있게(예전 방식은 화면이 쓰려다 5초 뒤 'database is locked'로 빈 화면)."""
     path = path or config.DB_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=timeout)
     conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
+    try:
+        if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+            conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:      # 다른 쪽이 쓰는 중이면 다음 연결 때 바꿈
+        pass
+    ensure_tables(conn, SCHEMA)
     cols = [r[1] for r in conn.execute("PRAGMA table_info(companies)")]
     if "induty_code" not in cols:   # 업종코드(한국표준산업분류) 칸 추가
         conn.execute("ALTER TABLE companies ADD COLUMN induty_code TEXT")

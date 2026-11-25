@@ -91,7 +91,7 @@ def release():
 
 # ---------------------------------------------------------------- 오늘 받은 곳
 def ensure(conn):
-    conn.execute("CREATE TABLE IF NOT EXISTS collect_done (stock_code TEXT PRIMARY KEY, day TEXT, at TEXT, by TEXT)")
+    db.ensure_tables(conn, "CREATE TABLE IF NOT EXISTS collect_done (stock_code TEXT PRIMARY KEY, day TEXT, at TEXT, by TEXT)")
 
 
 def mark_done(conn, code, by):

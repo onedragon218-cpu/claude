@@ -56,7 +56,7 @@ def knowledge():
 
 # ---------------------------------------------------------------- DB(연결·판정 기록)
 def ensure(conn):
-    conn.executescript("""
+    db.ensure_tables(conn, """
     CREATE TABLE IF NOT EXISTS node_links (
       stock_code TEXT NOT NULL, segment TEXT NOT NULL, node_id TEXT NOT NULL, source TEXT NOT NULL, updated_at TEXT,
       UNIQUE(stock_code, segment));

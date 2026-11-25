@@ -1,4 +1,5 @@
 """표준 라이브러리만 쓰는 로컬 웹 서버.  python -m analyzer serve  →  http://localhost:8765"""
+import html
 import json
 import os
 import urllib.parse
@@ -193,7 +194,22 @@ class H(BaseHTTPRequestHandler):
             return
         q = urllib.parse.parse_qs(u.query)
         by = int(q["base_year"][0]) if q.get("base_year") else None
-        conn = db.connect()
+        try:
+            return self._get(u, q, by)
+        except Exception as e:     # noqa: BLE001  어떤 오류든 빈 화면 대신 이유를 보여 줌
+            import traceback
+            busy = "locked" in str(e) or "busy" in str(e)
+            msg = ("자료를 받는 중이라 DB가 잠시 바쁩니다. 5초 뒤 저절로 다시 엽니다." if busy else f"화면을 만들다 오류가 났습니다: {type(e).__name__}: {e}")
+            if u.path.startswith("/api/"):
+                return self._send(503 if busy else 500, json.dumps({"error": msg}, ensure_ascii=False), "application/json")
+            body = (f"<!doctype html><meta charset='utf-8'>{'<meta http-equiv=refresh content=5>' if busy else ''}"
+                    f"<div style='font-family:sans-serif;max-width:760px;margin:40px auto;line-height:1.6'><h2>{html.escape(msg)}</h2>"
+                    + ("" if busy else f"<p>아래 내용을 그대로 복사해 알려 주세요.</p><pre style='white-space:pre-wrap;background:#f4f4f2;padding:12px'>{html.escape(traceback.format_exc()[-2500:])}</pre>")
+                    + "</div>")
+            return self._send(503 if busy else 500, body)
+
+    def _get(self, u, q, by):
+        conn = db.connect(timeout=1)          # 화면은 오래 기다리지 않음(쓰기는 건너뛰고, 그래도 안 되면 위에서 안내)
         try:
             if u.path == "/api/whoami":
                 from . import lan

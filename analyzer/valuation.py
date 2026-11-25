@@ -321,7 +321,7 @@ STOCK_KEYS = ["acc_debt", "acc_cash", "acc_eq", "acc_eq_owner", "acc_assets"]
 
 
 def run(conn, code, P):
-    conn.execute(SCHEMA)
+    db.ensure_tables(conn, SCHEMA)
     A = load_assumptions()
     bk = Book(conn, code)
     rows, checks = [], []
@@ -514,19 +514,24 @@ def run(conn, code, P):
             checks.append({"check_no": 12, "check": "ROIC 범위", "year": r["year"], "metric": "roic",
                            "level": "WARN", "message": f"ROIC {r['roic']:.1%}가 일반 범위를 벗어남"})
     run_at = db.now()
-    conn.execute("DELETE FROM validation WHERE stock_code=? AND check_no IN (11, 12)", (code,))
-    for c in checks:
-        conn.execute("INSERT INTO validation (stock_code,run_at,check_no,check_name,fiscal_year,metric,level,message) "
-                     "VALUES (?,?,?,?,?,?,?,?)", (code, run_at, c["check_no"], c["check"], c["year"], c["metric"],
-                                                  c["level"], c["message"]))
-    conn.execute("INSERT OR REPLACE INTO valuations VALUES (?,?,?,?,?)",
-                 (code, P["base_year"], run_at, json.dumps(A, ensure_ascii=False), json.dumps(rows, ensure_ascii=False)))
-    conn.commit()
+    try:
+        conn.execute("DELETE FROM validation WHERE stock_code=? AND check_no IN (11, 12)", (code,))
+        for c in checks:
+            conn.execute("INSERT INTO validation (stock_code,run_at,check_no,check_name,fiscal_year,metric,level,message) "
+                         "VALUES (?,?,?,?,?,?,?,?)", (code, run_at, c["check_no"], c["check"], c["year"], c["metric"],
+                                                      c["level"], c["message"]))
+        conn.execute("INSERT OR REPLACE INTO valuations VALUES (?,?,?,?,?)",
+                     (code, P["base_year"], run_at, json.dumps(A, ensure_ascii=False), json.dumps(rows, ensure_ascii=False)))
+        conn.commit()
+    except Exception as e:     # noqa: BLE001  DB가 다른 수집으로 바쁘면 저장만 건너뜀(계산 결과는 그대로 돌려줌 — 화면은 뜸)
+        if "locked" not in str(e) and "busy" not in str(e):
+            raise
+        conn.rollback()
     return {"rows": rows, "assumptions": A, "checks": checks}
 
 
 def latest(conn, code, base_year):
-    conn.execute(SCHEMA)
+    db.ensure_tables(conn, SCHEMA)
     r = conn.execute("SELECT * FROM valuations WHERE stock_code=? AND base_year=?", (code, base_year)).fetchone()
     if r is None:
         return None

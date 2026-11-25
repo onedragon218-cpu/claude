@@ -1276,6 +1276,27 @@ class T(unittest.TestCase):
         self.assertEqual(max(p, key=p.get), "우호")
         self.assertLess(p["씨앗"], 0.2)
 
+    def test_page_opens_while_db_busy(self):
+        import sqlite3
+        from analyzer import report
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.db")
+            c = db.connect(path)
+            pipeline.import_seed(c, "086900", 2026)
+            report.payload(c, "086900", 2026)                          # 표·색인 모두 만들어 둠
+            c.close()
+            busy = sqlite3.connect(path, timeout=30)
+            busy.execute("BEGIN IMMEDIATE")                             # 다른 프로그램(백그라운드 수집)이 쓰는 중
+            busy.execute("INSERT INTO fetch_log(source,key,stock_code,fetched_at,ok,n_items) VALUES ('x','x','x','2026',1,1)")
+            try:
+                c2 = db.connect(path, timeout=0.5)
+                d2 = report.payload(c2, "086900", 2026)                # 예전: database is locked → 빈 화면
+                self.assertEqual(d2["company"]["code"], "086900")
+                self.assertEqual(c2.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
+                c2.close()
+            finally:
+                busy.rollback(); busy.close()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

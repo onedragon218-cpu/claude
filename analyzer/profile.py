@@ -21,7 +21,7 @@ DOC_API = "https://opendart.fss.or.kr/api/document.xml"
 
 
 def ensure(conn):
-    conn.executescript("""
+    db.ensure_tables(conn, """
     CREATE TABLE IF NOT EXISTS company_profile (
       stock_code TEXT PRIMARY KEY, wr_lines TEXT, wics TEXT, wr_url TEXT, wr_at TEXT,
       dart_rcept_no TEXT, dart_year INTEGER, dart_overview TEXT, dart_products TEXT, dart_note TEXT, dart_at TEXT);

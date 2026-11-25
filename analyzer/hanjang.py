@@ -65,7 +65,7 @@ def map_judgment(raw):
 
 # ---------------------------------------------------------------- 저장(설계도 7-1)
 def ensure(conn):
-    conn.executescript("""
+    db.ensure_tables(conn, """
     CREATE TABLE IF NOT EXISTS hj_company (
       code TEXT NOT NULL, origin TEXT NOT NULL, name TEXT, asof TEXT, version INTEGER DEFAULT 1, status TEXT, memo TEXT, updated_at TEXT,
       PRIMARY KEY(code, origin));
