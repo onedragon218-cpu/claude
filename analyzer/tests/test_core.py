@@ -453,11 +453,17 @@ class T(unittest.TestCase):
         from analyzer import goodco
         pipeline.import_seed(self.conn, "213500", 2026)
         g = goodco.good6(self.conn, "213500", config.periods(2026))
-        self.assertEqual(set(g["rows"]), {"one", "two", "three", "four", "five", "six"})
-        for r in g["rows"].values():
+        self.assertEqual(set(g["rows"]), {"one", "two", "three", "roa", "rel", "four", "five", "six"})   # 7조건 + 참고 줄
+        self.assertEqual(g["n_conditions"], 7)
+        for k, r in g["rows"].items():
             m = r["mark"]
+            if k == "rel":                                          # 참고 줄은 판정 기호가 아님(점수에 안 들어감)
+                self.assertFalse(m.startswith("✓"), m)
+                continue
             self.assertTrue(m in ("✓", "△", "✗", "조사") or m.startswith("판정 못 함") or m == "✓(컨센 기준)", m)
-        self.assertEqual(g["rows"]["five"]["mark"], "조사")        # ⑤는 코드가 채우지 않음
+        self.assertEqual(g["rows"]["five"]["mark"], "조사")        # ⑥(내부 five)은 코드가 채우지 않음
+        self.assertIn("레버리지", g["rows"]["rel"]["text"])
+        self.assertEqual(g["score"], sum(1 for k in goodco.SCORED if g["rows"][k]["mark"].startswith("✓")))
 
     def test_good6_rule_three(self):
         from analyzer import goodco

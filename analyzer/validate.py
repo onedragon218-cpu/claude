@@ -160,6 +160,17 @@ def run(conn, code, P):
         if d and d > TOL:
             add(10, "출처 간 불일치", r["fiscal_year"], r["metric"], "WARN",
                 f"보고서·출처별 값 {r['mn']:,.0f} ~ {r['mx']:,.0f} (차이 {d:.1%}, 후속 보고서 재작성 가능)")
+    # 13 ROE·ROA를 FnGuide Financial Highlight 실적 값과 맞춰 보기(같은 정의 — 평균 자산·평균 지배자본). 2026-11-25
+    for r in conn.execute("SELECT fiscal_year, metric, value FROM observations WHERE stock_code=? AND source='FnGuide' "
+                          "AND metric IN ('roa_fnguide','roe_fg_fnguide') AND period='FY'", (code,)):
+        m = "roa" if r["metric"] == "roa_fnguide" else "roe"
+        mine = v(r["fiscal_year"], m)
+        if mine is None or r["value"] is None:
+            continue
+        gap = abs(mine - r["value"])
+        if gap > 0.3:            # 검사 표에는 문제만 남김(맞으면 기록 없음)
+            add(13, "ROE·ROA FnGuide 대조", r["fiscal_year"], m, "WARN",
+                f"{config.METRIC_NAME[m]} 앱 계산 {mine:.2f}% · FnGuide {r['value']:.2f}% (차이 {gap:.2f}%p — 연결/별도·자본 정의 차이 확인)")
     conn.commit()
     summary = {}
     for o in out:

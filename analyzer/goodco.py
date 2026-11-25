@@ -1,7 +1,7 @@
-"""화면 M「좋은 기업 6조건」· 화면 N「숫자 모양」 (지시서 2026-11-07, 원본: DOCA OS p236·p244·한장그림)
+"""화면 M「좋은 기업 7조건」(2026-11-25 ④ ROA 추가, 처음 6조건)· 화면 N「숫자 모양」 (지시서 2026-11-07, 원본: DOCA OS p236·p244·한장그림)
 
-- 판정 기호는 ✓ · △ · ✗ · 조사 · 판정 못 함(이유) 다섯 가지만 쓴다(⑥은 '✓(컨센 기준)'도 ✓로 센다).
-- 컨센서스는 DB의 원래 값(raw)을 쓰고, 이 앱의 보정계수는 쓰지 않는다. 엔진 규칙대로 ⑥·숫자 모양만 고정 ×0.83.
+- 판정 기호는 ✓ · △ · ✗ · 조사 · 판정 못 함(이유) 다섯 가지만 쓴다(⑦ 주가는 '✓(컨센 기준)'도 ✓로 센다 — 2026-11-25 번호 변경 전 ⑥).
+- 컨센서스는 DB의 원래 값(raw)을 쓰고, 이 앱의 보정계수는 쓰지 않는다. 엔진 규칙대로 ⑦(예전 ⑥)·숫자 모양만 고정 ×0.83.
 - 빈 연도·빈 분기는 만들어 넣지 않는다. 판정하지 못한 칸은 이유를 적는다.
 - 리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님
 """
@@ -19,14 +19,17 @@ REQ_DIV = 7.8                 # 예전 기본값: 10배 × (1 − 22%). 지금�
 MARKS = ("✓", "△", "✗", "조사")
 PRINCIPLE = "좋은 기업이어도 주가가 많이 오르면 '투자하기 좋은 기업'이 아니다."
 DISCLAIMER = "리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님"
-NAMES = {
+NAMES = {      # 2026-11-25: ④ ROA 추가(뒤 번호 밀기) → 7조건. 내부 이름(one…six)은 그대로라 사람이 적은 칸(five)이 이어짐
     "one": "① 매출이 과거 정점을 넘음(올해 못 넘어도 컨센상 2년 안에 넘고 방향 유지)",
     "two": "② 영업이익률이 과거 정점을 넘거나 최근 3년보다 우상향",
     "three": "③ ROE가 과거 정점을 넘거나 최근 3년보다 우상향",
-    "four": "④ 부채비율이 통제 가능 범위 안이거나 최근 3년보다 줄어듦",
-    "five": "⑤ 그 위에서 산업이 우호로 바뀌는 중이라 큰 폭 성장이 예상됨",
-    "six": "⑥ 주가가 아직 크게 반영되지 않음",
+    "roa": "④ ROA가 과거 정점을 넘거나 최근 3년보다 우상향",
+    "rel": "참고: ROE와 ROA의 관계 — 오른 ROE가 실력인가 빚(레버리지)인가(점수에 넣지 않음)",
+    "four": "⑤ 부채비율이 통제 가능 범위 안이거나 최근 3년보다 줄어듦",
+    "five": "⑥ 그 위에서 산업이 우호로 바뀌는 중이라 큰 폭 성장이 예상됨",
+    "six": "⑦ 주가가 아직 크게 반영되지 않음",
 }
+SCORED = ("one", "two", "three", "roa", "four", "five", "six")
 
 
 def manual_file():
@@ -168,7 +171,7 @@ def rule_three(r3, roe_est, rpk):
 
 
 def rule_six(mc, nd, op27, op28, n27, last_op=None, last=None, tax=0.22, f27=ENGINE_FACTOR, f28=ENGINE_FACTOR):
-    """⑥ 반환: (판정, 숫자 칸). 요구 영업이익 = (시총 + 순차입금) ÷ (10 × (1 − 세율)), 컨센 영업이익은 공통 보정 계수"""
+    """⑦(내부 six) 반환: (판정, 숫자 칸). 요구 영업이익 = (시총 + 순차입금) ÷ (10 × (1 − 세율)), 컨센 영업이익은 공통 보정 계수"""
     if n27 is not None and n27 <= 1:
         return "판정 못 함(원천 대기)", f"{_e(last + 2) if last else '27E'} 컨센 원천 {n27}곳 — 원천이 더 생기면 판정"
     if mc is None:
@@ -198,6 +201,7 @@ def good6(conn, code, P):
         why = "매출 칸이 없거나 실적 연도가 3년 미만이라 계산하지 않음(금융사 등)"
         for k in NAMES:
             out["rows"][k] = {"mark": "— 판정 안 함", "text": why}
+        out["n_conditions"] = len(SCORED)
         out["score"] = 0
         return out
     cy = D.cy
@@ -246,30 +250,56 @@ def good6(conn, code, P):
     else:
         out["rows"]["two"] = {"mark": "판정 못 함(영업이익 자료 부족)", "text": "최근 3년 영업이익이 다 있지 않음"}
 
-    # ③
-    roe = {y: D.v(y, "roe") for y in ys if D.v(y, "roe") is not None}
-    if all(y in roe for y in l3):
-        rpy = max(roe, key=roe.get)
-        rpk = roe[rpy]
-        r3 = [roe[y] for y in l3]
-        eq = D.eok(last, "acc_eq")
-        roe_est = {}
-        if eq:
-            for y in est_y:
-                ni = D.c(y, "net_income")
-                if ni is None:
-                    break
-                roe_est[y] = ni / (eq + ni / 2) * 100
-                eq += ni * 0.75
-        mark = rule_three(r3, list(roe_est.values()), rpk)
-        t = f"과거 정점 {rpk:.1f}%({rpy}) · 최근 3년 " + " → ".join(f"{v:.1f}" for v in r3) + "%"
-        t += (" · 컨센 추정(해석) " + " → ".join(f"{_e(y)} {v:.1f}" for y, v in roe_est.items()) + "%") if roe_est \
-            else " · 컨센 추정(해석) 없음(순이익 컨센 없음)"
-        out["rows"]["three"] = {"mark": mark, "text": t}
+    # ③ ROE · ④ ROA — 같은 규칙(과거 정점을 넘거나 최근 3년 우상향). 전망은 둘 다 FnGuide Financial Highlight 추정치(같은 출처)
+    def ratio_rule(key, cons_key, label):
+        hist = {y: D.v(y, key) for y in ys if D.v(y, key) is not None}
+        if not all(y in hist for y in l3):
+            return {"mark": f"판정 못 함({label} 자료 부족)", "text": f"최근 3년 {label}가 다 있지 않음"}, None
+        py = max(hist, key=hist.get)
+        r3 = [hist[y] for y in l3]
+        est = {y: D.c(y, cons_key) for y in est_y if D.c(y, cons_key) is not None}
+        src = "FnGuide 추정"
+        if not est and key == "roe":                  # FnGuide 추정이 없으면 예전 방식(순이익 컨센으로 추산)
+            eq = D.eok(last, "acc_eq")
+            if eq:
+                for y in est_y:
+                    ni = D.c(y, "net_income")
+                    if ni is None:
+                        break
+                    est[y] = ni / (eq + ni / 2) * 100
+                    eq += ni * 0.75
+            src = "컨센 추정(해석 — FnGuide 추정 없음)"
+        mark = rule_three(r3, list(est.values()), hist[py])
+        t = f"과거 정점 {hist[py]:.1f}%({py}) · 최근 3년 " + " → ".join(f"{v:.1f}" for v in r3) + "%"
+        t += (f" · {src} " + " → ".join(f"{_e(y)} {v:.1f}" for y, v in est.items()) + "%") if est else f" · 추정 없음"
+        return {"mark": mark, "text": t}, r3
+    out["rows"]["three"], roe3 = ratio_rule("roe", "roe_fg", "ROE")
+    out["rows"]["roa"], roa3 = ratio_rule("roa", "roa", "ROA")
+    # 참고: ROE와 ROA의 관계(점수 아님) — 레버리지 = 평균 자산 ÷ 평균 지배자본(ROE÷ROA는 지배/전체 기준이 섞여 직접 계산)
+    lev = []
+    for y in l3:
+        a, pa, e, pe = D.eok(y, "acc_assets"), D.eok(y - 1, "acc_assets"), D.eok(y, "acc_eq_owner"), D.eok(y - 1, "acc_eq_owner")
+        lev.append((a + pa) / (e + pe) if a and pa and e and pe and (e + pe) > 0 else (a / e if a and e and e > 0 else None))
+    up = lambda m: m.startswith("✓") or m.startswith("△")
+    m3, m4 = out["rows"]["three"]["mark"], out["rows"]["roa"]["mark"]
+    if m3.startswith("판정 못 함") or m4.startswith("판정 못 함"):
+        rel = "판정 못 함"
+    elif up(m3) and up(m4):
+        rel = "실력 개선(ROE·ROA 함께 오름)"
+    elif up(m3):
+        rel = "부채 효과 주의(ROE만 오름 — 빚으로 키운 ROE)"
+    elif up(m4):
+        rel = "빚 줄이며 체력 개선(ROA는 오르고 ROE는 아님)"
     else:
-        out["rows"]["three"] = {"mark": "판정 못 함(ROE 자료 부족)", "text": "최근 3년 ROE가 다 있지 않음"}
+        rel = "악화(ROE·ROA 함께 약함)"
+    lt = "레버리지(평균 자산 ÷ 평균 지배자본) " + " → ".join("–" if v is None else f"{v:.2f}" for v in lev) + "배"
+    if None not in lev:
+        lt += " (늘어남)" if lev[-1] > lev[0] * 1.05 else " (줄어듦)" if lev[-1] < lev[0] * 0.95 else " (비슷함)"
+    if roe3 and roa3:
+        lt += " · ROE " + " → ".join(f"{v:.1f}" for v in roe3) + "% · ROA " + " → ".join(f"{v:.1f}" for v in roa3) + "%"
+    out["rows"]["rel"] = {"mark": rel, "text": lt}
 
-    # ④
+    # ⑤(내부 이름 four) 부채비율
     d3 = [D.v(y, "debt_ratio") for y in l3]
     if None not in d3:
         mark = "✓" if d3[-1] <= 100 or d3[-1] < d3[0] else "✗"
@@ -282,14 +312,14 @@ def good6(conn, code, P):
     else:
         out["rows"]["four"] = {"mark": "판정 못 함(부채비율 자료 부족)", "text": "최근 3년 부채비율이 다 있지 않음"}
 
-    # ⑤ 사람이 적는 칸
+    # ⑥(내부 five) 사람이 적는 칸
     five = man.get("five")
     if five and five[0] in MARKS:
         out["rows"]["five"] = {"mark": five[0], "text": f"{five[1]} (사람 판정 {man.get('updated', '')})".strip()}
     else:
         out["rows"]["five"] = {"mark": "조사", "text": "노드 판정 — 대화 세션이 채움(위에서 아래·아래에서 위)"}
 
-    # ⑥
+    # ⑦(내부 six) 주가
     mc, mc_st = D.market_cap_now()
     nd, nd_when = D.net_debt()
     from . import standards
@@ -306,7 +336,8 @@ def good6(conn, code, P):
     out["rows"]["six"] = {"mark": mark, "text": t}
     out["engine"] = bool(eng)
     out["engine_why"] = None if eng else "보수중심은 엔진 값 — 연결 안 됨"
-    out["score"] = sum(1 for r in out["rows"].values() if r["mark"].startswith("✓"))
+    out["score"] = sum(1 for k in SCORED if (out["rows"].get(k) or {}).get("mark", "").startswith("✓"))
+    out["n_conditions"] = len(SCORED)
     out["last"] = last
     return out
 
@@ -360,6 +391,14 @@ def min_pbr(D):
             "unverified": D.st(y0, "market_cap") == "UNVERIFIED" or D.st(by, "bps") == "UNVERIFIED"}
 
 
+def _lev(D, y):
+    """레버리지 = 평균 자산 ÷ 평균 지배자본(전년 말·그해 말). 전년이 없으면 그해 말끼리"""
+    a, pa, e, pe = D.eok(y, "acc_assets"), D.eok(y - 1, "acc_assets"), D.eok(y, "acc_eq_owner"), D.eok(y - 1, "acc_eq_owner")
+    if a and pa and e and pe and (e + pe) > 0:
+        return (a + pa) / (e + pe)
+    return a / e if a and e and e > 0 else None
+
+
 def shape(conn, code, P):
     from .report import consensus_trend
     D = Data(conn, code, P)
@@ -370,7 +409,8 @@ def shape(conn, code, P):
         rev, op, ocf = D.eok(y, "acc_revenue"), D.eok(y, "acc_op"), D.eok(y, "acc_ocf")
         rows.append({"year": y, "revenue": rev, "op": op, "margin": op / rev * 100 if rev and op is not None else None,
                      "ocf": ocf, "pbr": year_pbr(D, y),
-                     "pbr_unverified": D.st(y, "market_cap") == "UNVERIFIED", "roe": D.v(y, "roe")})
+                     "pbr_unverified": D.st(y, "market_cap") == "UNVERIFIED", "roe": D.v(y, "roe"), "roa": D.v(y, "roa"),
+                     "lev": _lev(D, y)})
     per = D.latest_interim()
     partial = None
     if per and D.v(cy, "acc_revenue", per) is not None:
@@ -391,6 +431,7 @@ def shape(conn, code, P):
         r = rev3m.get((y, "op_income")) or {}
         fy_ = Fn[(y, "op_income")][0]
         cons.append({"year": y, "revenue": rv, "op": op, "op_adj": op * fy_ if op is not None else None, "factor": fy_,
+                     "roe": D.c(y, "roe_fg"), "roa": D.c(y, "roa"),
                      "margin": op / rv * 100 if rv and op is not None else None,
                      "rev3m": (r.get("ch") or {}).get(3), "rev3m_tag": (r.get("tag") or {}).get(3)})
     ms = [r["margin"] for r in rows if r["margin"] is not None]

@@ -415,6 +415,21 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
         elif not got:
             stats.notes.append("컨센서스 미확보(다음 실행 때 다시 시도): " + " / ".join(errs))
 
+    # 6-2) FnGuide Financial Highlight 연간: ROE·ROA 추정 3년(+실적 ROA·ROE — 앱 계산과 맞춰 보기용). 7일에 한 번(2026-11-25)
+    if not db.fetched_recently(conn, "fg_highlight", code, config.TTL_DAYS["consensus"], ok_only=True):
+        try:
+            stats.req("FnGuide")
+            url, est, act = fnguide.fetch_highlight(code)
+            n = ingest_consensus(conn, code, est, "FnGuide 하이라이트", db.today(), url) if est else 0
+            for y, v in act.items():
+                for k, val in v.items():
+                    db.add_observation(conn, code, y, f"{k}_fnguide", val, unit="%", basis="연결", source="FnGuide",
+                                       source_ref=url, report_year=y, col="Financial Highlight")
+            conn.commit()
+            db.log_fetch(conn, "fg_highlight", code, code, True, len(est) + len(act), None if est else "추정치 없음(실적만)")
+        except fnguide.ConsensusUnavailable as e:
+            db.log_fetch(conn, "fg_highlight", code, code, False, 0, str(e)[:200])
+
     # 7) 컨센서스 추이(상향·하향 확인용): 올해~내후년 매출·영업이익(+EPS·목표주가) 월별 값. 7일에 한 번.
     if not db.fetched_recently(conn, "consensus_hist", code, config.TTL_DAYS["consensus_hist"], ok_only=True):
         try:
@@ -740,6 +755,13 @@ def compute(conn, code, P, stats=None):
                 extra_note="전년 자본이 없어 기말 자본으로 계산(평균 아님)")
         else:
             put(y, "roe", None, [(y, "acc_ni_owner", "FY"), (y, "acc_eq_owner", "FY")])
+        asset, passet, ni = _v(fm, y, "acc_assets"), _v(fm, y - 1, "acc_assets"), _v(fm, y, "acc_ni")
+        if ni is not None and asset and passet:          # ROA = 당기순이익 ÷ 평균 자산총계(FnGuide·WiseReport와 같은 정의)
+            put(y, "roa", ni / ((asset + passet) / 2) * 100, [(y, "acc_ni", "FY"), (y, "acc_assets", "FY"), (y - 1, "acc_assets", "FY")])
+        elif ni is not None and asset:
+            put(y, "roa", ni / asset * 100, [(y, "acc_ni", "FY"), (y, "acc_assets", "FY")], extra_note="전년 자산이 없어 기말 자산으로 계산(평균 아님)")
+        else:
+            put(y, "roa", None, [(y, "acc_ni", "FY"), (y, "acc_assets", "FY")])
         put(y, "debt_ratio", liab / eq * 100 if eq and liab is not None else None,
             [(y, "acc_liab", "FY"), (y, "acc_eq", "FY")])
         px = _v(fm, y, "price_close")
@@ -846,7 +868,7 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
 
 
 # B탭 [다시 받기]: 수집 기록의 출처 이름 → 기다리는 기간을 무시할 출처(fetched_recently에 쓰는 이름)
-REFETCH = {"news": ["news"], "price": ["price"], "kiwoom_daily": ["price"], "consensus": ["consensus"], "consensus_src": ["consensus"],
+REFETCH = {"fg_highlight": ["fg_highlight"], "news": ["news"], "price": ["price"], "kiwoom_daily": ["price"], "consensus": ["consensus"], "consensus_src": ["consensus"],
            "consensus_hist": ["consensus_hist"], "segments": ["segments"], "dart_events": ["dart_events"], "dart_disclosures": ["dart_disclosures"],
            "dart_company": ["dart_company"], "dart_report": ["dart_report"], "dart_shares": ["dart_shares"], "dart_xbrl": ["dart_xbrl"],
            "kiwoom_info": ["kiwoom_info"], "kiwoom_flows": ["kiwoom_flows"], "profile_wr": ["profile_wr"], "profile_dart": ["profile_dart"],

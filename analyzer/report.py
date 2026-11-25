@@ -5,7 +5,7 @@ import os
 
 from . import config, db
 
-FLOW = {"revenue", "eps", "roe"}           # 현재 연도 부분 실적을 연간 값처럼 그리면 안 되는 지표
+FLOW = {"revenue", "eps", "roe", "roa"}           # 현재 연도 부분 실적을 연간 값처럼 그리면 안 되는 지표
 STOCK = {"bps", "debt_ratio", "market_cap"}  # 시점 값(현재 연도에 최신 실제치를 쓸 수 있음)
 
 
@@ -16,8 +16,8 @@ def _corr(metric, year, raw, F=None):
         return {"value": None, "raw": None, "factor": 1.0, "why": None}
     F = F or {}
     pick = lambda m: F.get((year, m), (1.0 if m == "revenue" else 0.83, "공통 규칙"))
-    if metric in ("revenue", "eps", "roe"):
-        f, why = pick("eps" if metric == "roe" else metric)
+    if metric in ("revenue", "eps", "roe", "roa"):
+        f, why = pick("eps" if metric in ("roe", "roa") else metric)
     elif metric == "op_margin":
         fo, w1 = pick("op_income")
         fr, _ = pick("revenue")

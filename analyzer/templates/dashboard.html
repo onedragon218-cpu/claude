@@ -135,7 +135,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <button data-s="J">J. 성장 조건 분류</button>
   <button data-s="K">K. 컨센서스 추이</button>
   <button data-s="L">L. 사업부 분석</button>
-  <button data-s="M">M. 좋은 기업 6조건</button>
+  <button data-s="M">M. 좋은 기업 7조건</button>
   <button data-s="N">N. 숫자 모양</button>
   <button data-s="O">O. 가치 5방법</button>
   <button data-s="P">P. 우상향 저평가</button>
@@ -401,7 +401,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
   <div class="card">
     <p class="muted" style="margin:0 0 8px">리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님</p>
     <div class="row" style="justify-content:space-between;align-items:flex-end">
-      <h2 style="margin:0">좋은 기업 6조건 <span class="muted" style="font-size:14px;font-weight:400">사용자 기준 — 좋은 기업이면서 투자하기 좋은 기업(엔진 p236)</span></h2>
+      <h2 style="margin:0">좋은 기업 7조건 <span class="muted" style="font-size:14px;font-weight:400">사용자 기준 — 좋은 기업이면서 투자하기 좋은 기업(엔진 p236)</span></h2>
       <div style="font-size:32px;font-weight:700" id="m-score"></div>
     </div>
     <p class="muted" id="m-note" style="margin:6px 0"></p>
@@ -410,11 +410,11 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p style="margin:0;font-weight:700">표시 칸 □ — 매수 조건 아님(생존 게이트·판 규칙이 먼저)</p>
   </div>
   <div class="card">
-    <h3>⑤ 사람이 적는 칸 · ④ 예외 메모</h3>
+    <h3>⑥ 사람이 적는 칸 · ⑤ 예외 메모</h3>
     <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
-      <label>⑤ 판정<select id="m-five"><option>조사</option><option>✓</option><option>△</option><option>✗</option></select></label>
-      <label style="flex:1 1 320px">⑤ 근거(한두 줄)<input id="m-fivetext" style="width:100%"></label>
-      <label style="flex:1 1 320px">④ 메모(성장을 위한 통제 가능한 증가 등 — 판정은 바꾸지 않음)<input id="m-fournote" style="width:100%"></label>
+      <label>⑥ 판정<select id="m-five"><option>조사</option><option>✓</option><option>△</option><option>✗</option></select></label>
+      <label style="flex:1 1 320px">⑥ 근거(한두 줄)<input id="m-fivetext" style="width:100%"></label>
+      <label style="flex:1 1 320px">⑤ 메모(성장을 위한 통제 가능한 증가 등 — 판정은 바꾸지 않음)<input id="m-fournote" style="width:100%"></label>
       <button id="m-save" class="primary">저장</button>
     </div>
     <p class="muted" id="m-msg"></p>
@@ -473,6 +473,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <span class="muted">우상향 지표</span>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="p-use" value="op_margin" checked> 영업이익률</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="p-use" value="roe" checked> ROE</label>
+      <label style="flex-direction:row;align-items:center;gap:6px" title="체크하면 ROA도 우상향 조건에 넣음(작년 DART · 올해~내후년 FnGuide 추정). 끄면 표에 표시만"><input type="checkbox" class="p-use" value="roa"> ROA</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="p-use" value="revenue" checked> 매출액</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="p-use" value="eps" checked> EPS</label>
       <label style="flex-direction:row;align-items:center;gap:6px" title="적정가 = ROE × 1/10 × 0.83 × BPS. 끄면 0.83을 곱하지 않음"><input type="checkbox" id="p-factor" checked> 보정 적용(×0.83, 급하향 ×0.73)</label>
@@ -481,6 +482,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <span class="muted">최소 증가폭(선택, 비우면 조금이라도 오르면 통과)</span>
       <label>영업이익률(%p)<input id="p-th-op_margin" type="number" step="0.1" style="width:80px"></label>
       <label>ROE(%p)<input id="p-th-roe" type="number" step="0.1" style="width:80px"></label>
+      <label>ROA(%p)<input id="p-th-roa" type="number" step="0.1" style="width:80px"></label>
       <label>매출액(%)<input id="p-th-revenue" type="number" step="0.5" style="width:80px"></label>
       <label>EPS(%)<input id="p-th-eps" type="number" step="0.5" style="width:80px"></label>
     </div>
@@ -499,6 +501,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <span class="muted">우상향 지표</span>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="u-use" value="op_margin" checked> 영업이익률</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="u-use" value="roe" checked> ROE</label>
+      <label style="flex-direction:row;align-items:center;gap:6px" title="체크하면 ROA도 우상향 조건에 넣음(작년 DART · 올해~내후년 FnGuide 추정). 끄면 표에 표시만"><input type="checkbox" class="u-use" value="roa"> ROA</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="u-use" value="revenue" checked> 매출액</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="u-use" value="eps" checked> EPS</label>
     </div>
@@ -506,6 +509,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <span class="muted">최소 증가폭(선택, 비우면 조금이라도 오르면 통과)</span>
       <label>영업이익률(%p)<input id="u-th-op_margin" type="number" step="0.1" style="width:80px"></label>
       <label>ROE(%p)<input id="u-th-roe" type="number" step="0.1" style="width:80px"></label>
+      <label>ROA(%p)<input id="u-th-roa" type="number" step="0.1" style="width:80px"></label>
       <label>매출액(%)<input id="u-th-revenue" type="number" step="0.5" style="width:80px"></label>
       <label>EPS(%)<input id="u-th-eps" type="number" step="0.5" style="width:80px"></label>
     </div>
@@ -524,6 +528,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <span class="muted">우상향 지표(화면 P와 같음, 모두 끄면 거르지 않음)</span>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="op_margin" checked> 영업이익률</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="roe" checked> ROE</label>
+      <label style="flex-direction:row;align-items:center;gap:6px" title="체크하면 ROA도 우상향 조건에 넣음(작년 DART · 올해~내후년 FnGuide 추정). 끄면 표에 표시만"><input type="checkbox" class="q-use" value="roa"> ROA</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="revenue" checked> 매출액</label>
       <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" class="q-use" value="eps" checked> EPS</label>
     </div>
@@ -536,6 +541,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <span class="muted">최소 증가폭(선택, 비우면 조금이라도 오르면 통과)</span>
       <label>영업이익률(%p)<input id="q-th-op_margin" type="number" step="0.1" style="width:80px"></label>
       <label>ROE(%p)<input id="q-th-roe" type="number" step="0.1" style="width:80px"></label>
+      <label>ROA(%p)<input id="q-th-roa" type="number" step="0.1" style="width:80px"></label>
       <label>매출액(%)<input id="q-th-revenue" type="number" step="0.5" style="width:80px"></label>
       <label>EPS(%)<input id="q-th-eps" type="number" step="0.5" style="width:80px"></label>
     </div>
@@ -656,7 +662,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 
 <section id="F">
   <div class="tiles" id="vtiles"></div>
-  <div class="card" style="margin-top:16px"><h2>검증 결과(10개 항목)</h2><div class="tablewrap"><table id="vtable"></table></div></div>
+  <div class="card" style="margin-top:16px"><h2>검증 결과(10개 항목 + ROE·ROA FnGuide 대조)</h2><div class="tablewrap"><table id="vtable"></table></div></div>
   <div class="card"><h2>데이터 변경 이력</h2><p class="muted">값은 덮어쓰지 않고 새 버전으로 쌓습니다.</p><div class="tablewrap"><table id="hist"></table></div></div>
   <div class="card"><h2>미확보 데이터</h2><div class="tablewrap"><table id="miss"></table></div></div>
 </section>
@@ -667,7 +673,7 @@ const D = /*__DATA__*/null;
 const DISK_VERSION = /*__DISK_VERSION__*/null;   // 설치 폴더 코드의 버전(서버가 옛 코드로 떠 있으면 다름)
 const $ = s => document.querySelector(s);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const COLORS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
+const COLORS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8'];
 const MET = D.metrics;
 MET.forEach((m,i)=>{ m.color = COLORS[i]; m.ps = 'circle'; });
 // 가치평가 지표(화면 G의 계산 결과)를 통합 그래프에 함께 겹치기 위한 정의
@@ -1644,21 +1650,24 @@ $('#l-kwsave').onclick = async () => {
   } catch(e){ $('#l-kwmsg').textContent = '저장 실패: ' + e.message; }
 };
 
-// ---- M. 좋은 기업 6조건 ----
+// ---- M. 좋은 기업 7조건 ----
 const G6 = D.good6 || {error:'자료 없음'};
 const markHtml = m => { const c = String(m||''); const col = c.startsWith('✓') ? 'var(--good)' : c.startsWith('✗') ? 'var(--text-primary)' : 'var(--text-secondary)';
   return `<span style="color:${col};font-weight:600;white-space:nowrap">${esc(c)}</span>`; };
 function renderM(){
   if (G6.error){ $('#m-table').innerHTML = `<tr><td class="l">계산하지 못했습니다: ${esc(G6.error)}</td></tr>`; return; }
-  $('#m-score').textContent = `${G6.score}/6`;
+  $('#m-score').textContent = `${G6.score}/${G6.n_conditions||7}`;
   $('#m-note').innerHTML = `✓로 시작하는 판정만 셉니다(✓(컨센 기준) 포함). 컨센서스 기준일 ${esc(G6.cons_asof||'–')} · ${esc(G6.factor_note)}. 판정 기호: ✓ · △ · ✗ · 조사 · 판정 못 함(이유).${G6.engine?'':' '+esc(G6.engine_why||'')}`;
-  const keys = ['one','two','three','four','five','six'];
+  const keys = ['one','two','three','roa','rel','four','five','six'];
+  const relCol = m => /실력/.test(m) ? 'var(--good)' : /부채 효과|악화/.test(m) ? 'var(--bad)' : 'var(--text-secondary)';
   $('#m-table').innerHTML = '<tr><th class="l">조건</th><th class="l">판정</th><th class="l">숫자</th></tr>' +
-    keys.map(k=>{ const r = G6.rows[k]||{}; return `<tr><td class="l" style="white-space:normal;min-width:220px">${esc(G6.names[k])}</td><td class="l">${markHtml(r.mark)}</td><td class="l" style="white-space:normal">${esc(r.text)}</td></tr>`; }).join('');
+    keys.filter(k=>G6.names[k]).map(k=>{ const r = G6.rows[k]||{};
+      if (k==='rel') return `<tr style="background:var(--surface-2)"><td class="l muted" style="white-space:normal;min-width:220px;font-size:13px">${esc(G6.names[k])}</td><td class="l" style="font-size:13px;color:${relCol(r.mark||'')};font-weight:600;white-space:normal">${esc(r.mark||'–')}</td><td class="l muted" style="white-space:normal;font-size:13px">${esc(r.text||'')}</td></tr>`;
+      return `<tr><td class="l" style="white-space:normal;min-width:220px">${esc(G6.names[k])}</td><td class="l">${markHtml(r.mark)}</td><td class="l" style="white-space:normal">${esc(r.text)}</td></tr>`; }).join('');
   const man = G6.manual||{}; const five = man.five||['조사',''];
   $('#m-five').value = five[0]; $('#m-fivetext').value = five[1]||''; $('#m-fournote').value = man.four_note||'';
   ['#m-five','#m-fivetext','#m-fournote','#m-save'].forEach(id=>$(id).disabled = !SERVED);
-  $('#m-msg').textContent = SERVED ? (man.updated ? `마지막 저장 ${man.updated}` : '⑤는 코드가 채우지 않습니다. 사람이 판정하고 근거를 적어 저장하세요.') : '재무분석 열기.bat 으로 연 화면에서 저장할 수 있습니다.';
+  $('#m-msg').textContent = SERVED ? (man.updated ? `마지막 저장 ${man.updated}` : '⑥은 코드가 채우지 않습니다. 사람이 판정하고 근거를 적어 저장하세요.') : '재무분석 열기.bat 으로 연 화면에서 저장할 수 있습니다.';
 }
 $('#m-save').onclick = async () => {
   try { const r = await fetch('/api/good6/manual', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -1709,12 +1718,14 @@ function renderN(){
       {label:'영업이익', data:Q.map(q=>q.op), borderColor:css('--s3'), backgroundColor:css('--s3'), tension:0}]}, options:o3}); }
   const n0 = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
   const pc = (v,d=1) => v==null ? '–' : v.toFixed(d)+'%';
-  let h = '<tr><th class="l">해</th><th>매출</th><th>영업이익</th><th>이익률</th><th>영업현금</th><th>연말 PBR</th><th>ROE%</th></tr>';
-  h += rows.map(r=>`<tr><td class="l">${r.year}</td><td>${n0(r.revenue)}</td><td>${n0(r.op)}</td><td>${pc(r.margin)}</td><td>${n0(r.ocf)}</td><td title="${r.pbr_unverified?'시가총액이 역산 주식수 기준(UNVERIFIED)':''}">${r.pbr==null?'–':r.pbr.toFixed(2)}${r.pbr_unverified&&r.pbr!=null?' <span class="badge b-UNVERIFIED">U</span>':''}</td><td>${r.roe==null?'–':r.roe.toFixed(1)}</td></tr>`).join('');
+  const levTip = 'ROE ÷ ROA에 가까운 값. 평균 자산 ÷ 평균 지배자본 — 높을수록 빚(부채)이 ROE를 키우는 몫이 큼';
+  let h = `<tr><th class="l">해</th><th>매출</th><th>영업이익</th><th>이익률</th><th>영업현금</th><th>연말 PBR</th><th>ROE%</th><th>ROA%</th><th title="${levTip}">레버리지(배)</th></tr>`;
+  h += rows.map(r=>`<tr><td class="l">${r.year}</td><td>${n0(r.revenue)}</td><td>${n0(r.op)}</td><td>${pc(r.margin)}</td><td>${n0(r.ocf)}</td><td title="${r.pbr_unverified?'시가총액이 역산 주식수 기준(UNVERIFIED)':''}">${r.pbr==null?'–':r.pbr.toFixed(2)}${r.pbr_unverified&&r.pbr!=null?' <span class="badge b-UNVERIFIED">U</span>':''}</td><td>${r.roe==null?'–':r.roe.toFixed(1)}</td><td>${r.roa==null?'–':r.roa.toFixed(1)}</td><td title="${levTip}">${r.lev==null?'–':r.lev.toFixed(2)}</td></tr>`).join('');
   const p = SH.partial;
-  if (p) h += `<tr style="background:var(--info-bg)"><td class="l">${esc(p.label)}</td><td>${n0(p.revenue)}</td><td>${p.op==null?'–':p.op.toFixed(1)}</td><td>${pc(p.margin)}</td><td>${n0(p.ocf)}</td><td colspan="2" class="l">순차입 ${n0(p.net_debt)}억(−는 순현금, ${esc(p.net_debt_when)})</td></tr>`;
-  h += (SH.cons||[]).map(c=> c.none ? `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td colspan="6" class="l">컨센서스 없음</td></tr>`
-    : `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td>${n0(c.revenue)}</td><td>${n0(c.op)}</td><td>${pc(c.margin)}</td><td colspan="3" class="l">3개월 전 대비 영업이익 ${c.rev3m_tag ? esc(c.rev3m_tag) : c.rev3m==null ? '–' : (c.rev3m>=0?'+':'')+c.rev3m.toFixed(1)+'%'}</td></tr>`).join('');
+  if (p) h += `<tr style="background:var(--info-bg)"><td class="l">${esc(p.label)}</td><td>${n0(p.revenue)}</td><td>${p.op==null?'–':p.op.toFixed(1)}</td><td>${pc(p.margin)}</td><td>${n0(p.ocf)}</td><td colspan="4" class="l">순차입 ${n0(p.net_debt)}억(−는 순현금, ${esc(p.net_debt_when)})</td></tr>`;
+  h += (SH.cons||[]).map(c=> c.none ? `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td colspan="8" class="l">컨센서스 없음</td></tr>`
+    : `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td>${n0(c.revenue)}</td><td>${n0(c.op)}</td><td>${pc(c.margin)}</td><td colspan="2" class="l">3개월 전 대비 영업이익 ${c.rev3m_tag ? esc(c.rev3m_tag) : c.rev3m==null ? '–' : (c.rev3m>=0?'+':'')+c.rev3m.toFixed(1)+'%'}</td><td title="FnGuide 추정">${c.roe==null?'–':(+c.roe).toFixed(1)}</td><td title="FnGuide 추정">${c.roa==null?'–':(+c.roa).toFixed(1)}</td><td title="FnGuide ROE ÷ ROA(추정 — 지배/전체 기준 차이로 근사)">${c.roe!=null&&c.roa?(c.roe/c.roa).toFixed(2):'–'}</td></tr>`).join('');
+  h += `<tr><td colspan="9" class="l muted" style="white-space:normal;font-size:12px">ROA = 당기순이익 ÷ 평균 자산총계(DART로 계산, FnGuide와 대조). 레버리지 = 평균 자산 ÷ 평균 지배자본 ≈ ROE ÷ ROA — ROE가 ROA보다 훨씬 높으면 빚이 ROE를 키우는 몫이 큼. 컨센 행의 ROE·ROA는 FnGuide 추정(레버리지는 ROE ÷ ROA 근사).</td></tr>`;
   $('#n-table').innerHTML = h;
   $('#n-memo').textContent = SH.memo || '';
 }
@@ -1839,7 +1850,7 @@ let PTAB = uiGet('ptab', 't1');
 function renderP(){
   if (PV.error){ $('#p-note').textContent = '계산하지 못했습니다: ' + PV.error; return; }
   const Y = PV.years, use = [...document.querySelectorAll('.p-use')].filter(c=>c.checked).map(c=>c.value);
-  const th = {}; ['op_margin','roe','revenue','eps'].forEach(m=>{ const v = $('#p-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
+  const th = {}; ['op_margin','roe','roa','revenue','eps'].forEach(m=>{ const v = $('#p-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
   const factor = $('#p-factor').checked;
   $('#p-note').innerHTML = `<b>1단계 우상향</b>: ${Y[0]}(실적) &lt; ${Y[1]}E &lt; ${Y[2]}E &lt; ${Y[3]}E 를 고른 지표 모두 만족하는 기업. <b>2단계 가격</b>: 적정가 = ROE(%) × 1/10${factor?' × 보정(0.83, 3개월 급하향이면 0.73)':''} × BPS(그해 컨센서스) &gt; 현재 주가. <b>1차 분류</b> = ${Y[3]}E(내후년) 기준, <b>2차 분류</b> = ${Y[2]}E(내년) 기준, <b>3차 분류</b> = ${Y[1]}E(올해) 기준. 대상: DB에 있는 기업 ${PV.rows.length}곳.`;
   const res = PV.rows.map(r=>({r, c: use.length ? pClassify(r, use, th, factor) : {status:'자료 부족', why:'우상향 지표를 하나 이상 고르세요'}}));
@@ -1867,17 +1878,17 @@ function renderP(){
   const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   $('#p-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +
     `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th>` +
-    use.map(m=>`<th class="l">${PV.metrics[m][0]}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
+    use.concat(use.includes('roa')?[]:['roa']).map(m=>`<th class="l">${PV.metrics[m][0]}${m==='roa'&&!use.includes('roa')?' <span class="muted" style="font-weight:400">(표시만)</span>':''}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
     (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td><b>${n0(r.price)}원</b></td>` +
       pcell(r,c,2) + pcell(r,c,1) + pcell(r,c,0) +
       `<td class="l">${c.status==='통과' ? (tierList(c)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tierList(c)}</span>`) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td>` +
-      use.map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'?'%':''}</td>`).join('') + '</tr>').join('')
-    : `<tr><td colspan="${6+use.length}" class="l">${T[PTAB] ? `${T[PTAB].name}에 해당하는 기업이 없습니다. 다른 분류나 '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+      use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
+    : `<tr><td colspan="${7+use.length}" class="l">${T[PTAB] ? `${T[PTAB].name}에 해당하는 기업이 없습니다. 다른 분류나 '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
   $('#p-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 적정가 칸: 위 = 적정가(✓ = 현재가보다 높음), 아래 = 현재가 대비 %(안전 여유). 칸에 마우스를 올리면 계산식이 보입니다. 적정가 = ROE × BPS ÷ 10 ≈ 그해 EPS × 10(PER 10배, 요구수익률 10%)${factor?' × 0.83':''}. ` +
     `작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로. 작년이 적자였다가 오른 경우도 우상향(턴어라운드)으로 보며 그 구간은 증가율(%) 문턱을 적용하지 않습니다. 고른 지표 중 작년 실적이나 컨센서스가 하나라도 없으면 '자료 부족'으로 따로 모읍니다(있는 값으로 이미 우상향이 깨졌으면 '우상향 아님').`;
 }
 document.querySelectorAll('.p-use').forEach(c=>c.addEventListener('change', renderP));
-['#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps'].forEach(id=>$(id).addEventListener('input', renderP));
+['#p-factor','#p-th-op_margin','#p-th-roe','#p-th-roa','#p-th-revenue','#p-th-eps'].forEach(id=>$(id).addEventListener('input', renderP));
 
 // ---- U. 우상향 저평가 — min PBR 적정가 (화면 P와 같은 우상향 조건, 적정가만 다름 · 화면 P와 서로 독립) ----
 function uClassify(row, use, th){
@@ -1897,7 +1908,7 @@ let UTAB = uiGet('utab', 't1');
 function renderU(){
   if (PV.error){ $('#u-note').textContent = '계산하지 못했습니다: ' + PV.error; return; }
   const Y = PV.years, use = [...document.querySelectorAll('.u-use')].filter(c=>c.checked).map(c=>c.value);
-  const th = {}; ['op_margin','roe','revenue','eps'].forEach(m=>{ const v = $('#u-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
+  const th = {}; ['op_margin','roe','roa','revenue','eps'].forEach(m=>{ const v = $('#u-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
   $('#u-note').innerHTML = `<b>1단계 우상향</b>: 화면 P와 같음(${Y[0]}(실적) &lt; ${Y[1]}E &lt; ${Y[2]}E &lt; ${Y[3]}E). <b>2단계 가격</b>: 적정가 = <b>10년 최저 연말 PBR</b> × BPS(그해 컨센서스) &gt; 현재 주가 — 기업이 가장 낮게 평가받던 때의 배수로도 지금 주가가 싼가. <b>1차 분류</b> = ${Y[3]}E(내후년) 기준, <b>2차</b> = ${Y[2]}E(내년), <b>3차</b> = ${Y[1]}E(올해). 대상: DB에 있는 기업 ${PV.rows.length}곳.`;
   const res = PV.rows.map(r=>({r, c: use.length ? uClassify(r, use, th) : {status:'자료 부족', why:'우상향 지표를 하나 이상 고르세요'}}));
   const up = res.filter(x=>x.c.status==='통과'), ex = res.filter(x=>x.c.status==='자료 부족'), no = res.filter(x=>x.c.status==='우상향 아님');
@@ -1921,18 +1932,18 @@ function renderU(){
   const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   $('#u-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +
     `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th>` +
-    use.map(m=>`<th class="l">${PV.metrics[m][0]}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
+    use.concat(use.includes('roa')?[]:['roa']).map(m=>`<th class="l">${PV.metrics[m][0]}${m==='roa'&&!use.includes('roa')?' <span class="muted" style="font-weight:400">(표시만)</span>':''}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
     (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td><b>${n0(r.price)}원</b></td>` +
       ucell(r,c,2) + ucell(r,c,1) + ucell(r,c,0) +
       `<td class="l">${c.status==='통과' ? (tierList(c)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tierList(c)}</span>`) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td>` +
-      use.map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'?'%':''}</td>`).join('') + '</tr>').join('')
-    : `<tr><td colspan="${6+use.length}" class="l">${T[UTAB] ? `${T[UTAB].name}에 해당하는 기업이 없습니다. '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+      use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
+    : `<tr><td colspan="${7+use.length}" class="l">${T[UTAB] ? `${T[UTAB].name}에 해당하는 기업이 없습니다. '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
   $('#u-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 적정가 칸: 위 = 적정가(✓ = 현재가보다 높음), 아래 = 현재가 대비 %. 칸에 마우스를 올리면 계산식이 보입니다. ` +
     `10년 최저 PBR = 최근 10개 연도 연말 PBR(연말 시가총액 ÷ 지배주주 자본, 화면 N 표와 같은 값) 중 가장 낮은 값. BPS는 컨센서스 원래 값(보정 없음 — BPS는 대부분 이미 쌓인 자본이라 이익 보정 0.83을 통째로 곱하지 않음). ` +
     `화면 P(ROE 적정가)와 우상향 조건은 같지만 설정·분류는 따로 움직입니다.`;
 }
 document.querySelectorAll('.u-use').forEach(c=>c.addEventListener('change', renderU));
-['#u-th-op_margin','#u-th-roe','#u-th-revenue','#u-th-eps'].forEach(id=>$(id).addEventListener('input', renderU));
+['#u-th-op_margin','#u-th-roe','#u-th-roa','#u-th-revenue','#u-th-eps'].forEach(id=>$(id).addEventListener('input', renderU));
 
 // ---------------- Q. 적정 PER 주가 (analyzer/fairper.py compute와 같은 식) ----------------
 const QV = D.fairper || {error:'자료 없음'};
@@ -1982,7 +1993,7 @@ let QTAB = uiGet('qtab', 't1');
 function renderQ(){
   if (QV.error){ $('#q-note').textContent = '계산하지 못했습니다: ' + QV.error; return; }
   const Y = QV.years, p = qParams(), use = [...document.querySelectorAll('.q-use')].filter(c=>c.checked).map(c=>c.value);
-  const th = {}; ['op_margin','roe','revenue','eps'].forEach(m=>{ const v = $('#q-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
+  const th = {}; ['op_margin','roe','roa','revenue','eps'].forEach(m=>{ const v = $('#q-th-'+m).value; if (v!=='' && !isNaN(+v) && +v>0) th[m] = +v; });
   $('#q-note').innerHTML = `<b>1단계 우상향</b>(화면 P와 같은 조건, 지표를 모두 끄면 거르지 않음). <b>2단계 가격</b>: 적정 PER = (1 − g ÷ ROE) ÷ (Ke − g), 적정 주가 = 적정 PER × EPS(컨센 × 보정), 오늘가치 = 적정 주가 ÷ (1 + Ke)^(그해 1월 1일까지 남은 해). 오늘가치 &gt; 현재 주가이면 그 분류. <b>1차 분류</b> = ${Y[2]}E(내후년) 기준, <b>2차</b> = ${Y[1]}E(내년), <b>3차</b> = ${Y[0]}E(올해). ROE는 실제 지배자본에 보정 순이익을 이어 쌓아 계산. 대상: DB에 있는 기업 ${QV.rows.length}곳.`;
   const PVrow = Object.fromEntries((PV.rows||[]).map(r=>[r.code, r]));
   const res = QV.rows.map(r=>{
@@ -2017,14 +2028,15 @@ function renderQ(){
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${q.wait?'color:var(--text-muted)':hit?'color:var(--good);font-weight:600':''}">${n0(q.tv)}원 ${hit?'✓':''}${q.wait?' <span class="badge b-WARN">원천 대기</span>':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tl = x => x.st!=='통과' ? '' : ['t1','t2','t3'].filter(k=>x.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   const pctv = v => v==null ? '–' : (v*100).toFixed(1);
-  $('#q-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th><th>1차 오늘가치<br><span class="muted" style="font-weight:400">${Y[2]}E(내후년)</span></th><th>2차 오늘가치<br><span class="muted" style="font-weight:400">${Y[1]}E(내년)</span></th><th>3차 오늘가치<br><span class="muted" style="font-weight:400">${Y[0]}E(올해)</span></th><th class="l">해당 분류</th><th class="l">가치 경로</th><th class="l">적정 PER<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l">ROE(이월, %)<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th></tr>` +
+  $('#q-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th><th>1차 오늘가치<br><span class="muted" style="font-weight:400">${Y[2]}E(내후년)</span></th><th>2차 오늘가치<br><span class="muted" style="font-weight:400">${Y[1]}E(내년)</span></th><th>3차 오늘가치<br><span class="muted" style="font-weight:400">${Y[0]}E(올해)</span></th><th class="l">해당 분류</th><th class="l">가치 경로</th><th class="l">적정 PER<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l">ROE(이월, %)<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l" title="작년 DART 계산 · 올해~내후년 FnGuide 추정">ROA(%)<br><span class="muted" style="font-weight:400">${(Y[0]-1)%100}→${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th></tr>` +
     (rows.length ? rows.map(x=>`<tr><td class="l"><a href="${companyUrl(x.r.code)}">${esc(x.r.name)}</a> <span class="muted">${esc(x.r.code)}</span></td><td><b>${x.r.data ? n0(x.r.data.price)+'원' : '–'}</b></td>` +
       cell(x,2) + cell(x,1) + cell(x,0) +
       `<td class="l">${x.st==='통과' ? (tl(x)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tl(x)}</span>`) : `<span class="muted">${esc(x.st)} — ${esc(x.why||'')}</span>`}</td>` +
       `<td class="l" title="${esc(x.c ? x.c.path.why : '')}">${x.c ? esc(x.c.path.label) : '–'}</td>` +
       `<td class="l" style="white-space:nowrap">${x.c ? x.c.rows.map(q=>q.per==null?'–':q.per.toFixed(1)).join(' → ') : '–'}</td>` +
-      `<td class="l" style="white-space:nowrap">${x.c ? x.c.rows.map(q=>pctv(q.roe)).join(' → ') : '–'}</td></tr>`).join('')
-    : `<tr><td colspan="9" class="l">${T[QTAB] ? `${T[QTAB].name}에 해당하는 기업이 없습니다. '${use.length?'우상향 통과 전체':'대상 전체'}'를 눌러 각 기업의 연도별 오늘가치를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+      `<td class="l" style="white-space:nowrap">${x.c ? x.c.rows.map(q=>pctv(q.roe)).join(' → ') : '–'}</td>` +
+      `<td class="l" style="white-space:nowrap">${((PVrow[x.r.code]||{}).series||{}).roa ? PVrow[x.r.code].series.roa.map(v=>v==null?'–':(+v).toFixed(1)).join(' → ') : '–'}</td></tr>`).join('')
+    : `<tr><td colspan="10" class="l">${T[QTAB] ? `${T[QTAB].name}에 해당하는 기업이 없습니다. '${use.length?'우상향 통과 전체':'대상 전체'}'를 눌러 각 기업의 연도별 오늘가치를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
   $('#q-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 오늘가치 칸: 위 = 오늘가치(✓ = 현재가보다 높음), 아래 = 현재가 대비 %. 칸에 마우스를 올리면 계산식이 보입니다. 원천(증권사) 1곳뿐인 해는 회색 '원천 대기'로 보여 주되 분류에서 뺍니다. ` +
     `'판정 못 함'은 적자, ROE ≤ g(성장할수록 가치 감소), Ke − g < 2%p처럼 공식이 성립하지 않는 경우입니다. 보정: ${p.use_cal?'앱 실측 보정계수':'앱 공통 규칙(×0.83, 3개월 사이 5% 넘게 하향이면 ×0.73)'} · Ke: ${p.fixed_r?'10% 고정':'그해 국고채 10년 + β × ERP(화면 G·O와 같음)'} · g ${(p.g*100).toFixed(0)}%.`;
   renderQDetail(p);
@@ -2406,7 +2418,7 @@ $('#r-revsave').onclick = async () => {
     setTimeout(()=>location.reload(), 5000);
   } catch(e){ $('#r-revmsg').innerHTML = '<b>넣지 못했습니다</b>: ' + esc(e.message); }
   $('#r-revsave').disabled = false; };
-['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
+['#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-roa','#q-th-revenue','#q-th-eps'].forEach(id=>$(id).addEventListener('input', renderQ));
 
 async function bRefetch(sources){
   if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
@@ -2714,8 +2726,8 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ren
 const UI_KEEP = ['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show',
   '#smkt','#smin','#sshow','#srisk',
   '#o-ke','#o-wacc','#o-omega','#o-r-cash','#o-r-recv','#o-r-inv','#o-r-land','#o-r-bldg',
-  '#p-factor','#p-th-op_margin','#p-th-roe','#p-th-revenue','#p-th-eps',
-  '#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-revenue','#q-th-eps'];
+  '#p-factor','#p-th-op_margin','#p-th-roe','#p-th-roa','#p-th-revenue','#p-th-eps',
+  '#q-g','#q-r10','#q-cal','#q-th-op_margin','#q-th-roe','#q-th-roa','#q-th-revenue','#q-th-eps'];
 const UI_GROUPS = ['.j-per', '.p-use', '.q-use'];   // 같은 이름의 체크 상자 묶음(값으로 구분)
 function uiEls(){ const out = [];
   UI_KEEP.forEach(sel=>{ const el = document.querySelector(sel); if (el) out.push([sel, el]); });

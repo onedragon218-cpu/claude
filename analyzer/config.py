@@ -73,6 +73,7 @@ METRICS = [
     ("eps", "EPS", "원"),
     ("bps", "BPS", "원"),
     ("roe", "ROE", "%"),
+    ("roa", "ROA", "%"),          # 2026-11-25: ROE와 나란히 — ROE ÷ ROA ≈ 레버리지(빚이 ROE를 얼마나 부풀렸나)
     ("debt_ratio", "부채비율", "%"),
     ("market_cap", "시가총액", "억원"),
 ]

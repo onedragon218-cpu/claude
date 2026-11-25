@@ -92,3 +92,46 @@ def fetch(code):
     if m and m.group(1) != code:      # 다른 회사 화면이 오면 그 값을 넣지 않음(잘못된 컨센서스 방지)
         raise ConsensusUnavailable(f"FnGuide가 다른 회사({m.group(1)}) 화면을 돌려줌")
     return url, parse(page)
+
+
+# ---------------------------------------------------------------- Snapshot 'Financial Highlight' 연간(ROE·ROA 실적·추정) — 2026-11-25
+HIGHLIGHT_URL = "https://wcomp.fnguide.com/CompanyInfo/getSnpFinancial"
+
+
+def fetch_highlight(code):
+    """FnGuide 기업정보 Snapshot → Financial Highlight → '연간'(실적 5년 + 추정 3년)의 ROE·ROA.
+    FnGuide 정의: ROA = 당기순이익 ÷ 평균 자산총계, ROE = 지배순이익 ÷ 평균 지배자본(앱 계산과 같음).
+    반환: (주소, 추정치 목록[{target_year, metric('roe_fg'|'roa'), value, unit, kind}], 실적 {연도: {'roa','roe'}})"""
+    import urllib.parse
+    last_err = None
+    for consol in ("C", "D"):                 # 연결 → 없으면 별도
+        url = HIGHLIGHT_URL + "?" + urllib.parse.urlencode({"cmp_cd": code, "consol_typ": consol, "freq_typ": "Y"})
+        req = urllib.request.Request(url, headers={"User-Agent": UA, "X-Requested-With": "XMLHttpRequest",
+                                                   "Referer": f"https://wcomp.fnguide.com/CompanyInfo/Snapshot?cmp_cd={code}"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                d = json.loads(r.read().decode("utf-8", "replace"))
+        except Exception as e:      # noqa: BLE001
+            last_err = e
+            continue
+        ds = d.get("dataset") or d
+        rows = {str(x.get("NAME") or "").strip(): x for x in ds.get("data") or []}
+        if "ROA" not in rows and "ROE" not in rows:
+            continue
+        est, act = [], {}
+        for h in ds.get("header") or []:
+            m = re.match(r"(20\d\d)/12", str(h.get("YYMM") or ""))
+            if not m:
+                continue
+            y, cd, e = int(m.group(1)), h.get("CD"), str(h.get("EP_CHK") or "").strip()
+            for name, metric in (("ROA", "roa"), ("ROE", "roe_fg")):
+                v = _num((rows.get(name) or {}).get(cd))
+                if v is None:
+                    continue
+                if e in ("E", "P"):
+                    est.append({"target_year": y, "metric": metric, "value": v, "unit": "%", "kind": "잠정" if e == "P" else "추정",
+                                "basis": "연결" if consol == "C" else "별도"})
+                else:
+                    act.setdefault(y, {})[metric] = v
+        return url, est, act
+    raise ConsensusUnavailable(f"FnGuide Financial Highlight를 읽지 못함: {last_err}" if last_err else "FnGuide Financial Highlight에 ROE·ROA 줄이 없음")
