@@ -51,15 +51,29 @@ def signature(conn):
     return (tuple(parts), _mt(config.DATA_DIR), _mt(KDIR), dt.date.today().isoformat())
 
 
+COLLECTING_REUSE_SEC = 600   # 수집이 도는 동안(자료가 계속 바뀜) 모든 회사 계산은 이 시간 안의 저장본을 그대로 씀(2026-11-25)
+
+
+def _collecting():
+    try:
+        from . import collectlock
+        return collectlock.status() is not None
+    except Exception:      # noqa: BLE001
+        return False
+
+
 def get(name, key, fn, sig):
     """반환: (값, 저장본을 썼나)"""
+    import time as _t
     with _L:
         hit = _C.get((name, key))
     if hit and (hit[0] == sig or getattr(BATCH, "on", False)):
         return hit[1], True
+    if hit and _t.time() - hit[2] < COLLECTING_REUSE_SEC and _collecting():
+        return hit[1], "수집 중"                 # 자료가 계속 바뀌는 중 — 최대 10분 전 계산본
     v = fn()
     with _L:
-        _C[(name, key)] = (sig, v)
+        _C[(name, key)] = (sig, v, _t.time())
     return v, False
 
 
@@ -105,4 +119,5 @@ class Timer:
     def summary(self):
         tot = round(time.time() - self.t0, 3)
         top = sorted(self.items, key=lambda x: -x["sec"])[:8]
-        return {"total": tot, "top": top, "n_cached": sum(1 for x in self.items if x["cached"])}
+        return {"total": tot, "top": top, "n_cached": sum(1 for x in self.items if x["cached"]),
+                "collecting": any(x["cached"] == "수집 중" for x in self.items)}

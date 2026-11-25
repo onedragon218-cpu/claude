@@ -1044,8 +1044,8 @@ function renderStatic(){
     let sym = ''; if(p){ sym = p.kind==='전망'?'◇': p.kind==='실적'? (p.p.status==='VERIFIED'?'●':'◐') : '△'; } else if (y===BY && s.partial) sym='△';
     return `<td style="text-align:center" title="${p?esc(p.kind+' '+(p.p.status||'')):'미확보'}">${sym}</td>`; }).join('')+'</tr>').join('');
   const PF = D.perf;
-  $('#b-perf').innerHTML = PF ? `이 화면 자료를 만드는 데 <b>${PF.total}초</b> 걸렸습니다(서버 계산, 브라우저 그리기 제외). 모든 회사를 훑는 계산 중 저장본을 쓴 칸 ${PF.n_cached}개 — 자료가 갱신된 뒤 첫 화면만 새로 계산하고, 그다음 종목부터는 저장본을 씁니다.<br>오래 걸린 칸: ` +
-    PF.top.slice(0,6).map(x=>`${esc(x.name)} ${x.sec}초${x.cached?'(저장본)':''}`).join(' · ') : '측정값 없음';
+  $('#b-perf').innerHTML = PF ? `이 화면 자료를 만드는 데 <b>${PF.total}초</b> 걸렸습니다(서버 계산, 브라우저 그리기 제외). 모든 회사를 훑는 계산 중 저장본을 쓴 칸 ${PF.n_cached}개 — 자료가 갱신된 뒤 첫 화면만 새로 계산하고, 그다음 종목부터는 저장본을 씁니다.${PF.collecting?' <b>지금은 수집이 도는 중이라 P·U·Q·J탭 목록 등은 최대 10분 전 계산 기준입니다</b>(그 회사 자료는 최신).':''}<br>오래 걸린 칸: ` +
+    PF.top.slice(0,6).map(x=>`${esc(x.name)} ${x.sec}초${x.cached?(x.cached==='수집 중'?'(10분 안 저장본)':'(저장본)'):''}`).join(' · ') : '측정값 없음';
   // 출처·대상마다 가장 최근 기록이 실패(또는 메모에 오류)면 [다시 받기]
   const RF = new Set(D.refetchable||[]), seenF = new Set(), failSrc = new Set();
   const isFail = r => !r.ok || /실패|Error|오류|40[13]|8050|시간 초과|timed out/i.test(String(r.note||''));

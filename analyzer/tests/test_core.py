@@ -1297,6 +1297,26 @@ class T(unittest.TestCase):
             finally:
                 busy.rollback(); busy.close()
 
+    def test_cache_reused_while_collecting(self):
+        from unittest import mock
+        from analyzer import pcache, collectlock
+        pcache.clear()
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            conn = db.connect(os.path.join(d, "t.db"))
+            n = {"c": 0}
+            fn = lambda: n.__setitem__("c", n["c"] + 1) or n["c"]
+            pcache.get("x", 1, fn, pcache.signature(conn))
+            db.log_fetch(conn, "news", "a", "a", True, 1)                        # 자료가 바뀜
+            self.assertEqual(pcache.get("x", 1, fn, pcache.signature(conn)), (2, False))   # 수집 안 할 땐 새로 계산
+            self.assertTrue(collectlock.acquire("background", total=10))
+            try:
+                db.log_fetch(conn, "news", "a", "a", True, 1)
+                self.assertEqual(pcache.get("x", 1, fn, pcache.signature(conn)), (2, "수집 중"))   # 수집 중엔 10분 안 저장본
+            finally:
+                collectlock.release()
+            conn.close()
+        pcache.clear()
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

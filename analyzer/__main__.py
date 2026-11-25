@@ -56,6 +56,12 @@ def background_collect(base_year=None, wait_max=6 * 3600, poll=60):
                     continue
     finally:
         collectlock.release()
+        try:                             # 수집 동안 커진 임시 기록(WAL) 정리 — 화면 읽기가 느려지지 않게
+            c = db.connect()
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            c.close()
+        except Exception:      # noqa: BLE001
+            pass
 
 
 def do_analyze(code, base_year=None, offline=False, quiet=False, fresh=False):

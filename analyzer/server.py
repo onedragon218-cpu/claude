@@ -721,6 +721,12 @@ def warm_once(state):
     try:
         s = pcache.signature(conn)
         stable, state["last"] = s == state.get("last"), s
+        if stable and not state.get("ckpt") == s:      # 한가할 때 임시 기록(WAL) 정리
+            try:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:      # noqa: BLE001
+                pass
+            state["ckpt"] = s
         if not stable or pcache.is_warm(s):
             return False
         row = conn.execute("SELECT stock_code FROM companies ORDER BY updated_at DESC LIMIT 1").fetchone()
