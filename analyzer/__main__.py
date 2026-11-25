@@ -30,6 +30,7 @@ def background_collect(base_year=None, wait_max=6 * 3600, poll=60):
     화면에서 수동 갱신이 돌고 있으면 끝날 때까지 기다림. 받는 주기는 평소 규칙 그대로(주가·공시 매일, 뉴스 3일, 컨센서스 7일)."""
     import time
     from . import collectlock, pcache
+    db.set_wal(wait=60)                  # 화면이 수집 중에도 읽을 수 있게 먼저 WAL로(2026-11-25)
     waited = 0
     while not collectlock.acquire("background", kind="백그라운드 수집"):
         st = collectlock.status() or {}

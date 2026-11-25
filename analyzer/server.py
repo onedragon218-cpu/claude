@@ -202,14 +202,29 @@ class H(BaseHTTPRequestHandler):
             msg = ("자료를 받는 중이라 DB가 잠시 바쁩니다. 5초 뒤 저절로 다시 엽니다." if busy else f"화면을 만들다 오류가 났습니다: {type(e).__name__}: {e}")
             if u.path.startswith("/api/"):
                 return self._send(503 if busy else 500, json.dumps({"error": msg}, ensure_ascii=False), "application/json")
+            extra = ""
+            if busy:
+                from . import collectlock
+                st = collectlock.status() or {}
+                if True:
+                    try:
+                        db.set_wal(wait=0)       # 이 틈에 WAL로 바꿔 보기(바뀌면 다음부터는 수집 중에도 열림)
+                    except Exception:      # noqa: BLE001
+                        pass
+                who = (f"<p>지금 {html.escape(str(st.get('kind') or '수집'))} 중: {st.get('done', 0)}/{st.get('total', '?')}곳"
+                       f"{(' · ' + html.escape(str(st.get('current')))) if st.get('current') else ''}</p>") if st else ""
+                extra = (who + "<p>1분 넘게 계속되면 아래 버튼으로 백그라운드 수집을 멈추세요. 지금 회사까지만 하고 멈추며, 다음 로그인·평일 07:13에 이어서 받습니다.</p>"
+                         "<button onclick=\"fetch('/api/collect/stop',{method:'POST'}).then(r=>r.json()).then(j=>{document.getElementById('m').textContent=j.message})\">백그라운드 수집 멈추기</button> "
+                         "<span id='m' style='color:#555'></span>"
+                         "<p style='color:#555'>버튼으로 안 되면: Windows 검색에서 '작업 스케줄러' → 왼쪽 '작업 스케줄러 라이브러리' → <b>CorpAnalyzer-Update</b>를 마우스 오른쪽 → <b>끝내기</b>.</p>")
             body = (f"<!doctype html><meta charset='utf-8'>{'<meta http-equiv=refresh content=5>' if busy else ''}"
-                    f"<div style='font-family:sans-serif;max-width:760px;margin:40px auto;line-height:1.6'><h2>{html.escape(msg)}</h2>"
+                    f"<div style='font-family:sans-serif;max-width:760px;margin:40px auto;line-height:1.6'><h2>{html.escape(msg)}</h2>{extra}"
                     + ("" if busy else f"<p>아래 내용을 그대로 복사해 알려 주세요.</p><pre style='white-space:pre-wrap;background:#f4f4f2;padding:12px'>{html.escape(traceback.format_exc()[-2500:])}</pre>")
                     + "</div>")
             return self._send(503 if busy else 500, body)
 
     def _get(self, u, q, by):
-        conn = db.connect(timeout=1)          # 화면은 오래 기다리지 않음(쓰기는 건너뛰고, 그래도 안 되면 위에서 안내)
+        conn = db.connect(timeout=8)          # 읽기는 조금 기다림(옛 방식에서 수집이 저장하는 순간 잠깐 막힘). 쓰기는 가치평가에서 짧게 시도하고 건너뜀
         try:
             if u.path == "/api/whoami":
                 from . import lan
@@ -328,6 +343,14 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps({"error": "넣을 내용이 없습니다", "notes": notes}, ensure_ascii=False), "application/json")
             total = nodeview.save_review(clean)
             return self._send(200, json.dumps({"saved": got, "total": total, "notes": notes}, ensure_ascii=False), "application/json")
+        if u.path == "/api/collect/stop":
+            from . import collectlock, lan
+            if not lan.is_local(self.client_address[0]):
+                return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
+            self._drain()
+            ok = collectlock.request_stop()
+            return self._send(200, json.dumps({"ok": ok, "message": "멈춤을 요청했습니다. 지금 회사가 끝나면 멈추고 화면이 저절로 열립니다(1~2분)." if ok
+                                               else "돌고 있는 백그라운드 수집을 찾지 못했습니다. 아래 안내대로 작업 스케줄러에서 멈춰 주세요."}, ensure_ascii=False), "application/json")
         if u.path == "/api/refetch":
             # B탭 [다시 받기]: 실패한 출처만 기다리는 기간을 무시하고 지금 다시 받기(PC에서만)
             from . import lan
@@ -738,6 +761,8 @@ def serve(port=8765):
         print(f"[오류] {port} 포트를 열 수 없습니다: {last}. 다른 프로그램이 이 포트를 쓰고 있는지 확인하세요.")
         raise SystemExit(2)
     print(f"화면 서버 시작: http://localhost:{port}  버전 {__version__}  데이터 {config.DATA_DIR}  (종료: Ctrl+C)", flush=True)
+    mode = db.set_wal(wait=20)          # 수집이 쓰는 중에도 화면이 읽을 수 있게(2026-11-25)
+    print(f"DB 방식: {mode or '확인 못 함(다른 프로그램이 쓰는 중 — 다음 연결 때 다시 시도)'}", flush=True)
     threading.Thread(target=_warm_loop, daemon=True).start()      # 갱신 뒤 첫 화면을 미리 계산
     if lan.enabled():
         tport = port + 1 if port != 8765 else lan.HTTPS_PORT

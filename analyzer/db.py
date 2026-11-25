@@ -117,6 +117,30 @@ def ensure_tables(conn, script):
         _SCHEMA_OK[key] = True
 
 
+def set_wal(path=None, wait=30):
+    """DB를 WAL 방식으로 바꿀 때까지 최대 wait초 다시 시도(서버·백그라운드 수집이 시작할 때). 반환: 바뀐 뒤 방식('wal' 등)
+    바꾸려면 잠깐 혼자 써야 해서, 다른 프로그램이 쓰는 중이면 실패할 수 있음 → 잠깐씩 기다리며 되풀이."""
+    import time
+    path = path or config.DB_PATH
+    if not os.path.exists(path):
+        return None
+    t0, mode = time.time(), None
+    while True:
+        try:
+            c = sqlite3.connect(path, timeout=2)
+            try:
+                mode = c.execute("PRAGMA journal_mode").fetchone()[0].lower()
+                if mode != "wal":
+                    mode = c.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower()
+            finally:
+                c.close()
+        except sqlite3.OperationalError:
+            mode = None
+        if mode == "wal" or time.time() - t0 >= wait:
+            return mode
+        time.sleep(1)
+
+
 def connect(path=None, timeout=30):
     """timeout: 다른 프로그램(백그라운드 수집 등)이 쓰는 중이면 기다리는 최대 초(화면은 짧게).
     2026-11-25: WAL 방식 — 수집이 쓰는 동안에도 화면이 읽을 수 있게(예전 방식은 화면이 쓰려다 5초 뒤 'database is locked'로 빈 화면)."""

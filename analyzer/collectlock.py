@@ -63,6 +63,19 @@ def acquire(who, **info):
     return False
 
 
+def request_stop():
+    """화면의 [백그라운드 수집 멈추기]: 잠금 파일에 멈춤 표시 → 백그라운드가 지금 회사까지만 하고 멈춤(다음 로그인·07:13에 이어서)"""
+    d = _read()
+    if not d:
+        return False
+    d["stop"] = True
+    tmp = lock_path() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, lock_path())
+    return True
+
+
 def mine():
     d = _read()
     return bool(d) and d.get("pid") == os.getpid()
@@ -71,7 +84,7 @@ def mine():
 def heartbeat(**info):
     """진행 상황과 함께 '살아 있음' 신호. 잠금이 내 것이 아니면 False(다른 쪽이 가져감 → 멈춰야 함)"""
     d = _read()
-    if not d or d.get("pid") != os.getpid():
+    if not d or d.get("pid") != os.getpid() or d.get("stop"):
         return False
     d.update(info, heartbeat=time.time())
     tmp = lock_path() + ".tmp"

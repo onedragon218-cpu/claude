@@ -514,7 +514,9 @@ def run(conn, code, P):
             checks.append({"check_no": 12, "check": "ROIC 범위", "year": r["year"], "metric": "roic",
                            "level": "WARN", "message": f"ROIC {r['roic']:.1%}가 일반 범위를 벗어남"})
     run_at = db.now()
+    prev_bt = conn.execute("PRAGMA busy_timeout").fetchone()[0]
     try:
+        conn.execute("PRAGMA busy_timeout = 300")          # 저장은 짧게만 기다림(바쁘면 건너뜀 — 화면이 늦어지지 않게)
         conn.execute("DELETE FROM validation WHERE stock_code=? AND check_no IN (11, 12)", (code,))
         for c in checks:
             conn.execute("INSERT INTO validation (stock_code,run_at,check_no,check_name,fiscal_year,metric,level,message) "
@@ -527,6 +529,11 @@ def run(conn, code, P):
         if "locked" not in str(e) and "busy" not in str(e):
             raise
         conn.rollback()
+    finally:
+        try:
+            conn.execute(f"PRAGMA busy_timeout = {int(prev_bt)}")
+        except Exception:      # noqa: BLE001
+            pass
     return {"rows": rows, "assumptions": A, "checks": checks}
 
 
