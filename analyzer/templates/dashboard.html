@@ -178,6 +178,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
       <span class="muted" id="cselinfo"></span>
     </div>
     <p class="muted" style="margin:6px 0 10px"><b>체크한 기업 갱신</b>: 왼쪽 체크 상자로 고른 기업만 갱신합니다(맨 위 체크 상자 = 지금 보이는 기업 모두). <b>체크한 기업 삭제</b>: 고른 기업과 그 수집 자료를 DB에서 지웁니다(PC에서만, 지우기 전 DB 자동 백업). <b>갱신 필요 표시</b>: 공시(1일)·뉴스(3일)·컨센서스(7일) 칸이 <span style="color:var(--bad)">빨간색</span>이면 기한이 지나 누르면 실제로 받을 것이 있다는 뜻입니다. 빨간 칸이 있는 기업만 체크 상자가 켜지고, 모두 기한 안이면 회색으로 잠깁니다(눌러도 받을 것이 없음). 보통은 백그라운드 수집이 채워 두므로 빨간 칸이 남아 있을 때만 누르시면 됩니다. <b>주가</b>는 기한 없이 언제든 [주가만 새로 받기(전체)] 또는 목록의 ↻(그 기업만)로 받습니다. <b>백그라운드 수집</b>: PC에 로그인할 때와 평일 07:13에 화면과 따로 자동으로 돌고, 꺼지면 멈췄다가 다음에 켜면 이어서 받습니다. 도는 동안에는 수동 갱신을 시작하지 않습니다(자료가 꼬이지 않게).</p>
+    <div id="prepstatus"></div>
     <div id="bgstatus"></div>
     <div id="ustatus"></div>
     <div class="tablewrap"><table id="comps"></table></div>
@@ -2680,6 +2681,12 @@ function renderJob(j){
   document.querySelectorAll('.cpr').forEach(b=>{ if (j.running) b.disabled = true; });
   renderBg(j.collect);
 }
+let PREP_SEEN = false;
+function renderPrep(P){
+  if (!P) return;
+  if (P.running){ PREP_SEEN = true; $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--accent)"><b>ROA 채우는 중</b> — ${P.done} / ${P.total}곳 (새 버전 설치 뒤 한 번: 실적 ROA 계산 + FnGuide ROE·ROA 추정 받기). 화면은 그대로 쓰셔도 됩니다.</div>`; }
+  else if (PREP_SEEN && P.finished_at) $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">ROA를 채웠습니다(${P.done}곳). <button onclick="location.reload()">새로 고침</button></div>`;
+}
 function renderBg(C){
   if (!C) return;
   const L = C.lock;
@@ -2689,10 +2696,10 @@ function renderBg(C){
   ['#uall','#uupsel','#uprall'].forEach(id=>{ const b = $(id); if (b && L){ b.disabled = true; b.title = '백그라운드 수집이 끝나면 누를 수 있습니다'; } });
   document.querySelectorAll('.cpr').forEach(b=>{ if (L) b.disabled = true; });
 }
-async function bgPoll(){ if (!SERVED || UJOB_RUNNING) return; try { const j = await (await fetch('/api/job')).json(); if (!j.running) renderBg(j.collect);
+async function bgPoll(){ if (!SERVED || UJOB_RUNNING) return; try { const j = await (await fetch('/api/job')).json(); renderPrep(j.prep); if (!j.running) renderBg(j.collect);
     if (BG_LOCKED && (!j.collect || !j.collect.lock)) $('#bgstatus').insertAdjacentHTML('beforeend', `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">백그라운드 수집이 끝났습니다. <button onclick="location.reload()">새로 고침</button>을 누르면 목록의 빨간 칸·오늘 받음이 새 상태로 바뀝니다.</div>`);
     if (!j.collect || !j.collect.lock){ BG_LOCKED = false; const b=$('#uprall'); if (b && !UJOB_RUNNING){ b.disabled = false; b.title=''; } document.querySelectorAll('.cpr').forEach(x=>{ if (!UJOB_RUNNING) x.disabled = false; }); cSelInfo(); } } catch(e){} }
-if (SERVED) setInterval(bgPoll, 30000);
+if (SERVED) setInterval(bgPoll, 15000);
 async function pollJob(){
   try { const j = await (await fetch('/api/job')).json(); renderJob(j);
     if (j.running) setTimeout(pollJob, 1500);
@@ -2721,7 +2728,7 @@ $('#uall').onclick = async () => {
     renderJob(j); setTimeout(pollJob, 1000);
   } catch(e){ $('#ustatus').textContent = '시작 실패: ' + e.message; cSelInfo(); }
 };
-if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } else renderBg(j.collect); }).catch(()=>{});
+if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } else { renderBg(j.collect); renderPrep(j.prep); } }).catch(()=>{});
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
 const UI_KEEP = ['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show',
   '#smkt','#smin','#sshow','#srisk',

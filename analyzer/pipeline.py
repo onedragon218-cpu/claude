@@ -897,6 +897,66 @@ def refetch(code, sources, base_year=None, conn=None):
     return res
 
 
+PREP = {"running": False, "done": 0, "total": 0, "current": None, "finished_at": None}
+
+
+def prepare_roa(base_year=None, wait=None):
+    """새 버전 설치 뒤 한 번: ROA가 아직 없는 회사의 파생값을 다시 계산(인터넷 없이)하고, FnGuide ROE·ROA 추정을 받음.
+    백그라운드 수집과 겹치지 않게 수집 잠금을 잡고, 잠금이 있으면 기다림. 반환: 처리한 회사 수"""
+    import time
+    from . import collectlock
+    P = config.periods(base_year)
+    conn = db.connect()
+    try:
+        todo = [r["stock_code"] for r in conn.execute(
+            "SELECT c.stock_code FROM companies c WHERE EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code AND f.metric='acc_assets') "
+            "AND NOT EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code AND f.metric='roa' AND f.value IS NOT NULL)")]
+        need_fg = [r["stock_code"] for r in conn.execute("SELECT stock_code FROM companies")
+                   if not db.fetched_recently(conn, "fg_highlight", r["stock_code"], config.TTL_DAYS["consensus"])]
+    finally:
+        conn.close()
+    codes = list(dict.fromkeys(todo + need_fg))
+    if not codes:
+        return 0
+    t0 = time.time()
+    while not collectlock.acquire("server", kind="ROA 준비", total=len(codes)):
+        if wait is not None and time.time() - t0 > wait:
+            return 0
+        time.sleep(30)
+    PREP.update(running=True, done=0, total=len(codes), current=None, finished_at=None)
+    n = 0
+    try:
+        conn = db.connect()
+        for i, code in enumerate(codes):
+            if not collectlock.heartbeat(current=code, done=i, total=len(codes), kind="ROA 준비"):
+                break
+            PREP.update(done=i, current=code)
+            try:
+                if code in todo:
+                    compute(conn, code, P)                       # ROA 실적(인터넷 없이)
+                if code in need_fg:
+                    try:
+                        url, est, act = fnguide.fetch_highlight(code)
+                        if est:
+                            ingest_consensus(conn, code, est, "FnGuide 하이라이트", db.today(), url)
+                        for y, v in act.items():
+                            for k, val in v.items():
+                                db.add_observation(conn, code, y, f"{k}_fnguide", val, unit="%", basis="연결", source="FnGuide",
+                                                   source_ref=url, report_year=y, col="Financial Highlight")
+                        conn.commit()
+                        db.log_fetch(conn, "fg_highlight", code, code, True, len(est) + len(act), None if est else "추정치 없음(실적만)")
+                    except fnguide.ConsensusUnavailable as e:
+                        db.log_fetch(conn, "fg_highlight", code, code, False, 0, str(e)[:200])
+                n += 1
+            except Exception:      # noqa: BLE001  한 회사가 실패해도 다음 회사
+                continue
+        conn.close()
+    finally:
+        PREP.update(running=False, done=n, current=None, finished_at=db.now())
+        collectlock.release()
+    return n
+
+
 def update_price(code, base_year=None, conn=None):
     """A탭 [주가만 새로 받기]: 기준일 주가(키움 수정주가 일봉 1순위, 실패하면 네이버)만 받고 시가총액 등 파생값만 다시 계산.
     공시·컨센서스·뉴스·판정은 건너뜀(빠르게). 반환: {"stats": ...}"""

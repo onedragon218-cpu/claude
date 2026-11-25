@@ -247,6 +247,7 @@ class H(BaseHTTPRequestHandler):
                     j = dict(JOB)
                 bg = collectlock.status()
                 n_all = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+                j["prep"] = dict(pipeline.PREP)
                 j["collect"] = {"lock": bg if bg and bg.get("who") == "background" else None,
                                 "done_today": len(collectlock.done_today(conn)), "total": n_all}
                 return self._send(200, json.dumps(j, ensure_ascii=False), "application/json")
@@ -738,6 +739,16 @@ def warm_once(state):
         conn.close()
 
 
+def _prep_loop():
+    """새 버전 설치 뒤 한 번: ROA 채우기(30초 뒤 시작, 백그라운드 수집이 돌면 끝날 때까지 기다림)"""
+    import time
+    time.sleep(30)
+    try:
+        pipeline.prepare_roa()
+    except Exception:      # noqa: BLE001
+        pass
+
+
 def _warm_loop():
     import time
     state = {}
@@ -770,6 +781,7 @@ def serve(port=8765):
     mode = db.set_wal(wait=20)          # 수집이 쓰는 중에도 화면이 읽을 수 있게(2026-11-25)
     print(f"DB 방식: {mode or '확인 못 함(다른 프로그램이 쓰는 중 — 다음 연결 때 다시 시도)'}", flush=True)
     threading.Thread(target=_warm_loop, daemon=True).start()      # 갱신 뒤 첫 화면을 미리 계산
+    threading.Thread(target=_prep_loop, daemon=True).start()      # ROA가 없는 회사 채우기(새 버전 설치 뒤 한 번)
     if lan.enabled():
         tport = port + 1 if port != 8765 else lan.HTTPS_PORT
         try:
