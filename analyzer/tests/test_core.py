@@ -1129,7 +1129,9 @@ class T(unittest.TestCase):
             def fake_payload(c, code, by=None, **kw):
                 called.append(code)
                 pcache.get("x", None, lambda: 1, pcache.signature(c))
-            with mock.patch.object(db, "connect", lambda p=None: sqlite3_connect(path)), mock.patch.object(_r, "payload", fake_payload):
+            from analyzer import sourcehealth
+            with mock.patch.object(db, "connect", lambda p=None: sqlite3_connect(path)), mock.patch.object(_r, "payload", fake_payload), \
+                    mock.patch.object(sourcehealth, "run_canary", lambda c, force=False: {}):
                 st = {}
                 self.assertFalse(server.warm_once(st))          # 처음 본 서명 → 1분 더 지켜봄
                 self.assertTrue(server.warm_once(st))           # 그대로 → 미리 계산
@@ -1354,6 +1356,45 @@ class T(unittest.TestCase):
                 M.background_collect(poll=0.2)
             self.assertEqual(sorted(done), ["111111", "222222", "333333", "444444"])   # 차례를 넘겨준 뒤에도 이어서 끝까지
             self.assertIsNone(collectlock.status())
+
+    def test_source_health_alarms(self):
+        import datetime as dtm
+        from analyzer import sourcehealth
+        with tempfile.TemporaryDirectory() as d:
+            conn = db.connect(os.path.join(d, "t.db"))
+            now = dtm.datetime(2026, 11, 26, 12, 0)
+            t = lambda h: (now - dtm.timedelta(hours=h)).strftime("%Y-%m-%d %H:%M:%S")
+            ins = lambda src, key, ok, note, h: conn.execute(
+                "INSERT INTO fetch_log(source,key,stock_code,fetched_at,ok,n_items,note) VALUES (?,?,?,?,?,?,?)", (src, key, key[:6], t(h), ok, 1 if ok else 0, note))
+            for i in range(4):                                             # FnGuide: 24시간 안에 4번 모두 실패
+                ins("fg_highlight", f"10000{i}", 0, "HTTP 404", 1 + i)
+            for i in range(6):                                             # WiseReport: 정상
+                ins("consensus_src", f"20000{i}:WiseReport", 1, None, 2)
+            ins("consensus_src", "200009:WiseReport", 0, "추정치(E) 열이 없음", 2)   # 자료가 원래 없음 → 실패로 안 셈
+            ins("canary", "뉴스", 0, "ConnectionError", 3)                 # 시험 수집 실패
+            conn.commit()
+            st = sourcehealth.status(conn, now)
+            al = {a["name"]: a["why"] for a in st["alarms"]}
+            self.assertIn("FnGuide", al)
+            self.assertIn("4번 모두 실패", al["FnGuide"])
+            self.assertIn("뉴스", al)
+            self.assertNotIn("WiseReport 컨센서스", al)
+            self.assertFalse(st["offline"])
+            w = next(r for r in st["rows"] if r["name"] == "WiseReport 컨센서스")
+            self.assertEqual((w["ok1"], w["n1"]), (7, 7))
+            conn.close()
+
+    def test_cons_gap_signal(self):
+        from analyzer import report
+        vals = {("revenue", 2027): (1000, "WiseReport"), ("revenue_fg", 2027): (1080, "FnGuide 하이라이트"),
+                ("op_income", 2027): (100, "WiseReport"), ("op_income_fg", 2027): (130, "FnGuide 하이라이트"),
+                ("eps", 2027): (500, "WiseReport"), ("eps_fg", 2027): (540, "FnGuide 하이라이트")}
+        g = {x["metric"]: x for x in report.cons_gap(lambda m, y: vals.get((m, y), (None, None)), 2027)}
+        self.assertFalse(g["revenue"]["big"])                 # 매출 7.4% < 10%
+        self.assertTrue(g["op_income"]["big"])                # 영업이익 23% > 15%
+        self.assertFalse(g["eps"]["big"])                     # EPS 7.4% < 15%
+        vals[("op_income", 2027)] = (100, "FnGuide")          # 주 컨센이 이미 FnGuide면 비교 안 함
+        self.assertNotIn("op_income", {x["metric"] for x in report.cons_gap(lambda m, y: vals.get((m, y), (None, None)), 2027)})
 
     def test_lan_password_and_network_rules(self):
         from analyzer import lan

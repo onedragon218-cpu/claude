@@ -45,6 +45,13 @@ def background_collect(base_year=None, wait_max=6 * 3600, poll=60):
     if not wait_turn():
         return
     try:
+        try:                             # 하루 한 번 출처 시험 수집(삼성전자) — 고장 난 출처를 바로 알리기
+            from . import sourcehealth
+            c = db.connect()
+            sourcehealth.run_canary(c)
+            c.close()
+        except Exception:      # noqa: BLE001
+            pass
         with pcache.batch():
             while True:                  # 화면 쪽(수동 갱신·ROA 채우기)이 차례를 가져가면 끝날 때까지 기다렸다가 남은 회사부터 이어서
                 conn = db.connect()

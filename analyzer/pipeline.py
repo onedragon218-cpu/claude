@@ -911,8 +911,13 @@ def prepare_roa(base_year=None, wait=None):
         todo = [r["stock_code"] for r in conn.execute(
             "SELECT c.stock_code FROM companies c WHERE EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code AND f.metric='acc_assets') "
             "AND NOT EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code AND f.metric='roa' AND f.value IS NOT NULL)")]
+        have_new = {r[0] for r in conn.execute("SELECT DISTINCT stock_code FROM consensus WHERE metric='revenue_fg'")}
         need_fg = [r["stock_code"] for r in conn.execute("SELECT stock_code FROM companies")
-                   if not db.fetched_recently(conn, "fg_highlight", r["stock_code"], config.TTL_DAYS["consensus"])]
+                   if not db.fetched_recently(conn, "fg_highlight", r["stock_code"], config.TTL_DAYS["consensus"])
+                   or r["stock_code"] not in have_new]      # 2026-11-26: 매출·영업이익·EPS 추정도 받는 판 — 아직 없는 회사는 한 번 더(추정치 없는 회사는 기록으로 판단)
+        none_ok = {r[0] for r in conn.execute("SELECT DISTINCT key FROM fetch_log WHERE source='fg_highlight' AND ok=1 AND note LIKE '추정치 없음%' "
+                                              "AND fetched_at >= '2026-11-26'")}
+        need_fg = [c for c in need_fg if c not in none_ok or not db.fetched_recently(conn, "fg_highlight", c, config.TTL_DAYS["consensus"])]
     finally:
         conn.close()
     codes = list(dict.fromkeys(todo + need_fg))

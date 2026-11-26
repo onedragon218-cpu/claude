@@ -122,6 +122,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 </header>
 <div id="riskbar" style="max-width:1200px;margin:10px auto 0;padding:0 16px;display:none"></div>
 <div id="rfbar" style="max-width:1200px;margin:10px auto 0;padding:0 16px;display:none"></div>
+<div id="srcalarm"></div>
 <nav id="tabs">
   <button data-s="A" class="on">A. 기업 검색</button>
   <button data-s="B">B. 수집 현황</button>
@@ -210,6 +211,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
     <div class="tablewrap"><table id="coverage"></table></div>
   </div>
+  <div class="card"><h2>출처 상태 <span class="muted" style="font-size:14px;font-weight:400">출처가 조용히 고장 나면 바로 알기 위한 표</span></h2><div class="tablewrap"><table id="b-src"></table></div><p class="muted" id="b-srcnote" style="margin:6px 0 0"></p></div>
   <div class="card"><h2>화면 불러오기 시간</h2><p class="muted" id="b-perf"></p></div>
   <div class="card"><h2>최근 수집 기록</h2><p class="muted">같은 자료를 다시 요청하지 않았는지 이 기록으로 확인할 수 있습니다. 실패한 출처는 [다시 받기]로 기다리는 기간(뉴스 3일 등)을 무시하고 지금 다시 받을 수 있습니다(기록은 지우지 않고 새 줄이 위에 생김).</p>
     <div class="row" style="gap:8px;align-items:center;margin-bottom:6px"><button id="b-refall" style="display:none"></button><span class="muted" id="b-refmsg"></span></div>
@@ -436,6 +438,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <div class="chartbox" id="n-qbox" style="height:240px"><canvas id="n-q"></canvas></div>
     <h3>해마다 한 줄</h3>
     <div class="tablewrap"><table id="n-table"></table></div>
+    <div class="tablewrap" id="n-peer"></div>
     <p class="muted" id="n-memo"></p>
   </div>
 </section>
@@ -972,7 +975,8 @@ function renderSingles(){
     o.plugins.tooltip.callbacks = {label: ctx => { const p = pts[ctx.dataIndex]; if(!p) return '자료 없음';
       const r = yoy(m, ys[ctx.dataIndex], BY);
       const corr = p.kind==='전망' && p.p.raw!=null && Math.abs((p.p.factor??1)-1)>1e-9 ? (CORR ? `원래 컨센서스 ${fmt(p.p.raw,m.unit)} × 보정계수 ${p.p.factor.toFixed(2)}` : `보정 꺼짐(보정 시 ×${p.p.factor.toFixed(2)})`) : '';
-      return [`${fmt(p.v,m.unit)} ${m.unit} (${p.kind})`, corr, r?`전년 대비 ${yoyText(r)}`:'', p.p.status?`상태: ${p.p.status}`:'', p.p.note?String(p.p.note).slice(0,70):''].filter(Boolean); }};
+      const gap = p.kind==='전망' && p.p.gap ? p.p.gap.map(g=>`⚠ 추정 불확실: ${g.name} 주 컨센 ${fmt(g.main,'')} · FnGuide ${fmt(g.fg,'')} (차이 ${(g.pct*100).toFixed(0)}%)`) : [];
+      return [`${fmt(p.v,m.unit)} ${m.unit} (${p.kind})`, corr, ...gap, r?`전년 대비 ${yoyText(r)}`:'', p.p.status?`상태: ${p.p.status}`:'', p.p.note?String(p.p.note).slice(0,70):''].filter(Boolean); }};
     if (charts[m.key]) charts[m.key].destroy();
     charts[m.key] = mkChart($('#c-'+m.key), {type:'line', data:{labels:ys.map(y=> y>BY? y+'E' : y===BY? y+'(현재)': String(y)),
       datasets:[{data:pts.map(p=>p?p.v:null), borderColor:c, backgroundColor:c, borderWidth:2, pointRadius:4, pointHoverRadius:6,
@@ -1677,6 +1681,30 @@ $('#m-save').onclick = async () => {
   } catch(e){ $('#m-msg').textContent = '저장 실패: ' + e.message; }
 };
 
+// ---- 업종 안 위치(analyzer/peerrank.py) ----
+const PR = (D.peerrank && !D.peerrank.error) ? D.peerrank : null;
+const prOf = code => PR ? (PR.companies||{})[code] : null;
+function prShort(code){            // P·U·Q 표 칸: PBR·ROE 위치 요약
+  const x = prOf(code); if (!x) return '<span class="muted">–</span>';
+  if (!x.group) return `<span class="muted" title="${esc(x.why||'')}">비교 불가</span>`;
+  const t = m => { const r = x.metrics[m]; return r && r.rank ? `${m==='pbr'?'PBR':'ROE'} ${r.rank}/${r.n}위` : null; };
+  const parts = [t('pbr'), t('roe')].filter(Boolean);
+  return parts.length ? `<span title="${esc(x.group)} · DB 안 ${x.n}곳 중(시장 전체 아님) · PBR은 낮을수록, ROE는 높을수록 1위">${parts.join(' · ')}<br><span class="muted" style="font-size:11px">${esc(x.group)} · PBR 낮은 순 · ROE 높은 순</span></span>` : '<span class="muted">–</span>';
+}
+function renderPeer(){
+  const el = $('#n-peer'); if (!el) return;
+  const x = prOf(D.company.code);
+  if (!PR || !x){ el.innerHTML = '<p class="muted">업종 안 위치를 계산하지 못했습니다(업종코드 또는 실적 자료 없음).</p>'; return; }
+  if (!x.group){ el.innerHTML = `<p class="muted">업종 안 위치: 비교 불가 — ${esc(x.why||'')}</p>`; return; }
+  const fv = (m, v) => v==null ? '–' : (m==='per'||m==='pbr' ? (+v).toFixed(2)+'배' : (+v).toFixed(1)+'%');
+  el.innerHTML = `<h3 style="margin:12px 0 4px">업종 안 위치 <span class="muted" style="font-size:13px;font-weight:400">${esc(x.group)} · DB 안 ${x.n}곳 중 · ${x.year}년 실적 기준(PER·PBR은 기준일 주가)</span></h3>` +
+    `<table><tr><th class="l">지표</th><th>이 회사</th><th>업종 중앙값</th><th>순위</th><th class="l">위치</th></tr>` +
+    PR.metrics.map(([m, label])=>{ const r = x.metrics[m]||{};
+      const bar = r.rank ? `<span style="display:inline-block;width:120px;height:8px;background:var(--surface-2);border-radius:4px;vertical-align:middle;position:relative"><span style="position:absolute;left:${Math.max(0,Math.min(100,100-r.top_pct))}%;top:-3px;width:4px;height:14px;background:${r.top_pct<=30?'var(--good)':r.top_pct>=70?'var(--bad)':'var(--text-secondary)'}"></span></span> ${r.n}곳 중 ${r.rank}위 <span class="muted">(${esc(r.better)})</span>` : '<span class="muted">순위 못 매김(값 없음)</span>';
+      return `<tr><td class="l">${esc(label)}</td><td>${fv(m, r.v)}</td><td>${fv(m, r.median)}</td><td>${r.rank?`${r.rank}/${r.n}`:'–'}</td><td class="l">${bar}</td></tr>`; }).join('') +
+    `</table><p class="muted" style="margin:4px 0 0;font-size:12px">${esc(PR.note)} 막대: 오른쪽일수록 업종 안에서 좋은 쪽.</p>`;
+}
+
 // ---- N. 숫자 모양 ----
 const SH = D.shape || {error:'자료 없음'};
 const valLabelPlugin = {id:'valLabels', afterDatasetsDraw(chart){ const {ctx} = chart;
@@ -1725,9 +1753,10 @@ function renderN(){
   const p = SH.partial;
   if (p) h += `<tr style="background:var(--info-bg)"><td class="l">${esc(p.label)}</td><td>${n0(p.revenue)}</td><td>${p.op==null?'–':p.op.toFixed(1)}</td><td>${pc(p.margin)}</td><td>${n0(p.ocf)}</td><td colspan="4" class="l">순차입 ${n0(p.net_debt)}억(−는 순현금, ${esc(p.net_debt_when)})</td></tr>`;
   h += (SH.cons||[]).map(c=> c.none ? `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td colspan="8" class="l">컨센서스 없음</td></tr>`
-    : `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td>${n0(c.revenue)}</td><td>${n0(c.op)}</td><td>${pc(c.margin)}</td><td colspan="2" class="l">3개월 전 대비 영업이익 ${c.rev3m_tag ? esc(c.rev3m_tag) : c.rev3m==null ? '–' : (c.rev3m>=0?'+':'')+c.rev3m.toFixed(1)+'%'}</td><td title="FnGuide 추정">${c.roe==null?'–':(+c.roe).toFixed(1)}</td><td title="FnGuide 추정">${c.roa==null?'–':(+c.roa).toFixed(1)}</td><td title="FnGuide ROE ÷ ROA(추정 — 지배/전체 기준 차이로 근사)">${c.roe!=null&&c.roa?(c.roe/c.roa).toFixed(2):'–'}</td></tr>`).join('');
-  h += `<tr><td colspan="9" class="l muted" style="white-space:normal;font-size:12px">ROA = 당기순이익 ÷ 평균 자산총계(DART로 계산, FnGuide와 대조). 레버리지 = 평균 자산 ÷ 평균 지배자본 ≈ ROE ÷ ROA — ROE가 ROA보다 훨씬 높으면 빚이 ROE를 키우는 몫이 큼. 컨센 행의 ROE·ROA는 FnGuide 추정(레버리지는 ROE ÷ ROA 근사).</td></tr>`;
+    : `<tr style="color:var(--text-muted)"><td class="l">${c.year}E(컨센)</td><td>${n0(c.revenue)}</td><td>${n0(c.op)}</td><td>${pc(c.margin)}</td><td colspan="2" class="l">3개월 전 대비 영업이익 ${c.rev3m_tag ? esc(c.rev3m_tag) : c.rev3m==null ? '–' : (c.rev3m>=0?'+':'')+c.rev3m.toFixed(1)+'%'}${(c.gap||[]).length?` <span class="badge b-WARN" title="${esc(c.gap.map(g=>`${g.name}: 주 컨센 ${n0(g.main)} · FnGuide ${n0(g.fg)} (차이 ${(g.pct*100).toFixed(0)}%)`).join(' / '))}">추정 불확실(${c.gap.map(g=>g.name).join('·')})</span>`:''}</td><td title="FnGuide 추정">${c.roe==null?'–':(+c.roe).toFixed(1)}</td><td title="FnGuide 추정">${c.roa==null?'–':(+c.roa).toFixed(1)}</td><td title="FnGuide ROE ÷ ROA(추정 — 지배/전체 기준 차이로 근사)">${c.roe!=null&&c.roa?(c.roe/c.roa).toFixed(2):'–'}</td></tr>`).join('');
+  h += `<tr><td colspan="9" class="l muted" style="white-space:normal;font-size:12px">ROA = 당기순이익 ÷ 평균 자산총계(DART로 계산, FnGuide와 대조). '추정 불확실' = 주 컨센서스(WiseReport)와 FnGuide 추정이 매출 10%·영업이익·EPS 15% 넘게 다름(계산은 바꾸지 않음, 마우스로 두 값 확인). 레버리지 = 평균 자산 ÷ 평균 지배자본 ≈ ROE ÷ ROA — ROE가 ROA보다 훨씬 높으면 빚이 ROE를 키우는 몫이 큼. 컨센 행의 ROE·ROA는 FnGuide 추정(레버리지는 ROE ÷ ROA 근사).</td></tr>`;
   $('#n-table').innerHTML = h;
+  renderPeer();
   $('#n-memo').textContent = SH.memo || '';
 }
 
@@ -1878,13 +1907,13 @@ function renderP(){
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${hit?'color:var(--good);font-weight:600':''}">${n0(c.fair[i])}원 ${hit?'✓':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   $('#p-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +
-    `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th>` +
+    `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th><th class="l" title="DB 안 같은 업종 회사 중 위치(시장 전체 아님)">업종 안 위치</th>` +
     use.concat(use.includes('roa')?[]:['roa']).map(m=>`<th class="l">${PV.metrics[m][0]}${m==='roa'&&!use.includes('roa')?' <span class="muted" style="font-weight:400">(표시만)</span>':''}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
     (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td><b>${n0(r.price)}원</b></td>` +
       pcell(r,c,2) + pcell(r,c,1) + pcell(r,c,0) +
       `<td class="l">${c.status==='통과' ? (tierList(c)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tierList(c)}</span>`) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td>` +
-      use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
-    : `<tr><td colspan="${7+use.length}" class="l">${T[PTAB] ? `${T[PTAB].name}에 해당하는 기업이 없습니다. 다른 분류나 '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+      `<td class="l" style="white-space:nowrap">${prShort(r.code)}</td>` + use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
+    : `<tr><td colspan="${8+use.length}" class="l">${T[PTAB] ? `${T[PTAB].name}에 해당하는 기업이 없습니다. 다른 분류나 '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
   $('#p-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 적정가 칸: 위 = 적정가(✓ = 현재가보다 높음), 아래 = 현재가 대비 %(안전 여유). 칸에 마우스를 올리면 계산식이 보입니다. 적정가 = ROE × BPS ÷ 10 ≈ 그해 EPS × 10(PER 10배, 요구수익률 10%)${factor?' × 0.83':''}. ` +
     `작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로. 작년이 적자였다가 오른 경우도 우상향(턴어라운드)으로 보며 그 구간은 증가율(%) 문턱을 적용하지 않습니다. 고른 지표 중 작년 실적이나 컨센서스가 하나라도 없으면 '자료 부족'으로 따로 모읍니다(있는 값으로 이미 우상향이 깨졌으면 '우상향 아님').`;
 }
@@ -1932,13 +1961,13 @@ function renderU(){
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${hit?'color:var(--good);font-weight:600':''}">${n0(c.fair[i])}원 ${hit?'✓':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   $('#u-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +
-    `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th>` +
+    `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th><th class="l" title="DB 안 같은 업종 회사 중 위치(시장 전체 아님)">업종 안 위치</th>` +
     use.concat(use.includes('roa')?[]:['roa']).map(m=>`<th class="l">${PV.metrics[m][0]}${m==='roa'&&!use.includes('roa')?' <span class="muted" style="font-weight:400">(표시만)</span>':''}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
     (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td><b>${n0(r.price)}원</b></td>` +
       ucell(r,c,2) + ucell(r,c,1) + ucell(r,c,0) +
       `<td class="l">${c.status==='통과' ? (tierList(c)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tierList(c)}</span>`) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td>` +
-      use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
-    : `<tr><td colspan="${7+use.length}" class="l">${T[UTAB] ? `${T[UTAB].name}에 해당하는 기업이 없습니다. '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+      `<td class="l" style="white-space:nowrap">${prShort(r.code)}</td>` + use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
+    : `<tr><td colspan="${8+use.length}" class="l">${T[UTAB] ? `${T[UTAB].name}에 해당하는 기업이 없습니다. '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
   $('#u-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 적정가 칸: 위 = 적정가(✓ = 현재가보다 높음), 아래 = 현재가 대비 %. 칸에 마우스를 올리면 계산식이 보입니다. ` +
     `10년 최저 PBR = 최근 10개 연도 연말 PBR(연말 시가총액 ÷ 지배주주 자본, 화면 N 표와 같은 값) 중 가장 낮은 값. BPS는 컨센서스 원래 값(보정 없음 — BPS는 대부분 이미 쌓인 자본이라 이익 보정 0.83을 통째로 곱하지 않음). ` +
     `화면 P(ROE 적정가)와 우상향 조건은 같지만 설정·분류는 따로 움직입니다.`;
@@ -2029,15 +2058,16 @@ function renderQ(){
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${q.wait?'color:var(--text-muted)':hit?'color:var(--good);font-weight:600':''}">${n0(q.tv)}원 ${hit?'✓':''}${q.wait?' <span class="badge b-WARN">원천 대기</span>':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tl = x => x.st!=='통과' ? '' : ['t1','t2','t3'].filter(k=>x.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   const pctv = v => v==null ? '–' : (v*100).toFixed(1);
-  $('#q-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th><th>1차 오늘가치<br><span class="muted" style="font-weight:400">${Y[2]}E(내후년)</span></th><th>2차 오늘가치<br><span class="muted" style="font-weight:400">${Y[1]}E(내년)</span></th><th>3차 오늘가치<br><span class="muted" style="font-weight:400">${Y[0]}E(올해)</span></th><th class="l">해당 분류</th><th class="l">가치 경로</th><th class="l">적정 PER<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l">ROE(이월, %)<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l" title="작년 DART 계산 · 올해~내후년 FnGuide 추정">ROA(%)<br><span class="muted" style="font-weight:400">${(Y[0]-1)%100}→${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th></tr>` +
+  $('#q-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th><th>1차 오늘가치<br><span class="muted" style="font-weight:400">${Y[2]}E(내후년)</span></th><th>2차 오늘가치<br><span class="muted" style="font-weight:400">${Y[1]}E(내년)</span></th><th>3차 오늘가치<br><span class="muted" style="font-weight:400">${Y[0]}E(올해)</span></th><th class="l">해당 분류</th><th class="l">가치 경로</th><th class="l">적정 PER<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l">ROE(이월, %)<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l" title="DB 안 같은 업종 회사 중 위치(시장 전체 아님)">업종 안 위치</th><th class="l" title="작년 DART 계산 · 올해~내후년 FnGuide 추정">ROA(%)<br><span class="muted" style="font-weight:400">${(Y[0]-1)%100}→${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th></tr>` +
     (rows.length ? rows.map(x=>`<tr><td class="l"><a href="${companyUrl(x.r.code)}">${esc(x.r.name)}</a> <span class="muted">${esc(x.r.code)}</span></td><td><b>${x.r.data ? n0(x.r.data.price)+'원' : '–'}</b></td>` +
       cell(x,2) + cell(x,1) + cell(x,0) +
       `<td class="l">${x.st==='통과' ? (tl(x)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tl(x)}</span>`) : `<span class="muted">${esc(x.st)} — ${esc(x.why||'')}</span>`}</td>` +
       `<td class="l" title="${esc(x.c ? x.c.path.why : '')}">${x.c ? esc(x.c.path.label) : '–'}</td>` +
       `<td class="l" style="white-space:nowrap">${x.c ? x.c.rows.map(q=>q.per==null?'–':q.per.toFixed(1)).join(' → ') : '–'}</td>` +
       `<td class="l" style="white-space:nowrap">${x.c ? x.c.rows.map(q=>pctv(q.roe)).join(' → ') : '–'}</td>` +
+      `<td class="l" style="white-space:nowrap">${prShort(x.r.code)}</td>` +
       `<td class="l" style="white-space:nowrap">${((PVrow[x.r.code]||{}).series||{}).roa ? PVrow[x.r.code].series.roa.map(v=>v==null?'–':(+v).toFixed(1)).join(' → ') : '–'}</td></tr>`).join('')
-    : `<tr><td colspan="10" class="l">${T[QTAB] ? `${T[QTAB].name}에 해당하는 기업이 없습니다. '${use.length?'우상향 통과 전체':'대상 전체'}'를 눌러 각 기업의 연도별 오늘가치를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
+    : `<tr><td colspan="11" class="l">${T[QTAB] ? `${T[QTAB].name}에 해당하는 기업이 없습니다. '${use.length?'우상향 통과 전체':'대상 전체'}'를 눌러 각 기업의 연도별 오늘가치를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
   $('#q-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 오늘가치 칸: 위 = 오늘가치(✓ = 현재가보다 높음), 아래 = 현재가 대비 %. 칸에 마우스를 올리면 계산식이 보입니다. 원천(증권사) 1곳뿐인 해는 회색 '원천 대기'로 보여 주되 분류에서 뺍니다. ` +
     `'판정 못 함'은 적자, ROE ≤ g(성장할수록 가치 감소), Ke − g < 2%p처럼 공식이 성립하지 않는 경우입니다. 보정: ${p.use_cal?'앱 실측 보정계수':'앱 공통 규칙(×0.83, 3개월 사이 5% 넘게 하향이면 ×0.73)'} · Ke: ${p.fixed_r?'10% 고정':'그해 국고채 10년 + β × ERP(화면 G·O와 같음)'} · g ${(p.g*100).toFixed(0)}%.`;
   renderQDetail(p);
@@ -2432,7 +2462,22 @@ async function bRefetch(sources){
     setTimeout(()=>location.reload(), 3000);
   } catch(e){ $('#b-refmsg').textContent = '실패: ' + e.message; document.querySelectorAll('.b-ref,#b-refall').forEach(b=>b.disabled=false); } }
 
-function renderAll(){ renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderU(); renderQ(); renderR(); renderS(); renderT(); renderKiwoom(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
+function renderSources(){
+  const S = D.sources; if (!S || S.error){ return; }
+  const A = S.alarms||[];
+  $('#srcalarm').innerHTML = !A.length ? '' : `<div class="warnbox" style="border-left-color:var(--bad);background:var(--bad-bg);max-width:1200px;margin:8px auto">` +
+    (S.offline ? `<b>⚠ 모든 출처가 함께 실패하고 있습니다</b> — 인터넷 연결(회사 네트워크·VPN)을 먼저 확인해 주세요.`
+     : `<b>⚠ 출처 고장 경보</b> — ${A.map(a=>`<b>${esc(a.name)}</b>: ${esc(a.why)}`).join(' · ')}. 이 출처의 새 자료는 믿기 전에 확인이 필요합니다(형식이 바뀌었거나 막혔을 수 있음). 자세한 내용은 B탭 '출처 상태'.`) + `</div>`;
+  const pc = (ok, n) => n ? `${ok}/${n}` : '–';
+  $('#b-src').innerHTML = '<tr><th class="l">출처</th><th>최근 24시간 성공</th><th>최근 7일 성공</th><th class="l">시험 수집(삼성전자, 하루 한 번)</th><th class="l">마지막 성공</th><th class="l">상태</th></tr>' +
+    S.rows.map(r=>`<tr${r.alarm?' style="background:var(--bad-bg)"':''}><td class="l">${esc(r.name)}</td><td>${pc(r.ok1,r.n1)}</td><td>${pc(r.ok7,r.n7)}${r.rate7!=null?` (${r.rate7}%)`:''}</td>` +
+      `<td class="l">${r.canary ? (r.canary.ok ? `<span style="color:var(--good)">정상</span> <span class="muted">${esc(String(r.canary.at).slice(5,16))}</span>` : `<span style="color:var(--bad)">실패</span> <span class="muted" title="${esc(r.canary.note||'')}">${esc(String(r.canary.at).slice(5,16))}</span>`) : '<span class="muted">해당 없음</span>'}</td>` +
+      `<td class="l muted">${esc(String(r.last_ok||'–').slice(0,16))}</td><td class="l" style="white-space:normal">${r.alarm ? `<b style="color:var(--bad)">경보</b> ${esc(r.alarm)}${r.last_fail?`<div class="muted" style="font-size:12px">${esc(r.last_fail)}</div>`:''}` : '<span style="color:var(--good)">정상</span>'}</td></tr>`).join('');
+  $('#b-srcnote').textContent = `기준 ${S.at} · '자료가 원래 없음'(공시 전·추정치 없음 등)은 실패로 세지 않음 · 경보: 시험 수집 실패, 24시간 안에 3번 이상 모두 실패, 또는 5번 이상 시도에 성공률 50% 미만.`;
+}
+
+function renderAll(){
+  renderSources(); renderStatic(); renderUniverse(); renderScreen(); renderJ(); renderK(); renderL(); renderM(); renderN(); renderO(); renderP(); renderU(); renderQ(); renderR(); renderS(); renderT(); renderKiwoom(); renderRisk(); renderH(); renderC(); renderG(); renderSingles(); renderPivot(); renderFacts(); }
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on', x===b));
@@ -2684,8 +2729,8 @@ function renderJob(j){
 let PREP_SEEN = false;
 function renderPrep(P){
   if (!P) return;
-  if (P.running){ PREP_SEEN = true; $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--accent)"><b>ROA 채우는 중</b> — ${P.done} / ${P.total}곳 (새 버전 설치 뒤 한 번: 실적 ROA 계산 + FnGuide ROE·ROA 추정 받기). 화면은 그대로 쓰셔도 됩니다.</div>`; }
-  else if (PREP_SEEN && P.finished_at) $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">ROA를 채웠습니다(${P.done}곳). <button onclick="location.reload()">새로 고침</button></div>`;
+  if (P.running){ PREP_SEEN = true; $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--accent)"><b>ROA·FnGuide 추정 채우는 중</b> — ${P.done} / ${P.total}곳 (새 버전 설치 뒤 한 번: 실적 ROA 계산 + FnGuide 추정(ROE·ROA·매출·영업이익·EPS) 받기). 화면은 그대로 쓰셔도 됩니다.</div>`; }
+  else if (PREP_SEEN && P.finished_at) $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">ROA·FnGuide 추정을 채웠습니다(${P.done}곳). <button onclick="location.reload()">새로 고침</button></div>`;
 }
 function renderBg(C){
   if (!C) return;

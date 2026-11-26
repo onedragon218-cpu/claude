@@ -101,7 +101,8 @@ HIGHLIGHT_URL = "https://wcomp.fnguide.com/CompanyInfo/getSnpFinancial"
 def fetch_highlight(code):
     """FnGuide 기업정보 Snapshot → Financial Highlight → '연간'(실적 5년 + 추정 3년)의 ROE·ROA.
     FnGuide 정의: ROA = 당기순이익 ÷ 평균 자산총계, ROE = 지배순이익 ÷ 평균 지배자본(앱 계산과 같음).
-    반환: (주소, 추정치 목록[{target_year, metric('roe_fg'|'roa'), value, unit, kind}], 실적 {연도: {'roa','roe'}})"""
+    반환: (주소, 추정치 목록[{target_year, metric('roe_fg'|'roa'|'revenue_fg'|'op_income_fg'|'eps_fg'), value, unit, kind}], 실적 {연도: {'roa','roe_fg'}})
+    revenue_fg·op_income_fg·eps_fg(2026-11-26): WiseReport 컨센서스와 비교해 차이가 크면 '추정 불확실' 신호용(계산에는 안 씀)"""
     import urllib.parse
     last_err = None
     for consol in ("C", "D"):                 # 연결 → 없으면 별도
@@ -124,14 +125,18 @@ def fetch_highlight(code):
             if not m:
                 continue
             y, cd, e = int(m.group(1)), h.get("CD"), str(h.get("EP_CHK") or "").strip()
-            for name, metric in (("ROA", "roa"), ("ROE", "roe_fg")):
+            for name, metric in (("ROA", "roa"), ("ROE", "roe_fg"), ("매출액", "revenue_fg"), ("영업이익(발표기준)", "op_income_fg"),
+                                 ("영업이익", "op_income_fg"), ("EPS", "eps_fg")):
+                if metric == "op_income_fg" and name == "영업이익" and _num((rows.get("영업이익(발표기준)") or {}).get(cd)) is not None:
+                    continue                      # 발표기준 값이 있으면 그것(추정 칸은 '영업이익'이 비고 발표기준만 있는 경우가 많음)
                 v = _num((rows.get(name) or {}).get(cd))
                 if v is None:
                     continue
                 if e in ("E", "P"):
-                    est.append({"target_year": y, "metric": metric, "value": v, "unit": "%", "kind": "잠정" if e == "P" else "추정",
+                    unit = "%" if metric in ("roa", "roe_fg") else ("원" if metric == "eps_fg" else "억원")
+                    est.append({"target_year": y, "metric": metric, "value": v, "unit": unit, "kind": "잠정" if e == "P" else "추정",
                                 "basis": "연결" if consol == "C" else "별도"})
-                else:
+                elif metric in ("roa", "roe_fg"):
                     act.setdefault(y, {})[metric] = v
         return url, est, act
     raise ConsensusUnavailable(f"FnGuide Financial Highlight를 읽지 못함: {last_err}" if last_err else "FnGuide Financial Highlight에 ROE·ROA 줄이 없음")

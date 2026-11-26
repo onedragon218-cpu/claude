@@ -430,8 +430,10 @@ def shape(conn, code, P):
             continue
         r = rev3m.get((y, "op_income")) or {}
         fy_ = Fn[(y, "op_income")][0]
+        from .report import cons_gap
+        gap = [g for g in cons_gap(lambda m, yy: (D.c(yy, m), (D.cons.get((yy, m)) or {}).get("provider")), y) if g["big"]]
         cons.append({"year": y, "revenue": rv, "op": op, "op_adj": op * fy_ if op is not None else None, "factor": fy_,
-                     "roe": D.c(y, "roe_fg"), "roa": D.c(y, "roa"),
+                     "roe": D.c(y, "roe_fg"), "roa": D.c(y, "roa"), "gap": gap,
                      "margin": op / rv * 100 if rv and op is not None else None,
                      "rev3m": (r.get("ch") or {}).get(3), "rev3m_tag": (r.get("tag") or {}).get(3)})
     ms = [r["margin"] for r in rows if r["margin"] is not None]

@@ -27,6 +27,25 @@ def _corr(metric, year, raw, F=None):
     return {"value": raw * f, "raw": raw, "factor": f, "why": why}
 
 
+GAP_LIMIT = {"revenue": 0.10, "op_income": 0.15, "eps": 0.15}     # 2026-11-26 사용자 결정: 매출 10%, 영업이익·EPS 15% 넘게 다르면 '추정 불확실'
+GAP_NAME = {"revenue": "매출", "op_income": "영업이익", "eps": "EPS"}
+
+
+def cons_gap(get, y):
+    """주 컨센서스(WiseReport 등)와 FnGuide 추정의 차이. get(metric, year) → (값, 출처) 또는 (None, None).
+    반환: [{metric, name, main, fg, pct, big}] — big이면 추정 불확실 신호(계산·판정은 바꾸지 않음)"""
+    out = []
+    for m, lim in GAP_LIMIT.items():
+        a, prov = get(m, y)
+        b, _ = get(m + "_fg", y)
+        if a is None or b is None or (prov or "").startswith("FnGuide"):
+            continue                       # 주 컨센이 이미 FnGuide면 비교할 것이 없음
+        base = max(abs(a), abs(b))
+        pct = abs(a - b) / base if base else 0.0
+        out.append({"metric": m, "name": GAP_NAME[m], "main": a, "fg": b, "pct": round(pct, 4), "big": pct > lim})
+    return out
+
+
 def _safe(fn):
     """한 칸의 계산이 실패해도 다른 화면은 살린다."""
     try:
@@ -59,6 +78,8 @@ def payload(conn, code, base_year=None, last_run=None):
                                              source_ref=(r["source_ref"] or "") + " (영업이익/매출 추정치로 계산)")
     from . import standards
     F = standards.factors(conn, code, P)
+    getc = lambda m, y: ((latest.get((y, m)) or {}).get("value"), (latest.get((y, m)) or {}).get("provider"))
+    gaps = {y: cons_gap(getc, y) for y in years}
     series = {}
     for m in config.METRIC_KEYS:
         pts = {}
@@ -71,7 +92,10 @@ def payload(conn, code, base_year=None, last_run=None):
                 "fy": _pt(fy), "partial": _pt(part),
                 "est": None if est is None else dict(_corr(m, y, est["value"], F), provider=est["provider"],
                                                      as_of=est["as_of"], n=est["n_estimates"],
-                                                     source_ref=est["source_ref"]),
+                                                     source_ref=est["source_ref"],
+                                                     gap=[g for g in gaps.get(y, []) if g["big"] and g["metric"] in
+                                                          ({"revenue": ("revenue",), "eps": ("eps",), "op_margin": ("op_income", "revenue"),
+                                                            "roe": ("eps",)}.get(m, ()))] or None),
             }
         series[m] = pts
     status = {}
@@ -125,6 +149,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "good6": TM.run("M탭 좋은 기업", lambda: _safe(lambda: __import__("analyzer.goodco", fromlist=["good6"]).good6(conn, code, P))),
         "shape": TM.run("N탭 숫자 모양", lambda: _safe(lambda: __import__("analyzer.goodco", fromlist=["shape"]).shape(conn, code, P))),
         "fairper": TM.run("Q탭", lambda: _safe(lambda: __import__("analyzer.fairper", fromlist=["payload"]).payload(conn, code, P, fp_rows))),
+        "peerrank": G("업종 안 순위(전체)", lambda: _safe(lambda: __import__("analyzer.peerrank", fromlist=["compute"]).compute(conn, P))),
         "upvalue": G("P·U탭 전체 회사", lambda: _safe(lambda: __import__("analyzer.upvalue", fromlist=["rows"]).rows(conn, P))),
         "value5": TM.run("O탭 가치 5방법", lambda: _safe(lambda: __import__("analyzer.value5", fromlist=["payload"]).payload(conn, code, P, vres["rows"]))),
         "biz": TM.run("L탭 사업부", lambda: __import__("analyzer.segments", fromlist=["payload"]).payload(conn, code, comp["name"] if comp else code, P)),
@@ -135,6 +160,7 @@ def payload(conn, code, base_year=None, last_run=None):
         "data_dir": config.DATA_DIR,
         "hanjang": TM.run("T탭(이 회사)", lambda: _safe(lambda: __import__("analyzer.hanjang", fromlist=["payload"]).payload(conn, code, P, hj_glob))),
         "hj_calib": _safe(lambda: __import__("analyzer.hj_calib", fromlist=["load"]).load()),
+        "sources": TM.run("출처 상태", lambda: _safe(lambda: __import__("analyzer.sourcehealth", fromlist=["status"]).status(conn))),
         "kiwoom": TM.run("키움", lambda: _safe(lambda: __import__("analyzer.kiwoom_store", fromlist=["summary"]).summary(conn, code))),
         "nodecat": G("S탭 노드 사전(전체)", lambda: _safe(lambda: __import__("analyzer.nodeview", fromlist=["catalog"]).catalog(conn))),
         "nodes": TM.run("R탭 사업부 우호", lambda: _safe(lambda: __import__("analyzer.nodeview", fromlist=["payload"]).payload(conn, code, P))),

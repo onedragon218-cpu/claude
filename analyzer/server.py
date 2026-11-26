@@ -726,6 +726,12 @@ def warm_once(state):
     conn = db.connect()
     try:
         s = pcache.signature(conn)
+        try:                               # 출처 시험 수집(삼성전자, 하루 한 번 — 출처가 조용히 고장 나면 바로 경보)
+            from . import sourcehealth
+            sourcehealth.run_canary(conn)
+            s = pcache.signature(conn)
+        except Exception:      # noqa: BLE001
+            pass
         stable, state["last"] = s == state.get("last"), s
         if stable and not state.get("ckpt") == s:      # 한가할 때 임시 기록(WAL) 정리
             try:
