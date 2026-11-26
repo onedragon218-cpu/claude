@@ -1396,6 +1396,44 @@ class T(unittest.TestCase):
         vals[("op_income", 2027)] = (100, "FnGuide")          # 주 컨센이 이미 FnGuide면 비교 안 함
         self.assertNotIn("op_income", {x["metric"] for x in report.cons_gap(lambda m, y: vals.get((m, y), (None, None)), 2027)})
 
+    def test_server_collector_round(self):
+        from unittest import mock
+        from analyzer import server, collectlock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d):
+            path = os.path.join(d, "t.db")
+            conn = db.connect(path)
+            for c in ("111111", "222222", "333333"):
+                db.ensure_company(conn, c, "회사" + c)
+            conn.close()
+            seen = []
+            def fake_analyze(code, by=None, conn=None, **kw):
+                seen.append(code)
+                for src in ("dart_disclosures", "news", "consensus"):      # 받으면 기한 안으로 들어옴
+                    db.log_fetch(conn, src, code, code, True, 1)
+                return {"stats": {}}
+            real = db.connect
+            server.COLLECTOR.clear(); server.COLLECTOR.update(state="시작 전")
+            with mock.patch.object(db, "connect", lambda p=None, timeout=30: real(path)), mock.patch.object(server.pipeline, "analyze", fake_analyze):
+                self.assertEqual(server.collector_round(), 3)               # 갱신 필요 3곳 모두
+                self.assertEqual(server.collector_round(), 0)               # 다 받았으면 쉼
+                self.assertEqual(server.COLLECTOR["why"], "갱신 필요한 회사 없음")
+                self.assertIsNone(collectlock.status())                      # 잠금 풀림
+                c2 = real(path); c2.execute("UPDATE fetch_log SET fetched_at='2000-01-01 00:00:00'"); c2.execute("DELETE FROM collect_done"); c2.commit(); c2.close()
+                with server.JOB_LOCK:
+                    server.JOB["running"] = True
+                try:
+                    self.assertEqual(server.collector_round(), 0)           # 수동 갱신 중엔 양보
+                finally:
+                    with server.JOB_LOCK:
+                        server.JOB["running"] = False
+                self.assertTrue(collectlock.acquire("background", kind="백그라운드 수집"))   # 다른(작업 스케줄러) 수집이 돌면 기다림
+                with mock.patch.object(collectlock, "status", lambda: {"kind": "백그라운드 수집", "done": 1, "total": 9, "pid": -1}):
+                    with mock.patch.object(collectlock, "acquire", lambda *a, **k: False):
+                        self.assertEqual(server.collector_round(), 0)
+                self.assertIn("다른 수집", server.COLLECTOR["why"])
+                collectlock.release()
+            self.assertEqual(seen, ["111111", "222222", "333333"])
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

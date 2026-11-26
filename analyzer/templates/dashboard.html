@@ -2727,6 +2727,7 @@ function renderJob(j){
   renderBg(j.collect);
 }
 let PREP_SEEN = false;
+let COLL = null;
 function renderPrep(P){
   if (!P) return;
   if (P.running){ PREP_SEEN = true; $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--accent)"><b>ROA·FnGuide 추정 채우는 중</b> — ${P.done} / ${P.total}곳 (새 버전 설치 뒤 한 번: 실적 ROA 계산 + FnGuide 추정(ROE·ROA·매출·영업이익·EPS) 받기). 화면은 그대로 쓰셔도 됩니다.</div>`; }
@@ -2735,15 +2736,16 @@ function renderPrep(P){
 function renderBg(C){
   if (!C) return;
   const L = C.lock;
-  $('#bgstatus').innerHTML = L ? `<div class="warnbox" style="border-left-color:var(--accent)"><b>백그라운드 수집 중</b> — ${L.done||0} / ${L.total||'?'}곳${L.current?' · 지금 '+esc(L.current):''} · 오늘 받은 곳 ${C.done_today} / ${C.total}곳 <span class="muted">(30초마다 새로 표시)</span>. 끝날 때까지 수동 갱신은 시작하지 않습니다(화면 보기는 그대로 가능, 받은 회사부터 바로 반영).</div>`
-    : `<p class="muted" style="margin:4px 0">백그라운드 수집: 오늘 받은 곳 <b>${C.done_today}</b> / ${C.total}곳 · 빨간 칸(갱신 필요)은 다음 로그인·평일 07:13 백그라운드 수집이 받거나, [갱신 필요한 기업 갱신]으로 지금 받을 수 있습니다.</p>`;
-  BG_LOCKED = !!L;
-  ['#uall','#uupsel','#uprall'].forEach(id=>{ const b = $(id); if (b && L){ b.disabled = true; b.title = '백그라운드 수집이 끝나면 누를 수 있습니다'; } });
-  document.querySelectorAll('.cpr').forEach(b=>{ if (L) b.disabled = true; });
+  const mine = L && L.kind === '자동 수집(화면 서버)';
+  $('#bgstatus').innerHTML = L ? `<div class="warnbox" style="border-left-color:var(--accent)"><b>${esc(L.kind||'백그라운드 수집')} 중</b> — ${L.done||0} / ${L.total||'?'}곳${L.current?' · 지금 '+esc(L.current):''} · 오늘 받은 곳 ${C.done_today} / ${C.total}곳 <span class="muted">(15초마다 새로 표시)</span>. ${mine ? '수동 갱신 버튼을 누르면 지금 회사까지만 하고 차례를 넘깁니다.' : '끝날 때까지 수동 갱신은 시작하지 않습니다'}(화면 보기는 그대로 가능, 받은 회사부터 바로 반영).</div>`
+    : `<p class="muted" style="margin:4px 0">자동 수집: ${COLL ? `<b>${esc(COLL.state)}</b>${COLL.why?' — '+esc(COLL.why):''}${COLL.last_round?` · 마지막 한 바퀴 ${esc(COLL.last_round.slice(5,16))}(${COLL.done}곳)`:''}` : '–'} · 오늘 받은 곳 <b>${C.done_today}</b> / ${C.total}곳. 화면 서버가 켜져 있으면(로그인하면 자동) 갱신 필요한 회사를 1분마다 확인해 계속 받습니다.</p>`;
+  BG_LOCKED = !!L && !mine;          // 화면 서버 자동 수집은 수동 갱신이 차례를 가져올 수 있어 잠그지 않음
+  ['#uall','#uupsel','#uprall'].forEach(id=>{ const b = $(id); if (b && BG_LOCKED){ b.disabled = true; b.title = '백그라운드 수집이 끝나면 누를 수 있습니다'; } });
+  document.querySelectorAll('.cpr').forEach(b=>{ if (BG_LOCKED) b.disabled = true; });
 }
 async function refreshStatus(){       // 수집이 도는 동안 A탭 회사별 칸(공시·뉴스·컨센서스·오늘 받음)을 새로 고침 없이 바꿈
   try { const r = await (await fetch('/api/company_status')).json(); if (r.status){ CST = r.status; DONE_TODAY = r.done_today || DONE_TODAY; renderComps(); } } catch(e){} }
-async function bgPoll(){ if (!SERVED) return; try { const j = await (await fetch('/api/job')).json(); renderPrep(j.prep);
+async function bgPoll(){ if (!SERVED) return; try { const j = await (await fetch('/api/job')).json(); renderPrep(j.prep); COLL = j.collector || null;
     if ((j.collect && j.collect.lock) || j.running || (j.prep && j.prep.running)) refreshStatus();
     if (UJOB_RUNNING) return; if (!j.running) renderBg(j.collect);
     if (BG_LOCKED && (!j.collect || !j.collect.lock)) $('#bgstatus').insertAdjacentHTML('beforeend', `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">백그라운드 수집이 끝났습니다. <button onclick="location.reload()">새로 고침</button>을 누르면 목록의 빨간 칸·오늘 받음이 새 상태로 바뀝니다.</div>`);
@@ -2777,7 +2779,7 @@ $('#uall').onclick = async () => {
     renderJob(j); setTimeout(pollJob, 1000);
   } catch(e){ $('#ustatus').textContent = '시작 실패: ' + e.message; cSelInfo(); }
 };
-if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } else { renderBg(j.collect); renderPrep(j.prep); } }).catch(()=>{});
+if (SERVED) fetch('/api/job').then(r=>r.json()).then(j=>{ if (j.running){ $('#uall').disabled = true; $('#uall').textContent = '갱신 중…'; renderJob(j); setTimeout(pollJob, 1000); } else { COLL = j.collector || null; renderBg(j.collect); renderPrep(j.prep); } }).catch(()=>{});
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
 const UI_KEEP = ['#j-rev','#j-opm','#j-opm-mode','#j-eps','#j-logic','#j-plogic','#j-adj','#j-show',
   '#smkt','#smin','#sshow','#srisk',

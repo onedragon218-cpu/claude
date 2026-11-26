@@ -22,6 +22,7 @@ def _update_all(codes, base_year, fresh, mode="full"):
             _update_loop(codes, base_year, fresh, mode)
     finally:
         collectlock.release()
+        COLLECTOR_PAUSE.clear()            # 수동 갱신이 끝나면 자동 수집기가 다시 이어서
     with JOB_LOCK:
         JOB["running"] = False
         JOB["current"] = None
@@ -253,6 +254,7 @@ class H(BaseHTTPRequestHandler):
                 bg = collectlock.status()
                 n_all = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
                 j["prep"] = dict(pipeline.PREP)
+                j["collector"] = dict(COLLECTOR)
                 j["collect"] = {"lock": bg if bg and bg.get("who") == "background" else None,
                                 "done_today": len(collectlock.done_today(conn)), "total": n_all}
                 return self._send(200, json.dumps(j, ensure_ascii=False), "application/json")
@@ -354,6 +356,8 @@ class H(BaseHTTPRequestHandler):
             if not lan.is_local(self.client_address[0]):
                 return self._send(403, json.dumps({"error": "PC에서만 할 수 있습니다"}, ensure_ascii=False), "application/json")
             self._drain()
+            import time as _t
+            COLLECTOR["stopped_until"] = _t.time() + 3600      # 화면 서버 안 자동 수집기도 1시간 쉼
             ok = collectlock.request_stop()
             return self._send(200, json.dumps({"ok": ok, "message": "멈춤을 요청했습니다. 지금 회사가 끝나면 멈추고 화면이 저절로 열립니다(1~2분)." if ok
                                                else "돌고 있는 백그라운드 수집을 찾지 못했습니다. 아래 안내대로 작업 스케줄러에서 멈춰 주세요."}, ensure_ascii=False), "application/json")
@@ -582,6 +586,15 @@ class H(BaseHTTPRequestHandler):
             from . import collectlock
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
+            st0 = collectlock.status()
+            if st0 and st0.get("pid") == os.getpid() and st0.get("kind") == "자동 수집(화면 서버)":
+                COLLECTOR_PAUSE.set()             # 화면 서버 안 자동 수집기는 지금 회사까지만 하고 차례를 넘김
+                import time as _t
+                for _ in range(120):              # 최대 2분
+                    st1 = collectlock.status()
+                    if not st1 or st1.get("pid") != os.getpid() or st1.get("kind") != "자동 수집(화면 서버)":
+                        break
+                    _t.sleep(1)
             with JOB_LOCK:
                 if JOB["running"]:
                     return self._send(200, json.dumps(dict(JOB, already=True), ensure_ascii=False), "application/json")
@@ -603,7 +616,8 @@ class H(BaseHTTPRequestHandler):
                     kind = "주가만 새로 받기" + ("(체크한 기업)" if pick is not None else "(전체)")
                     by = int(q["base_year"][0]) if q.get("base_year") else None
                     if not collectlock.acquire("server", kind=kind, total=len(codes)):
-                        return self._send(200, json.dumps({"error": "다른 수집이 진행 중입니다. 잠시 뒤 다시 눌러 주세요"}, ensure_ascii=False), "application/json")
+                        COLLECTOR_PAUSE.clear()
+                    return self._send(200, json.dumps({"error": "다른 수집이 진행 중입니다. 잠시 뒤 다시 눌러 주세요"}, ensure_ascii=False), "application/json")
                     JOB.update(running=True, total=len(codes), done=0, current=None, results=[], started_at=db.now(),
                                finished_at=None, fresh=False, kind=kind, stop=False, stopped=False, targets=[f"{nm}({c})" for c, nm in codes[:50]])
                     threading.Thread(target=_update_all, args=(codes, by, False, "price"), daemon=True).start()
@@ -750,6 +764,89 @@ def warm_once(state):
         conn.close()
 
 
+COLLECTOR = {"state": "시작 전", "why": None, "done": 0, "total": 0, "current": None, "since": None, "last_round": None}
+COLLECTOR_PAUSE = threading.Event()        # 화면의 수동 갱신이 차례를 달라고 할 때
+COLLECTOR_RECENT_H = 6                     # 한 번 받은 회사는 6시간 안에 다시 돌지 않음(받기 실패가 이어져도 같은 회사를 계속 돌지 않게)
+
+
+def collector_round():
+    """화면 서버 안 자동 수집기 한 번(2026-11-26): 갱신 필요(기한 지난 공시·뉴스·컨센서스)한 회사를 차례로 받음.
+    작업 스케줄러의 백그라운드 수집과 같은 수집 잠금을 써서 동시에 돌지 않음. 반환: 처리한 회사 수"""
+    import datetime as _dt
+    from . import collectlock, pcache
+    import time as _t
+    with JOB_LOCK:
+        busy = JOB.get("running")
+    if COLLECTOR_PAUSE.is_set() and not busy:          # 수동 갱신이 시작되지 않고 끝났으면(거절 등) 2분 뒤 스스로 다시
+        COLLECTOR.setdefault("paused_at", _t.time())
+        if _t.time() - COLLECTOR["paused_at"] > 120:
+            COLLECTOR_PAUSE.clear()
+    else:
+        COLLECTOR.pop("paused_at", None)
+    if busy or COLLECTOR_PAUSE.is_set():
+        COLLECTOR.update(state="대기", why="화면의 수동 갱신이 도는 중")
+        return 0
+    if COLLECTOR.get("stopped_until") and _t.time() < COLLECTOR["stopped_until"]:
+        COLLECTOR.update(state="멈춤", why="[수집 멈추기]를 눌러 1시간 쉼")
+        return 0
+    conn = db.connect()
+    try:
+        collectlock.ensure(conn)
+        due = set(collectlock.due_codes(conn))
+        recent = (_dt.datetime.now() - _dt.timedelta(hours=COLLECTOR_RECENT_H)).strftime("%Y-%m-%d %H:%M:%S")
+        skip = {r[0] for r in conn.execute("SELECT stock_code FROM collect_done WHERE at >= ?", (recent,))}
+        names = {r["stock_code"]: r["name"] for r in conn.execute("SELECT stock_code, name FROM companies")}
+        codes = [c for c in collectlock.todo_order(conn, sorted(due)) if c not in skip] if due else []
+        codes += [c for c in sorted(due) if c not in skip and c not in codes]
+    finally:
+        conn.close()
+    if not codes:
+        COLLECTOR.update(state="대기", why="갱신 필요한 회사 없음" if not due else f"갱신 필요 {len(due)}곳은 6시간 안에 이미 받아 봄(받기 실패가 이어지면 B탭 기록 확인)",
+                         current=None)
+        return 0
+    if not collectlock.acquire("background", kind="자동 수집(화면 서버)", total=len(codes)):
+        st = collectlock.status() or {}
+        COLLECTOR.update(state="대기", why=f"다른 수집이 도는 중: {st.get('kind') or '?'} {st.get('done', 0)}/{st.get('total', '?')}")
+        return 0
+    n = 0
+    COLLECTOR.update(state="수집 중", why=None, done=0, total=len(codes), since=db.now())
+    try:
+        with pcache.batch(), collectlock.keepalive():
+            for i, code in enumerate(codes):
+                with JOB_LOCK:
+                    busy = JOB.get("running")
+                if busy or COLLECTOR_PAUSE.is_set():
+                    break
+                label = f"{names.get(code) or ''}({code})"
+                if not collectlock.heartbeat(current=label, done=i, total=len(codes), kind="자동 수집(화면 서버)"):
+                    break
+                COLLECTOR.update(done=i, current=label)
+                try:
+                    c2 = db.connect()
+                    pipeline.analyze(code, None, conn=c2)
+                    collectlock.mark_done(c2, code, "화면 서버")
+                    c2.close()
+                    n += 1
+                except Exception:      # noqa: BLE001  한 곳이 실패해도 다음 곳(사유는 수집 기록에)
+                    continue
+    finally:
+        collectlock.release()
+        COLLECTOR.update(state="대기", why=None, done=n, current=None, last_round=db.now())
+    return n
+
+
+def _collector_loop():
+    """로그인하면 켜지는 화면 서버가 늘 돌림 — 브라우저로 화면을 열기 전부터, 절전에서 깨어난 뒤에도 갱신 필요한 회사를 받음"""
+    import time as _t
+    _t.sleep(45)
+    while True:
+        try:
+            collector_round()
+        except Exception as e:     # noqa: BLE001
+            COLLECTOR.update(state="오류", why=f"{type(e).__name__}: {e}"[:200])
+        _t.sleep(60)
+
+
 def _prep_loop():
     """새 버전 설치 뒤 한 번: ROA 채우기(30초 뒤 시작, 백그라운드 수집이 돌면 끝날 때까지 기다림)"""
     import time
@@ -793,6 +890,7 @@ def serve(port=8765):
     print(f"DB 방식: {mode or '확인 못 함(다른 프로그램이 쓰는 중 — 다음 연결 때 다시 시도)'}", flush=True)
     threading.Thread(target=_warm_loop, daemon=True).start()      # 갱신 뒤 첫 화면을 미리 계산
     threading.Thread(target=_prep_loop, daemon=True).start()      # ROA가 없는 회사 채우기(새 버전 설치 뒤 한 번)
+    threading.Thread(target=_collector_loop, daemon=True).start() # 자동 수집기(갱신 필요한 회사를 계속 받음)
     if lan.enabled():
         tport = port + 1 if port != 8765 else lan.HTTPS_PORT
         try:
