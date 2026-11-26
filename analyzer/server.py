@@ -18,7 +18,7 @@ JOB_LOCK = threading.Lock()
 def _update_all(codes, base_year, fresh, mode="full"):
     from . import pcache, collectlock
     try:
-        with pcache.batch():
+        with pcache.batch(), collectlock.keepalive():
             _update_loop(codes, base_year, fresh, mode)
     finally:
         collectlock.release()
@@ -241,6 +241,11 @@ class H(BaseHTTPRequestHandler):
                     job = dict(screener.JOB)
                 res = screener.results(conn) if q.get("results", ["0"])[0] == "1" else None
                 return self._send(200, json.dumps({"job": job, "results": res}, ensure_ascii=False), "application/json")
+            if u.path == "/api/company_status":
+                # A탭: 회사마다 공시·뉴스·컨센서스 받은 때(수집이 도는 동안 화면을 새로 고치지 않아도 칸이 바뀌게)
+                from . import collectlock
+                return self._send(200, json.dumps({"status": collectlock.company_status(conn), "done_today": collectlock.done_today(conn)},
+                                                  ensure_ascii=False), "application/json")
             if u.path == "/api/job":
                 from . import collectlock
                 with JOB_LOCK:

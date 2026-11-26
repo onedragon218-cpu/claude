@@ -94,6 +94,43 @@ def heartbeat(**info):
     return True
 
 
+def stop_requested():
+    d = _read()
+    return bool(d and d.get("stop"))
+
+
+class keepalive:
+    """with collectlock.keepalive(): 오래 걸리는 회사 하나를 처리하는 동안에도 30초마다 '살아 있음' 신호(2026-11-26).
+    예전에는 회사마다 한 번만 신호를 보내, 한 회사가 3분 넘게 걸리면 끝난 것으로 보여 다른 쪽(설치 뒤 ROA 채우기 등)이 차례를 가져가고
+    백그라운드 수집이 멈췄음."""
+
+    def __init__(self, every=30):
+        import threading
+        self.every, self._stop = every, threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        while not self._stop.wait(self.every):
+            d = _read()
+            if not d or d.get("pid") != os.getpid() or d.get("stop"):
+                return
+            try:
+                d["heartbeat"] = time.time()
+                tmp = lock_path() + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(d, f, ensure_ascii=False)
+                os.replace(tmp, lock_path())
+            except OSError:
+                pass
+
+    def __enter__(self):
+        self._t.start()
+        return self
+
+    def __exit__(self, *a):
+        self._stop.set()
+
+
 def release():
     if mine():
         try:

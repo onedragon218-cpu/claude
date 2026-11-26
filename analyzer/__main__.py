@@ -31,29 +31,45 @@ def background_collect(base_year=None, wait_max=6 * 3600, poll=60):
     import time
     from . import collectlock, pcache
     db.set_wal(wait=60)                  # 화면이 수집 중에도 읽을 수 있게 먼저 WAL로(2026-11-25)
-    waited = 0
-    while not collectlock.acquire("background", kind="백그라운드 수집"):
-        st = collectlock.status() or {}
-        if st.get("who") == "background" or waited >= wait_max:
-            return                       # 다른 백그라운드가 이미 돌거나 너무 오래 기다림
-        time.sleep(poll)
-        waited += poll
+    t0 = time.time()
+
+    def wait_turn():
+        """차례(수집 잠금)를 얻을 때까지 기다림. 다른 백그라운드가 돌고 있거나 너무 오래 기다리면 False"""
+        while not collectlock.acquire("background", kind="백그라운드 수집"):
+            st = collectlock.status() or {}
+            if st.get("who") == "background" or time.time() - t0 >= wait_max:
+                return False
+            time.sleep(poll)
+        return True
+
+    if not wait_turn():
+        return
     try:
-        conn = db.connect()
-        names = {r["stock_code"]: r["name"] for r in conn.execute("SELECT stock_code, name FROM companies")}
-        codes = collectlock.todo_order(conn, list(names))
-        conn.close()
         with pcache.batch():
-            for i, code in enumerate(codes):
-                if not collectlock.heartbeat(current=f"{names.get(code) or ''}({code})", done=i, total=len(codes), kind="백그라운드 수집"):
-                    return               # 잠금을 다른 쪽이 가져감(오래 잠들었던 경우) → 멈춤, 다음에 이어서
-                try:
-                    do_analyze(code, base_year, quiet=True)
-                    conn = db.connect()
-                    collectlock.mark_done(conn, code, "백그라운드")
-                    conn.close()
-                except Exception:        # noqa: BLE001  한 곳이 실패해도 다음 곳 계속(사유는 수집 기록에)
-                    continue
+            while True:                  # 화면 쪽(수동 갱신·ROA 채우기)이 차례를 가져가면 끝날 때까지 기다렸다가 남은 회사부터 이어서
+                conn = db.connect()
+                names = {r["stock_code"]: r["name"] for r in conn.execute("SELECT stock_code, name FROM companies")}
+                codes = collectlock.todo_order(conn, list(names))
+                conn.close()
+                yielded = False
+                with collectlock.keepalive():
+                    for i, code in enumerate(codes):
+                        if not collectlock.heartbeat(current=f"{names.get(code) or ''}({code})", done=i, total=len(codes), kind="백그라운드 수집"):
+                            yielded = True
+                            break
+                        try:
+                            do_analyze(code, base_year, quiet=True)
+                            conn = db.connect()
+                            collectlock.mark_done(conn, code, "백그라운드")
+                            conn.close()
+                        except Exception:        # noqa: BLE001  한 곳이 실패해도 다음 곳 계속(사유는 수집 기록에)
+                            continue
+                if not yielded:
+                    break                        # 오늘 할 일 끝
+                if collectlock.stop_requested():  # 화면의 [백그라운드 수집 멈추기]
+                    return
+                if not wait_turn():              # 다른 쪽이 차례를 가져감 → 기다렸다가 이어서
+                    return
     finally:
         collectlock.release()
         try:                             # 수집 동안 커진 임시 기록(WAL) 정리 — 화면 읽기가 느려지지 않게

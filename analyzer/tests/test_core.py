@@ -1323,6 +1323,38 @@ class T(unittest.TestCase):
             conn.close()
         pcache.clear()
 
+    def test_background_keeps_turn_and_resumes(self):
+        import threading, time as _t, json as _j
+        from unittest import mock
+        from analyzer import __main__ as M, collectlock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(config, "DATA_DIR", d), \
+                mock.patch.object(collectlock, "STALE_SEC", 1):
+            path = os.path.join(d, "t.db")
+            conn = db.connect(path)
+            for c in ("111111", "222222", "333333", "444444"):
+                db.ensure_company(conn, c, "회사" + c)
+            conn.close()
+            done = []
+            def fake(code, by=None, quiet=False, **kw):
+                if code == "111111":
+                    _t.sleep(2.5)                               # 오래 걸리는 회사(잠금 기한 1초보다 김)
+                    self.assertFalse(collectlock.acquire("server", kind="ROA 준비"))   # 그 사이 다른 쪽이 차례를 못 가져감
+                if code == "222222":                            # 다른 쪽이 차례를 가져간 상황(예: 오래 잠든 뒤)
+                    with open(collectlock.lock_path(), "w", encoding="utf-8") as f:
+                        _j.dump({"who": "server", "pid": -5, "heartbeat": _t.time()}, f)
+                    lp = collectlock.lock_path()
+                    threading.Timer(0.6, lambda: os.path.exists(lp) and os.remove(lp)).start()   # 다른 쪽이 끝남
+                done.append(code)
+            real = db.connect
+            class FastKA(collectlock.keepalive):
+                def __init__(self, every=0.2):
+                    super().__init__(every)
+            with mock.patch.object(db, "connect", lambda p=None, timeout=30: real(path)), mock.patch.object(M, "do_analyze", fake), \
+                    mock.patch.object(collectlock, "keepalive", FastKA):
+                M.background_collect(poll=0.2)
+            self.assertEqual(sorted(done), ["111111", "222222", "333333", "444444"])   # 차례를 넘겨준 뒤에도 이어서 끝까지
+            self.assertIsNone(collectlock.status())
+
     def test_lan_password_and_network_rules(self):
         from analyzer import lan
         old = os.environ.get("APPDATA")

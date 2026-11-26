@@ -925,6 +925,7 @@ def prepare_roa(base_year=None, wait=None):
         time.sleep(30)
     PREP.update(running=True, done=0, total=len(codes), current=None, finished_at=None)
     n = 0
+    ka = collectlock.keepalive().__enter__()
     try:
         conn = db.connect()
         for i, code in enumerate(codes):
@@ -953,6 +954,7 @@ def prepare_roa(base_year=None, wait=None):
         conn.close()
     finally:
         PREP.update(running=False, done=n, current=None, finished_at=db.now())
+        ka.__exit__()
         collectlock.release()
     return n
 
