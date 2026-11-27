@@ -105,6 +105,12 @@ a{color:var(--accent)}
 code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.5px}
 .warnbox{border-left:3px solid var(--warn);background:var(--warn-bg);padding:8px 12px;border-radius:6px;font-size:13.5px;margin:8px 0}
 @media (max-width:520px){.grid7{grid-template-columns:1fr}.chartbox.big{height:320px}}
+.rp-btn{font-size:11px;padding:1px 6px;margin-left:4px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-secondary);border-radius:4px;cursor:pointer;white-space:nowrap}
+.rp-btn:hover{border-color:var(--accent);color:var(--accent)}
+#rp-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;z-index:1000;align-items:center;justify-content:center;padding:16px}
+#rp-modal.on{display:flex}
+#rp-box{background:var(--surface-1);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;width:min(920px,100%);max-height:92vh;display:flex;flex-direction:column;padding:14px;gap:8px}
+#rp-text{width:100%;flex:1;min-height:50vh;font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--bg);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:8px;box-sizing:border-box}
 </style>
 </head>
 <body>
@@ -672,6 +678,12 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
 </section>
 </main>
 
+<div id="rp-modal"><div id="rp-box">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b id="rp-title">매수 판단 조사 프롬프트</b><span class="muted" id="rp-chars"></span></div>
+  <div class="muted" style="font-size:12px">웹 검색이 되는 AI의 <b>새 대화</b>에 붙여 넣으세요. 한장조사(Claude 쪽) 프로젝트에는 붙여 넣지 마세요 — 그쪽 지침과 섞이지 않게. 앱은 이 글을 만들기만 하고 아무것도 바꾸지 않습니다.</div>
+  <textarea id="rp-text" readonly></textarea>
+  <div style="display:flex;gap:8px;align-items:center"><button id="rp-copy">복사</button><button id="rp-close">닫기</button><span class="muted" id="rp-msg"></span></div>
+</div></div>
 <script>
 const D = /*__DATA__*/null;
 const DISK_VERSION = /*__DISK_VERSION__*/null;   // 설치 폴더 코드의 버전(서버가 옛 코드로 떠 있으면 다름)
@@ -1486,6 +1498,26 @@ $('#sstart').onclick = async () => {
 if (SERVED) pollScan(false);
 
 
+// ---- 매수 판단 조사 프롬프트 (J·P·Q·U 회사 줄마다, analyzer/research.py, 2026-11-27) ----
+const rpBtn = (tab, code, why) => `<button class="rp-btn" data-tab="${tab}" data-code="${esc(code)}" data-why="${esc(why)}" title="이 회사를 AI에게 조사시킬 글(매수 판단용)을 만들어 복사합니다">조사 프롬프트</button>`;
+const rpN = v => v==null ? '–' : Math.round(v).toLocaleString('ko-KR');
+const rpPct = v => v==null ? '' : `(현재가 대비 ${v>=0?'+':''}${(v*100).toFixed(0)}%)`;
+function rpOpen(title, text){ $('#rp-title').textContent = title; $('#rp-text').value = text; $('#rp-chars').textContent = text ? `${text.length.toLocaleString('ko-KR')}자` : ''; $('#rp-msg').textContent = ''; $('#rp-modal').classList.add('on'); }
+$('#rp-close').onclick = () => $('#rp-modal').classList.remove('on');
+$('#rp-modal').addEventListener('click', e => { if (e.target.id === 'rp-modal') $('#rp-modal').classList.remove('on'); });
+$('#rp-copy').onclick = async () => { const t = $('#rp-text'); if (!t.value) return;
+  t.focus(); t.select(); let ok = false;
+  try { ok = document.execCommand('copy'); } catch(_) { ok = false; }
+  if (!ok) { try { await Promise.race([navigator.clipboard.writeText(t.value), new Promise((_, no)=>setTimeout(()=>no(new Error('시간 초과')), 2000))]); ok = true; } catch(_) { ok = false; } }
+  $('#rp-msg').textContent = ok ? '복사했습니다 — AI 새 대화에 붙여 넣으세요.' : '자동 복사가 막혔습니다 — 글이 선택돼 있으니 Ctrl+C를 누르세요.'; };
+document.addEventListener('click', async e => { const b = e.target.closest('.rp-btn'); if (!b) return;
+  if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요(앱 DB를 읽어 글을 만듭니다).'); return; }
+  rpOpen('불러오는 중…', '');
+  try { const r = await fetch(`/api/research/prompt?base_year=${BY}&tab=${b.dataset.tab}&code=${encodeURIComponent(b.dataset.code)}&why=${encodeURIComponent(b.dataset.why)}`);
+    const j = await r.json().catch(()=>({error:'응답을 읽지 못함('+r.status+')'})); if (j.error) throw new Error(j.error);
+    rpOpen(`매수 판단 조사 프롬프트 — ${b.closest('tr').querySelector('a') ? b.closest('tr').querySelector('a').textContent : b.dataset.code}`, j.text); }
+  catch(err){ rpOpen('만들지 못했습니다: ' + err.message, ''); } });
+
 // ---- J. 성장 조건 분류 ----
 const G = D.growth || {rows:[], years:[]};
 function jPairs(){ const y = G.years||[]; return [[y[0],y[1],'작년→올해'],[y[1],y[2],'올해→내년'],[y[2],y[3],'내년→내후년']]; }
@@ -1527,7 +1559,12 @@ function renderJ(){
   const revCell = r => { const x = (r.rev3m||{}); return ry.map(y=>{ const v = x[y]; return v ? `<td style="${kColor(v.pct, v.tag)}" title="영업이익 컨센서스 3개월 수정률(K탭)">${kPct(v.pct, v.tag)}</td>` : '<td>–</td>'; }).join(''); };
   const head = '<tr><th class="l" rowspan="2">기업</th>' + pairs.map(p=>`<th colspan="3">${p[2]} (${p[0]}${p[0]<G.base_year?'A':'E'}→${p[1]}E)</th>`).join('') + '<th colspan="2" title="영업이익 컨센서스가 3개월 동안 얼마나 올랐는지(+) 내렸는지(−)">영업이익 컨센서스 3개월 수정</th><th class="l" rowspan="2">결과</th></tr><tr>' +
     pairs.map(()=>'<th>매출</th><th>영업이익률</th><th>EPS</th>').join('') + ry.map(y=>`<th>${y}E</th>`).join('') + '</tr>';
-  $('#j-table').innerHTML = head + (shown.length ? shown.map(o=>`<tr><td class="l"><a href="${companyUrl(o.row.code)}">${esc(o.row.name)}</a> <span class="muted">${esc(o.row.code)}</span></td>` +
+  const jWhy = o => { const unit = $('#j-opm-mode').value==='pp' ? '%p' : '%';
+    const f = v => v==null ? '–' : (v>=0?'+':'') + v.toFixed(1);
+    const per = o.per.map((p,i)=>!p.e ? null : `${pairs[i][2]} 매출 ${f(p.e.rev)}% · 영업이익률 ${f(p.e.opm)}${unit} · EPS ${p.e.epsTag || f(p.e.eps)+'%'}`).filter(Boolean).join(' / ');
+    const cond = Object.entries(use).map(([k,v])=>`${{rev:'매출',opm:'영업이익률',eps:'EPS'}[k]} ≥ ${v}`).join(logic==='and'?' 그리고 ':' 또는 ');
+    return `결과 ${o.pass===true?'조건 충족':o.pass===false?'미충족':'조건 없음'}${cond?` (조건: ${cond}, ${adj?'보정 컨센서스':'원래 컨센서스'})`:''}. 성장률: ${per}`; };
+  $('#j-table').innerHTML = head + (shown.length ? shown.map(o=>`<tr><td class="l"><a href="${companyUrl(o.row.code)}">${esc(o.row.name)}</a> <span class="muted">${esc(o.row.code)}</span>${rpBtn('J', o.row.code, jWhy(o))}</td>` +
       o.per.map(p=>cell(p,'rev')+cell(p,'opm')+cell(p,'eps')).join('') + revCell(o.row) +
       `<td class="l">${o.pass===true?'<span class="badge b-OK">충족</span>':o.pass===false?'<span class="muted">미충족</span>':'–'}</td></tr>`).join('')
     : `<tr><td colspan="13" class="l">조건을 충족하는 기업이 없습니다.</td></tr>`);
@@ -1906,10 +1943,14 @@ function renderP(){
     const tip = `ROE ${r.roe[i]}% × 1/10${factor?` × ${ff}`:''} × BPS ${n0(r.bps[i])} = ${n0(c.fair[i])}원${factor && r.f_why ? ' (' + r.f_why[i] + ')' : ''}`;
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${hit?'color:var(--good);font-weight:600':''}">${n0(c.fair[i])}원 ${hit?'✓':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
+  const pWhy = (r, c) => `분류: ${c.status==='통과' ? (tierList(c)==='해당 없음' ? '우상향 통과, 1·2·3차 해당 없음' : tierList(c)+' 분류') : c.status+' — '+(c.why||'')}. 현재가 ${rpN(r.price)}원. ` +
+    (c.fair ? `적정가(ROE × BPS ÷ 10${factor?' × 보정':''}): 1차 ${Y[3]}E ${rpN(c.fair[2])}원${rpPct(c.margin[2])}, 2차 ${Y[2]}E ${rpN(c.fair[1])}원${rpPct(c.margin[1])}, 3차 ${Y[1]}E ${rpN(c.fair[0])}원${rpPct(c.margin[0])}. ` : '') +
+    `우상향 조건 지표(${Y[0]}실적→${Y[1]}E→${Y[2]}E→${Y[3]}E): ` + use.map(m=>`${PV.metrics[m][0]} ${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}`).join('; ') +
+    `. ROE 컨센 ${r.roe.map(v=>v==null?'–':v).join('→')}%, BPS 컨센 ${r.bps.map(rpN).join('→')}원.`;
   $('#p-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +
     `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th><th class="l" title="DB 안 같은 업종 회사 중 위치(시장 전체 아님)">업종 안 위치</th>` +
     use.concat(use.includes('roa')?[]:['roa']).map(m=>`<th class="l">${PV.metrics[m][0]}${m==='roa'&&!use.includes('roa')?' <span class="muted" style="font-weight:400">(표시만)</span>':''}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
-    (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td><b>${n0(r.price)}원</b></td>` +
+    (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span>${rpBtn('P', r.code, pWhy(r, c))}</td><td><b>${n0(r.price)}원</b></td>` +
       pcell(r,c,2) + pcell(r,c,1) + pcell(r,c,0) +
       `<td class="l">${c.status==='통과' ? (tierList(c)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tierList(c)}</span>`) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td>` +
       `<td class="l" style="white-space:nowrap">${prShort(r.code)}</td>` + use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
@@ -1960,10 +2001,15 @@ function renderU(){
     const tip = `10년 최저 연말 PBR ${r.minpbr.pbr.toFixed(2)}배(${r.minpbr.year}년) × ${Y[i+1]}E BPS ${n0(r.bps[i])} = ${n0(c.fair[i])}원`;
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${hit?'color:var(--good);font-weight:600':''}">${n0(c.fair[i])}원 ${hit?'✓':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tierList = c => c.status!=='통과' ? '' : ['t1','t2','t3'].filter(k=>c.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
+  const uWhy = (r, c) => `분류: ${c.status==='통과' ? (tierList(c)==='해당 없음' ? '우상향 통과, 1·2·3차 해당 없음' : tierList(c)+' 분류') : c.status+' — '+(c.why||'')}. 현재가 ${rpN(r.price)}원. ` +
+    (r.minpbr && r.minpbr.pbr!=null ? `10년 최저 연말 PBR ${r.minpbr.pbr.toFixed(2)}배(${r.minpbr.year}년). ` : '') +
+    (c.fair ? `적정가(최저 PBR × BPS 컨센): 1차 ${Y[3]}E ${rpN(c.fair[2])}원${rpPct(c.margin[2])}, 2차 ${Y[2]}E ${rpN(c.fair[1])}원${rpPct(c.margin[1])}, 3차 ${Y[1]}E ${rpN(c.fair[0])}원${rpPct(c.margin[0])}. ` : '') +
+    `우상향 조건 지표(${Y[0]}실적→${Y[1]}E→${Y[2]}E→${Y[3]}E): ` + use.map(m=>`${PV.metrics[m][0]} ${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}`).join('; ') +
+    `. BPS 컨센 ${r.bps.map(rpN).join('→')}원.`;
   $('#u-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th>` +
     `<th>1차 적정가<br><span class="muted" style="font-weight:400">${Y[3]}E(내후년)</span></th><th>2차 적정가<br><span class="muted" style="font-weight:400">${Y[2]}E(내년)</span></th><th>3차 적정가<br><span class="muted" style="font-weight:400">${Y[1]}E(올해)</span></th><th class="l">해당 분류</th><th class="l" title="DB 안 같은 업종 회사 중 위치(시장 전체 아님)">업종 안 위치</th>` +
     use.concat(use.includes('roa')?[]:['roa']).map(m=>`<th class="l">${PV.metrics[m][0]}${m==='roa'&&!use.includes('roa')?' <span class="muted" style="font-weight:400">(표시만)</span>':''}<br><span class="muted" style="font-weight:400">${Y[0]}→${Y[1]%100}E→${Y[2]%100}E→${Y[3]%100}E</span></th>`).join('') + '</tr>' +
-    (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span></td><td><b>${n0(r.price)}원</b></td>` +
+    (rows.length ? rows.map(({r,c})=>`<tr><td class="l"><a href="${companyUrl(r.code)}">${esc(r.name)}</a> <span class="muted">${esc(r.code)}</span>${rpBtn('U', r.code, uWhy(r, c))}</td><td><b>${n0(r.price)}원</b></td>` +
       ucell(r,c,2) + ucell(r,c,1) + ucell(r,c,0) +
       `<td class="l">${c.status==='통과' ? (tierList(c)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tierList(c)}</span>`) : `<span class="muted">${esc(c.status)} — ${esc(c.why||'')}</span>`}</td>` +
       `<td class="l" style="white-space:nowrap">${prShort(r.code)}</td>` + use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
@@ -2058,8 +2104,12 @@ function renderQ(){
     return `<td title="${esc(tip)}" style="${sel?'background:var(--info-bg);':''}${q.wait?'color:var(--text-muted)':hit?'color:var(--good);font-weight:600':''}">${n0(q.tv)}원 ${hit?'✓':''}${q.wait?' <span class="badge b-WARN">원천 대기</span>':''}<br><span class="muted" style="font-weight:400">현재가 대비 ${pc>=0?'+':''}${pc.toFixed(0)}%</span></td>`; };
   const tl = x => x.st!=='통과' ? '' : ['t1','t2','t3'].filter(k=>x.cheap[T[k].i]).map(k=>T[k].name.replace(' 분류','')).join('·') || '해당 없음';
   const pctv = v => v==null ? '–' : (v*100).toFixed(1);
+  const qWhy = x => { const price = x.r.data ? x.r.data.price : null;
+    const yv = x.c ? x.c.rows.map((q,i)=>`${Y[i]}E ${q.tv==null ? (q.why||'판정 못 함') : `오늘가치 ${rpN(q.tv)}원${price?rpPct(q.tv/price-1):''} · 적정 PER ${q.per.toFixed(1)} · ROE ${pctv(q.roe)}% · Ke ${(q.ke*100).toFixed(1)}%${q.wait?' · 원천 1곳(분류 제외)':''}`}`).join(' / ') : '계산 없음';
+    return `분류: ${x.st==='통과' ? (tl(x)==='해당 없음' ? '통과, 1·2·3차 해당 없음' : tl(x)+' 분류') : x.st+' — '+(x.why||'')}. 현재가 ${rpN(price)}원. ` +
+      `적정 PER = (1 − g/ROE) ÷ (Ke − g), g ${(p.g*100).toFixed(0)}%, 보정 ${p.use_cal?'앱 실측':'0.83(급하향 0.73)'}. ${yv}.${x.c && x.c.path ? ' 가치 경로: '+x.c.path.label+'.' : ''}`; };
   $('#q-table').innerHTML = `<tr><th class="l">기업</th><th>현재가</th><th>1차 오늘가치<br><span class="muted" style="font-weight:400">${Y[2]}E(내후년)</span></th><th>2차 오늘가치<br><span class="muted" style="font-weight:400">${Y[1]}E(내년)</span></th><th>3차 오늘가치<br><span class="muted" style="font-weight:400">${Y[0]}E(올해)</span></th><th class="l">해당 분류</th><th class="l">가치 경로</th><th class="l">적정 PER<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l">ROE(이월, %)<br><span class="muted" style="font-weight:400">${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th><th class="l" title="DB 안 같은 업종 회사 중 위치(시장 전체 아님)">업종 안 위치</th><th class="l" title="작년 DART 계산 · 올해~내후년 FnGuide 추정">ROA(%)<br><span class="muted" style="font-weight:400">${(Y[0]-1)%100}→${Y[0]%100}E→${Y[1]%100}E→${Y[2]%100}E</span></th></tr>` +
-    (rows.length ? rows.map(x=>`<tr><td class="l"><a href="${companyUrl(x.r.code)}">${esc(x.r.name)}</a> <span class="muted">${esc(x.r.code)}</span></td><td><b>${x.r.data ? n0(x.r.data.price)+'원' : '–'}</b></td>` +
+    (rows.length ? rows.map(x=>`<tr><td class="l"><a href="${companyUrl(x.r.code)}">${esc(x.r.name)}</a> <span class="muted">${esc(x.r.code)}</span>${rpBtn('Q', x.r.code, qWhy(x))}</td><td><b>${x.r.data ? n0(x.r.data.price)+'원' : '–'}</b></td>` +
       cell(x,2) + cell(x,1) + cell(x,0) +
       `<td class="l">${x.st==='통과' ? (tl(x)==='해당 없음' ? '<span class="muted">해당 없음</span>' : `<span class="badge b-OK">${tl(x)}</span>`) : `<span class="muted">${esc(x.st)} — ${esc(x.why||'')}</span>`}</td>` +
       `<td class="l" title="${esc(x.c ? x.c.path.why : '')}">${x.c ? esc(x.c.path.label) : '–'}</td>` +

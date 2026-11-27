@@ -254,6 +254,15 @@ class H(BaseHTTPRequestHandler):
                     job = dict(screener.JOB)
                 res = screener.results(conn) if q.get("results", ["0"])[0] == "1" else None
                 return self._send(200, json.dumps({"job": job, "results": res}, ensure_ascii=False), "application/json")
+            if u.path == "/api/research/prompt":
+                # J·P·Q·U탭 [조사 프롬프트]: 매수 판단 조사 요청 글(읽기만, 2026-11-27)
+                from . import research
+                code = (q.get("code") or [""])[0].strip().upper()
+                try:
+                    text = research.build(conn, code, config.periods(by), (q.get("tab") or ["P"])[0], (q.get("why") or [""])[0])
+                except ValueError as e:
+                    return self._send(200, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+                return self._send(200, json.dumps({"text": text, "chars": len(text)}, ensure_ascii=False), "application/json")
             if u.path == "/api/company_status":
                 # A탭: 회사마다 공시·뉴스·컨센서스 받은 때(수집이 도는 동안 화면을 새로 고치지 않아도 칸이 바뀌게)
                 from . import collectlock

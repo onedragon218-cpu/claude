@@ -700,6 +700,30 @@ class T(unittest.TestCase):
                 srv.shutdown(); srv.server_close()
                 os.remove(collectlock.lock_path())
 
+    def test_research_prompt_sections(self):
+        """2026-11-27 매수 판단 조사 프롬프트: 구성 1~8·공통 점검 ①~⑬·탭별 무너질 조건·업종 추가 질문이 들어가고, DB는 읽기만"""
+        from analyzer import research
+        conn = db.connect(); P = config.periods(None)
+        code = conn.execute("SELECT stock_code FROM companies ORDER BY stock_code").fetchone()[0]
+        n_before = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        for tab in ("J", "P", "Q", "U"):
+            t = research.build(conn, code, P, tab, "테스트 이유 한 줄")
+            for h in ("## 1. 목적", "## 2. 앱이 이미 아는 사실", "## 3. 이 회사가 뽑힌 이유", "## 4. 먼저 확인할 것",
+                      "## 5. 공통 점검", "## 6. 업종 추가 질문", "## 7. 지킬 것", "## 8. 답 형식"):
+                self.assertIn(h, t)
+            for a, _ in research.CHECKS:
+                self.assertIn(a, t)
+            self.assertIn(research.BREAK[tab][0][:20], t)
+            self.assertIn("테스트 이유 한 줄", t)
+            self.assertIn(f"{tab}-{code}-", t)                       # 요청 번호
+        self.assertEqual(research.industry("201")[0], "석유정제·화학")
+        self.assertEqual(research.industry("171")[0], "펄프·종이")
+        self.assertEqual(research.industry(None)[1], research.GENERIC_INDUSTRY)
+        with self.assertRaises(ValueError):
+            research.build(conn, "999999", P, "P", "")
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0], n_before)
+        conn.close()
+
     def test_fairper_formula_guards_and_payload(self):
         from analyzer import fairper
         # 1) 공식 값
