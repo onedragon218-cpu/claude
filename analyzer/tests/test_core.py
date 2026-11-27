@@ -664,6 +664,42 @@ class T(unittest.TestCase):
             finally:
                 srv.shutdown(); srv.server_close()
 
+    def test_update_price_runs_during_background_collect(self):
+        """2026-11-27 회귀: [주가만 새로 받기]가 늘 '다른 수집이 진행 중'으로 거절되던 문제 — 백그라운드 수집 중에도 시작하고 그 잠금은 건드리지 않음"""
+        import http.client, threading, time
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+        from analyzer import server, collectlock, pipeline
+        from analyzer.collectors import kiwoom
+        gaps = []
+        def fake_price(code, by, conn=None):
+            gaps.append(kiwoom._GAP)
+            return {"ok": True, "stats": {"total_requests": 0, "new_facts": 0, "changed_facts": 0, "notes": []}}
+        tmpd = tempfile.mkdtemp()
+        with mock.patch.object(pipeline, "update_price", fake_price), mock.patch.object(config, "DATA_DIR", tmpd):
+            self.assertTrue(collectlock.acquire("background", kind="백그라운드 수집", total=5))
+            lock_before = open(collectlock.lock_path(), encoding="utf-8").read()
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), server.H)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                c = http.client.HTTPConnection("127.0.0.1", srv.server_port, timeout=10)
+                c.request("POST", "/api/update-price", body=b"{}", headers={"Content-Type": "application/json", "Content-Length": "2", "Origin": f"http://127.0.0.1:{srv.server_port}"})
+                r = c.getresponse(); d = json.loads(r.read() or b"{}"); c.close()
+                self.assertNotIn("error", d)
+                self.assertTrue(d.get("running"))
+                self.assertIn("주가만 새로 받기(전체)", d.get("kind", ""))
+                for _ in range(200):
+                    with server.JOB_LOCK:
+                        if not server.JOB["running"]: break
+                    time.sleep(0.05)
+                self.assertTrue(gaps)
+                self.assertEqual(set(gaps), {1.0})                         # 다른 수집과 겹치면 키움 간격을 넓힘(줄이지 않음)
+                self.assertEqual(kiwoom._GAP, 0.35)                         # 끝나면 원래 간격으로
+                self.assertEqual(open(collectlock.lock_path(), encoding="utf-8").read(), lock_before)   # 백그라운드 잠금은 그대로
+            finally:
+                srv.shutdown(); srv.server_close()
+                os.remove(collectlock.lock_path())
+
     def test_fairper_formula_guards_and_payload(self):
         from analyzer import fairper
         # 1) 공식 값

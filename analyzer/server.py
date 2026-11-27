@@ -16,13 +16,21 @@ JOB_LOCK = threading.Lock()
 
 
 def _update_all(codes, base_year, fresh, mode="full"):
+    import contextlib
     from . import pcache, collectlock
+    locked = mode != "price"               # 주가만은 수집 잠금을 쓰지 않음(다른 수집의 잠금을 건드리지 않게)
     try:
-        with pcache.batch(), collectlock.keepalive():
+        with pcache.batch(), (collectlock.keepalive() if locked else contextlib.nullcontext()):
             _update_loop(codes, base_year, fresh, mode)
     finally:
-        collectlock.release()
+        if locked:
+            collectlock.release()
         COLLECTOR_PAUSE.clear()            # 수동 갱신이 끝나면 자동 수집기가 다시 이어서
+        try:
+            from .collectors import kiwoom as _kw
+            _kw._GAP = 0.35
+        except Exception:      # noqa: BLE001
+            pass
     with JOB_LOCK:
         JOB["running"] = False
         JOB["current"] = None
@@ -38,9 +46,13 @@ def _update_loop(codes, base_year, fresh, mode="full"):
                 JOB["stopped"] = True
                 break
             JOB["current"] = f"{name or ''}({code})"
-        collectlock.heartbeat(current=f"{name or ''}({code})", done=i, total=len(codes), kind=JOB.get("kind"))
+        if mode != "price":
+            collectlock.heartbeat(current=f"{name or ''}({code})", done=i, total=len(codes), kind=JOB.get("kind"))
         item = {"code": code, "name": name}
         if mode == "price":                # [주가만 새로 받기]: 주가·파생값만
+            from .collectors import kiwoom as _kw
+            other = collectlock.status()
+            _kw._GAP = 1.0 if other else 0.35   # 다른 수집도 키움을 부르면 간격을 넓힘(줄이지 않고 넓히기만)
             try:
                 t0 = _t.time()
                 conn = db.connect()
@@ -587,7 +599,8 @@ class H(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
             st0 = collectlock.status()
-            if st0 and st0.get("pid") == os.getpid() and st0.get("kind") == "자동 수집(화면 서버)":
+            price_only = u.path == "/api/update-price"   # 주가만: 가벼워서 다른 수집과 겹쳐도 됨(차례를 기다리지 않음, 2026-11-27)
+            if not price_only and st0 and st0.get("pid") == os.getpid() and st0.get("kind") == "자동 수집(화면 서버)":
                 COLLECTOR_PAUSE.set()             # 화면 서버 안 자동 수집기는 지금 회사까지만 하고 차례를 넘김
                 import time as _t
                 for _ in range(120):              # 최대 2분
@@ -599,7 +612,7 @@ class H(BaseHTTPRequestHandler):
                 if JOB["running"]:
                     return self._send(200, json.dumps(dict(JOB, already=True), ensure_ascii=False), "application/json")
                 bg = collectlock.status()
-                if bg and bg.get("who") == "background":
+                if not price_only and bg and bg.get("who") == "background":
                     return self._send(200, json.dumps({"error": f"백그라운드 수집이 진행 중입니다({bg.get('done', 0)}/{bg.get('total', '?')}곳, 지금 {bg.get('current', '')}). "
                                                                 "끝나면 다시 눌러 주세요 — 동시에 돌면 자료가 꼬일 수 있어 기다립니다."}, ensure_ascii=False), "application/json")
                 mode = "price" if u.path == "/api/update-price" else "full"
@@ -615,9 +628,10 @@ class H(BaseHTTPRequestHandler):
                         return self._send(400, json.dumps({"error": "고른 기업이 없습니다"}, ensure_ascii=False), "application/json")
                     kind = "주가만 새로 받기" + ("(체크한 기업)" if pick is not None else "(전체)")
                     by = int(q["base_year"][0]) if q.get("base_year") else None
-                    if not collectlock.acquire("server", kind=kind, total=len(codes)):
-                        COLLECTOR_PAUSE.clear()
-                    return self._send(200, json.dumps({"error": "다른 수집이 진행 중입니다. 잠시 뒤 다시 눌러 주세요"}, ensure_ascii=False), "application/json")
+                    # 수집 잠금을 잡지 않음 — 다른 수집(백그라운드·자동 수집·ROA 채우기)이 돌아도 바로 시작.
+                    # 그때는 키움 호출 간격을 넓혀(0.35초 → 1초) 두 쪽 호출을 합쳐도 한도를 넘지 않게(_update_loop에서)
+                    if bg:
+                        kind += f" · {bg.get('kind') or '다른 수집'}과 함께"
                     JOB.update(running=True, total=len(codes), done=0, current=None, results=[], started_at=db.now(),
                                finished_at=None, fresh=False, kind=kind, stop=False, stopped=False, targets=[f"{nm}({c})" for c, nm in codes[:50]])
                     threading.Thread(target=_update_all, args=(codes, by, False, "price"), daemon=True).start()
