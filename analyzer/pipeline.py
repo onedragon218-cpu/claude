@@ -764,52 +764,91 @@ def share_factors(conn, code, fm):
     return out
 
 
+def _pick(it, exact, suffix):
+    if exact in it:
+        return it.get(exact)
+    for k, v in it.items():
+        if k.endswith(suffix):
+            return v
+    return None
+
+
 def parse_capital(d):
-    """OpenDART 증자(감자) 현황(irdsSttus) → [(날짜, 형태, 주식 종류, 수량)]"""
+    """OpenDART 증자(감자) 현황(irdsSttus) → [(날짜, 형태, 주식 종류, 수량, 접수번호)]. 항목 이름은 isu_dcrs_* 이 기본이고,
+    다르면 끝부분(_de 날짜, _stle 형태, _knd 종류, _qy 수량)으로 찾음. 수량·날짜가 '-'인 줄(내역 없음 표시)은 건너뜀"""
     out = []
     for it in d.get("list") or []:
-        ds = re.sub(r"\D", "", str(it.get("isu_dcrs_de") or ""))
+        ds = re.sub(r"\D", "", str(_pick(it, "isu_dcrs_de", "_de") or ""))
         if len(ds) < 8:
             continue
-        q = str(it.get("isu_dcrs_qy") or "").replace(",", "").strip()
+        q = str(_pick(it, "isu_dcrs_qy", "_qy") or "").replace(",", "").strip()
         try:
             qty = float(q)
         except ValueError:
             continue
-        out.append((f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}", (it.get("isu_dcrs_stle") or "").strip(), (it.get("isu_dcrs_stock_knd") or "").strip(), qty,
-                    it.get("rcept_no")))
+        out.append((f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}", str(_pick(it, "isu_dcrs_stle", "_stle") or "").strip(),
+                    str(_pick(it, "isu_dcrs_stock_knd", "_knd") or "").strip(), qty, it.get("rcept_no")))
     return out
 
 
+CAPITAL_KEY = "{code}:v2"     # v2(2026-11-28): 응답을 보관하고 '없음'과 '읽지 못함'을 구분 — v1 기록(모두 '없음'으로 적힘)은 무시하고 다시 받음
+
+
 def fetch_capital(conn, code, P, stats=None, corp=None):
-    """OpenDART 증자(감자) 현황을 받아 capital_events에 저장(30일마다). corp = 회사 고유번호를 돌려주는 함수(없으면 찾음)"""
-    if db.fetched_recently(conn, "dart_capital", code, 30):
+    """OpenDART 증자(감자) 현황을 받아 capital_events에 저장(30일마다). corp = 회사 고유번호를 돌려주는 함수(없으면 찾음).
+    응답은 데이터 폴더 raw/<코드>/capital_<연도>.json에 보관(키는 응답에 들어 있지 않음). 기록 메모:
+    · DART가 '조회된 데이터 없음'(013)이거나 줄이 없음 → 성공·0건(응답 상태를 메모에)
+    · 줄이 있는데 하나도 못 읽음 → 실패(첫 줄의 항목 이름과 값을 메모에 — 형식 확인용)"""
+    key = CAPITAL_KEY.format(code=code)
+    if db.fetched_recently(conn, "dart_capital", key, 30):
         return
     y_rep = P["current"] - 1
     try:
         if stats:
             stats.req("DART")
         cc = corp() if corp else dart.corp_code(code)
-        d = dart.get_json("irdsSttus.json", corp_code=cc, bsns_year=str(y_rep), reprt_code="11011")
-        if d.get("status") == "013":
-            d = dart.get_json("irdsSttus.json", corp_code=cc, bsns_year=str(y_rep - 1), reprt_code="11011")
+        tried, y, d = [], y_rep, {}
+        for y in (y_rep, y_rep - 1):
+            d = dart.get_json("irdsSttus.json", corp_code=cc, bsns_year=str(y), reprt_code="11011")
+            tried.append(f"{y}년 보고서 상태 {d.get('status')}")
+            if d.get("status") != "013":
+                break
+        try:
+            folder = os.path.join(RAW_DIR, code)
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, f"capital_{y}.json"), "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False)
+        except OSError:
+            pass
+        rows = d.get("list") or []
         evs = parse_capital(d)
         ensure_capital(conn)
         for ev in evs:
             conn.execute("INSERT OR IGNORE INTO capital_events VALUES (?,?,?,?,?,?,?)", (code,) + ev + (db.now(),))
-        db.log_fetch(conn, "dart_capital", code, code, True, len(evs), None if evs else "증자·감자 내역 없음")
+        if not rows:
+            db.log_fetch(conn, "dart_capital", key, code, True, 0,
+                         f"증자·감자 내역 없음(DART 응답: {', '.join(tried)} · {d.get('message') or ''})"[:200])
+        elif not evs:
+            r0 = rows[0]
+            sample = "; ".join(f"{k}={str(v)[:20]}" for k, v in list(r0.items())[:12] if k not in ("corp_code", "corp_name", "corp_cls"))
+            db.log_fetch(conn, "dart_capital", key, code, False, 0, f"응답 {len(rows)}줄을 하나도 읽지 못함(형식 확인 필요) — 첫 줄: {sample}"[:500])
+        else:
+            adj = sum(1 for e in evs if ADJ_KIND.search(e[1]) and not NO_ADJ_KIND.search(e[1]))
+            db.log_fetch(conn, "dart_capital", key, code, True, len(evs),
+                         f"{y}년 사업보고서 {len(rows)}줄 중 {len(evs)}건 읽음 · 무상증자·분할 {adj}건"
+                         + (f" · 못 읽은 줄 {len(rows) - len(evs)}" if len(rows) > len(evs) else ""))
     except dart.DartUnavailable as e:
-        msg = str(e)
-        db.log_fetch(conn, "dart_capital", code, code, False, 0, ("증자·감자 내역 없음 — " + msg) if "013" in msg else msg)
+        db.log_fetch(conn, "dart_capital", key, code, False, 0, str(e)[:200])
 
 
-RECALC_KEY = "recalc"        # 새 계산 규칙을 설치한 뒤 회사마다 한 번(키 = 해석 규칙 버전)
+RECALC_KEY = "recalc"        # 새 계산 규칙을 설치한 뒤 회사마다 한 번(키 = 해석 규칙 버전 + 계산 판)
+RECALC_VER = 2               # 2(2026-11-28): 증자 내역 수집 고침 → 다시 받고 다시 계산
 
 
 def recalc_todo(conn):
     """새 해석·계산 규칙(지배순이익 줄·자료 충돌·무상증자 보정 등, 2026-11-28)이 아직 적용되지 않은 회사"""
     done = {r[0] for r in conn.execute("SELECT DISTINCT stock_code FROM fetch_log WHERE source=? AND key LIKE ?",
-                                       (RECALC_KEY, f"%:v{dart.PARSER_VERSION}"))}
+                                       (RECALC_KEY, f"%:v{dart.PARSER_VERSION}.{RECALC_VER}"))}
     return [r["stock_code"] for r in conn.execute(
         "SELECT c.stock_code FROM companies c WHERE EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code) ORDER BY c.stock_code")
         if r["stock_code"] not in done]
@@ -826,7 +865,7 @@ def recalc_one(conn, code, P, has_key=None):
     validate.validate_accounts(conn, code, P)
     compute(conn, code, P)
     validate.run(conn, code, P)
-    db.log_fetch(conn, RECALC_KEY, f"{code}:v{dart.PARSER_VERSION}", code, True, 1, "새 계산 규칙 적용")
+    db.log_fetch(conn, RECALC_KEY, f"{code}:v{dart.PARSER_VERSION}.{RECALC_VER}", code, True, 1, "새 계산 규칙 적용")
     conn.commit()
 
 

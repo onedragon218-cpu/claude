@@ -824,6 +824,33 @@ class T(unittest.TestCase):
         self.assertTrue(standards.hidden_debt(1 * E, 1 * E, 5 * E, 1000 * E)[0])           # 이자율 환산 500%
         self.assertFalse(standards.hidden_debt(100 * E, 100 * E, 5 * E, 1000 * E)[0])      # 5% — 정상
 
+    def test_capital_fetch_distinguishes_empty_and_unreadable(self):
+        """2026-11-28: 증자 내역 0건이 '정말 없음'인지 '읽지 못함'인지 구분해 기록(예전엔 둘 다 '없음')"""
+        import shutil
+        from unittest import mock
+        tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "t.db")
+        shutil.copy(os.path.join(config.DATA_DIR, "analyzer.db"), path)
+        conn = db.connect(path); P = config.periods(2026)
+        last = lambda c: conn.execute("SELECT ok, n_items, note FROM fetch_log WHERE source='dart_capital' AND stock_code=? ORDER BY id DESC LIMIT 1", (c,)).fetchone()
+        cases = {
+            "TCAP01": {"status": "013", "message": "조회된 데이타가 없습니다."},
+            "TCAP02": {"status": "000", "list": [{"rcept_no": "1", "odd_date": "2022.03.15", "odd_count": "100"}]},
+            "TCAP03": {"status": "000", "list": [{"rcept_no": "1", "isu_dcrs_de": "2022.03.15", "isu_dcrs_stle": "무상증자",
+                                                  "isu_dcrs_stock_knd": "보통주", "isu_dcrs_qy": "21,213,373"},
+                                                 {"rcept_no": "1", "isu_dcrs_de": "-", "isu_dcrs_stle": "-", "isu_dcrs_stock_knd": "-", "isu_dcrs_qy": "-"}]},
+        }
+        with mock.patch.object(config, "DATA_DIR", tmp), mock.patch.object(pipeline, "RAW_DIR", os.path.join(tmp, "raw")):
+            for c, resp in cases.items():
+                with mock.patch.object(dart, "get_json", lambda *a, _r=resp, **k: _r):
+                    pipeline.fetch_capital(conn, c, P, corp=lambda: "00000000")
+        self.assertEqual((last("TCAP01")["ok"], last("TCAP01")["n_items"]), (1, 0)); self.assertIn("상태 013", last("TCAP01")["note"])
+        self.assertEqual(last("TCAP02")["ok"], 0); self.assertIn("하나도 읽지 못함", last("TCAP02")["note"]); self.assertIn("odd_date", last("TCAP02")["note"])
+        self.assertEqual((last("TCAP03")["ok"], last("TCAP03")["n_items"]), (1, 1)); self.assertIn("무상증자·분할 1건", last("TCAP03")["note"])
+        self.assertTrue(os.path.exists(os.path.join(tmp, "raw", "TCAP03", "capital_2025.json")))   # 응답 보관
+        # 끝부분 이름으로도 읽음
+        self.assertEqual(len(pipeline.parse_capital({"list": [{"x_de": "20220315", "x_stle": "무상증자", "x_knd": "보통주", "x_qy": "5"}]})), 1)
+        conn.close()
+
     def test_recalc_once_after_install(self):
         """2026-11-28: 새 해석·계산 규칙은 설치 뒤 '새 버전 준비'에서 회사마다 한 번 적용(예전엔 그 회사가 다시 수집될 때까지 옛 값이 남았음)"""
         import shutil
