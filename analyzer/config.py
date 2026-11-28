@@ -87,6 +87,7 @@ ACCOUNTS = {
     "acc_op": "영업이익(원)",
     "acc_ni": "당기순이익(원)",
     "acc_ni_owner": "지배주주 순이익(원)",
+    "acc_ni_nci": "비지배지분 순이익(원)",
     "acc_assets": "자산총계(원)",
     "acc_liab": "부채총계(원)",
     "acc_eq": "자본총계(원)",

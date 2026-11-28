@@ -760,6 +760,58 @@ class T(unittest.TestCase):
             finally:
                 srv.shutdown(); srv.server_close()
 
+    def test_dart_attrib_skips_comprehensive_line(self):
+        """2026-11-28: 지배순이익은 '당기순이익의 귀속' 줄 — 같은 이름의 '총포괄손익의 귀속' 줄을 잡지 않음(지배 + 비지배 = 당기순이익인 쌍만)"""
+        from analyzer.collectors import dart
+        row = lambda nm, v, aid="-표준계정코드 미사용-": {"sj_div": "CIS", "account_nm": nm, "account_id": aid, "thstrm_amount": str(v)}
+        L = [row("당기순이익(손실)", 3_000_000_000, "ifrs-full_ProfitLoss"), row("총포괄손익", -10_000_000_000, "ifrs-full_ComprehensiveIncome"),
+             row("지배기업소유주지분", -9_700_000_000), row("비지배지분", -300_000_000),                       # 총포괄손익 귀속(먼저 나옴)
+             row("지배기업 소유주에게 귀속되는 당기순이익", 5_700_000_000), row("비지배지분에 귀속되는 당기순손실", -2_700_000_000)]
+        self.assertEqual(dart._find(L, "acc_ni_owner", "thstrm_amount"), 5_700_000_000)
+        self.assertEqual(dart._find(L, "acc_ni_nci", "thstrm_amount"), -2_700_000_000)
+        L2 = [row("당기순이익", 1e9, "ifrs-full_ProfitLoss"), row("지배기업소유주지분", 4e8), row("지배기업소유주지분", 5e8)]   # 비지배 없음, 순이익과 안 맞음
+        self.assertIsNone(dart._find(L2, "acc_ni_owner", "thstrm_amount"))                                    # 못 고르면 결측(추측 금지)
+        self.assertGreaterEqual(dart.PARSER_VERSION, 5)
+
+    def test_fake077360_acceptance(self):
+        """2026-11-28 수정 지시(덕산하이메탈 077360) 확인 기준을 같은 모양의 가상 회사로: 자료 충돌·ROE −44%·⑤ ✗·증권사 수 미상·
+        무상증자만 보정·흑자전환 미통과·컨센 경고 둘"""
+        import shutil
+        from analyzer import pipeline, goodco, research, validate, upvalue
+        tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "t.db")
+        shutil.copy(os.path.join(config.DATA_DIR, "analyzer.db"), path)
+        conn, code = _make_fake077(path)
+        P = config.periods(2026)
+        pipeline.compute(conn, code, P); validate.run(conn, code, P)
+        fv = lambda y, k: db.current_fact(conn, code, y, k)
+        # 1 자료 충돌
+        self.assertIsNone(fv(2023, "eps")["value"]); self.assertEqual(fv(2023, "eps")["status"], "CONFLICT")
+        self.assertIsNone(fv(2023, "roe")["value"])
+        # 2 ROE 직접 계산(지배순이익 줄 없음 + 비지배 없음 → 당기순이익)
+        self.assertAlmostEqual(fv(2025, "roe")["value"], -44.5, delta=0.3)
+        g = goodco.good6(conn, code, P)
+        self.assertFalse(g["rows"]["three"]["mark"].startswith("판정 못 함"))
+        # 3 ⑤ 이자보상배율 0.37 → ✗, 숫자 표시
+        self.assertEqual(g["rows"]["four"]["mark"], "✗"); self.assertIn("0.37배", g["rows"]["four"]["text"]); self.assertIn("EBITDA", g["rows"]["four"]["text"])
+        # 5 무상증자(100%)만 보정: 2021 BPS 12,274 → 6,137, 유상증자는 보정 안 함. 시가총액은 수정주가 × 지금 기준 주식 수
+        self.assertAlmostEqual(fv(2021, "bps")["value"], 6137, delta=1); self.assertIn("주식 수 보정", fv(2021, "bps")["status_note"])
+        self.assertAlmostEqual(fv(2021, "eps")["value"], 751, delta=1)
+        self.assertAlmostEqual(fv(2021, "market_cap")["value"], 20000 * 21_213_373 * 2 / 1e8, delta=1)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM validation WHERE stock_code=? AND check_no=2 AND level='WARN' AND message LIKE '순이익/EPS%'",
+                                      (code,)).fetchone()[0], 0)
+        # A 흑자전환은 EPS 우상향으로 세지 않음(다른 지표는 그대로)
+        self.assertFalse(upvalue.rising([-50, 100, 200, 300], "%", None, "eps")[0])
+        self.assertTrue(upvalue.rising([-50, 100, 200, 300], "%", None, "revenue")[0])
+        # B 컨센 경고 둘
+        fl = research.consensus_flags(conn, code, P)
+        self.assertTrue(any(x.startswith("영업 밖 이익 전제") for x in fl)); self.assertTrue(any(x.startswith("EPS 상향이 영업에서") for x in fl))
+        # 4·C 요청서
+        t = research.build(conn, code, P, "P", "테스트")
+        self.assertIn("**자료 충돌**", t); self.assertIn("미상 · 원천 1/미상", t); self.assertIn("339 [281]", t)
+        self.assertLess(t.index("### 생존·빚"), t.index("### 최근 실적")); self.assertGreater(t.index("### 주가"), t.index("### 최근 3개월 뉴스"))
+        self.assertIn("-478억", t); self.assertIn("**143억**", t); self.assertIn("ROA(당기순이익 기준)", t)
+        conn.close()
+
     def test_fairper_formula_guards_and_payload(self):
         from analyzer import fairper
         # 1) 공식 값
@@ -1627,6 +1679,46 @@ class T(unittest.TestCase):
                 self.assertAlmostEqual(g["values"]["dcf"], o["dcf"], places=3, msg=str(y))
                 n += 1
         self.assertGreater(n, 3)
+
+
+def _make_fake077(path):
+    from analyzer import pipeline
+    conn = db.connect(path)
+    code = "T77360"
+    db.ensure_company(conn, code, "가상하이메탈")
+    db.set_induty(conn, code, "262")
+    E = 1e8
+    old, new = 21_213_373, 45_402_164
+    yrs = {2021: dict(rev=1200, op=150, ni=320, nio=318, eps=1502, eqo=12_274 * old / E, eq=12_274 * old / E, liab=0.20, sh=old),
+           2022: dict(rev=1500, op=120, ni=60, nio=58, eps=128, eqo=7_200 * new / E, eq=7_200 * new / E, liab=0.76, sh=new),
+           2023: dict(rev=1400, op=40, ni=25, nio=-97, eps=125, eqo=7_150 * new / E, eq=7_150 * new / E, liab=0.80, sh=new),
+           2024: dict(rev=1300, op=30, ni=-200, nio=-200, eps=-440, eqo=6_897 * new / E, eq=6_897 * new / E, liab=0.95, sh=new),
+           2025: dict(rev=1100, op=37, ni=-1157, nio=None, eps=-2548, eqo=4_544 * new / E, eq=4_544 * new / E, liab=0.95, sh=new)}
+    for y, d in yrs.items():
+        put = lambda k, v: v is not None and db.put_fact(conn, code, y, k, v, unit="원", basis="CFS", source="DART", source_ref=f"R{y}")
+        put("acc_revenue", d["rev"] * E); put("acc_op", d["op"] * E); put("acc_ni", d["ni"] * E)
+        put("acc_ni_owner", None if d["nio"] is None else d["nio"] * E); put("acc_eps_basic", d["eps"])
+        put("acc_eq_owner", d["eqo"] * E); put("acc_eq", d["eq"] * E); put("acc_liab", d["liab"] * d["eq"] * E)
+        put("acc_assets", (1 + d["liab"]) * d["eq"] * E)
+        put("acc_debt", 0.6 * d["liab"] * d["eq"] * E); put("acc_cash", 50 * E)
+        put("acc_ocf", 60 * E); put("acc_capex_ppe", 155.6 * E); put("acc_dep", 80 * E)
+        put("acc_int_paid_fin", 100 * E if y == 2025 else 20 * E)
+        db.put_fact(conn, code, y, "shares_common", d["sh"], unit="주", basis="-", source="DART", source_ref=f"S{y}")
+        db.put_fact(conn, code, y, "price_close", 20000 if y < 2022 else 9000, unit="원", basis="-", source="Kiwoom", source_ref="adj")
+    pipeline.ensure_capital(conn)
+    # 2022-03 무상증자 100%(21,213,373주) + 2022-08 유상증자(보정 안 함)
+    conn.execute("INSERT INTO capital_events VALUES (?,?,?,?,?,?,?)", (code, "2022-03-15", "무상증자", "보통주", 21_213_373, "X1", db.now()))
+    conn.execute("INSERT INTO capital_events VALUES (?,?,?,?,?,?,?)", (code, "2022-08-10", "유상증자(제3자배정)", "보통주", 2_975_418, "X2", db.now()))
+    for ty, m, v, n in [(2026, "op_income", 339, 2), (2026, "net_income", 413, 2), (2026, "revenue", 1400, 2), (2026, "eps", 910, 2),
+                        (2027, "op_income", 380, None), (2027, "net_income", 300, None), (2027, "eps", 660, None), (2027, "revenue", 1500, None),
+                        (2028, "op_income", 420, None), (2028, "eps", 720, None), (2028, "revenue", 1600, None)]:
+        db.add_consensus(conn, code, ty, m, v, "WiseReport", "2026-11-20", unit="억원" if m != "eps" else "원", n_estimates=n)
+    db.add_consensus_history(conn, code, [(2026, "eps", "2026-08-28", 484, "원"), (2026, "eps", "2026-11-20", 910, "원"),
+                                          (2026, "op_income", "2026-08-28", 329, "억원"), (2026, "op_income", "2026-11-20", 339, "억원")])
+    db.put_fact(conn, code, 2026, "acc_revenue", 993 * E, period="Q3", unit="원", basis="CFS", source="DART", source_ref="Q3")
+    db.put_fact(conn, code, 2026, "acc_op", 196 * E, period="Q3", unit="원", basis="CFS", source="DART", source_ref="Q3")
+    conn.commit()
+    return conn, code
 
 
 if __name__ == "__main__":

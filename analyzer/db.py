@@ -253,14 +253,16 @@ def current_fact(conn, code, year, metric, period="FY"):
 
 def put_fact(conn, code, year, metric, value, period="FY", unit=None, basis=None, data_type="ACTUAL",
              source=None, source_ref=None, source_url=None, as_of=None, status="UNVERIFIED",
-             status_note=None, change_reason=None, collected_at=None):
+             status_note=None, change_reason=None, collected_at=None, clear=False):
     """값을 저장한다. 같은 값이면 아무것도 하지 않고, 다르면 새 버전을 만든다.
     반환: 'new' | 'same' | 'changed'"""
     cur = current_fact(conn, code, year, metric, period)
     if cur is not None and _same(cur["value"], value) and (cur["source_ref"] == source_ref or value is None):
         return "same"
-    if cur is not None and cur["value"] is not None and value is None:
-        return "same"   # 이미 값이 있는데 '없음'으로 덮어쓰지 않는다
+    if cur is not None and cur["value"] is not None and value is None and not clear:
+        return "same"   # 이미 값이 있는데 '없음'으로 덮어쓰지 않는다(clear=True: 값이 틀렸다고 확인된 경우만 — 자료 충돌·재해석, 2026-11-28)
+    if cur is not None and value is None and clear and cur["value"] is None and cur["status_note"] == status_note:
+        return "same"
     version = 1
     if cur is not None:
         version = cur["version"] + 1
@@ -272,7 +274,7 @@ def put_fact(conn, code, year, metric, value, period="FY", unit=None, basis=None
         "source_url,collected_at,as_of,status,status_note,version,is_current,change_reason,created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)",
         (code, year, period, metric, value, unit, basis, data_type, source, source_ref, source_url,
-         collected_at or today(), as_of, status if value is not None else "MISSING", status_note, version,
+         collected_at or today(), as_of, status if value is not None or status == "CONFLICT" else "MISSING", status_note, version,
          change_reason, now()))
     return "new" if cur is None else "changed"
 

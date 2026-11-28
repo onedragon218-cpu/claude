@@ -507,7 +507,7 @@ def growth_table(conn, P):
             if y < cy:   # 작년: 실적
                 rev = fv(y, "acc_revenue")
                 op = fv(y, "acc_op")
-                eps = fv(y, "acc_eps_basic")
+                eps = fv(y, "eps")           # 계산된 EPS(자료 충돌 해는 비어 있음 · 무상증자·분할 보정 반영, 2026-11-28)
                 rev = rev / 1e8 if rev is not None else None
                 op = op / 1e8 if op is not None else None
                 row["years"][y] = {"kind": "실적", "raw": {"revenue": rev, "op_income": op, "eps": eps},

@@ -25,7 +25,7 @@ NAMES = {      # 2026-11-25: ④ ROA 추가(뒤 번호 밀기) → 7조건. 내�
     "three": "③ ROE가 과거 정점을 넘거나 최근 3년보다 우상향",
     "roa": "④ ROA가 과거 정점을 넘거나 최근 3년보다 우상향",
     "rel": "참고: ROE와 ROA의 관계 — 오른 ROE가 실력인가 빚(레버리지)인가(점수에 넣지 않음)",
-    "four": "⑤ 부채비율이 통제 가능 범위 안이거나 최근 3년보다 줄어듦",
+    "four": "⑤ 부채비율이 통제 가능 범위 안이거나 최근 3년보다 줄어듦 · 이자보상배율 1배 미만이면 ✗, 1~3배면 △",
     "five": "⑥ 그 위에서 산업이 우호로 바뀌는 중이라 큰 폭 성장이 예상됨",
     "six": "⑦ 주가가 아직 크게 반영되지 않음",
 }
@@ -253,10 +253,20 @@ def good6(conn, code, P):
     # ③ ROE · ④ ROA — 같은 규칙(과거 정점을 넘거나 최근 3년 우상향). 전망은 둘 다 FnGuide Financial Highlight 추정치(같은 출처)
     def ratio_rule(key, cons_key, label):
         hist = {y: D.v(y, key) for y in ys if D.v(y, key) is not None}
+        gap_note = ""
         if not all(y in hist for y in l3):
-            return {"mark": f"판정 못 함({label} 자료 부족)", "text": f"최근 3년 {label}가 다 있지 않음"}, None
+            # 마지막 해가 아닌 한 해만 '자료 충돌'로 빠졌으면(2026-11-28) 남은 두 해로 판정: 마지막 ≤ 앞 해면 ✗, 아니면 △까지만(우상향 유지 확인 불가)
+            miss = [y for y in l3 if y not in hist]
+            if len(miss) == 1 and miss[0] != l3[2] and D.st(miss[0], key) == "CONFLICT":
+                gap_note = f" · {miss[0]}년은 자료 충돌로 빠짐(남은 두 해로 판정)"
+            else:
+                return {"mark": f"판정 못 함({label} 자료 부족)", "text": f"최근 3년 {label}가 다 있지 않음"}, None
         py = max(hist, key=hist.get)
-        r3 = [hist[y] for y in l3]
+        if gap_note:
+            earlier, lastv = [hist[y] for y in l3 if y in hist]
+            r3 = [earlier, lastv, lastv] if lastv <= earlier else [earlier, float("inf"), lastv]
+        else:
+            r3 = [hist[y] for y in l3]
         est = {y: D.c(y, cons_key) for y in est_y if D.c(y, cons_key) is not None}
         src = "FnGuide 추정"
         if not est and key == "roe":                  # FnGuide 추정이 없으면 예전 방식(순이익 컨센으로 추산)
@@ -270,7 +280,7 @@ def good6(conn, code, P):
                     eq += ni * 0.75
             src = "컨센 추정(해석 — FnGuide 추정 없음)"
         mark = rule_three(r3, list(est.values()), hist[py])
-        t = f"과거 정점 {hist[py]:.1f}%({py}) · 최근 3년 " + " → ".join(f"{v:.1f}" for v in r3) + "%"
+        t = f"과거 정점 {hist[py]:.1f}%({py}) · 최근 3년 " + " → ".join("충돌" if hist.get(y) is None else f"{hist[y]:.1f}" for y in l3) + "%" + gap_note
         t += (f" · {src} " + " → ".join(f"{_e(y)} {v:.1f}" for y, v in est.items()) + "%") if est else f" · 추정 없음"
         return {"mark": mark, "text": t}, r3
     out["rows"]["three"], roe3 = ratio_rule("roe", "roe_fg", "ROE")
@@ -299,16 +309,29 @@ def good6(conn, code, P):
         lt += " · ROE " + " → ".join(f"{v:.1f}" for v in roe3) + "% · ROA " + " → ".join(f"{v:.1f}" for v in roa3) + "%"
     out["rows"]["rel"] = {"mark": rel, "text": lt}
 
-    # ⑤(내부 이름 four) 부채비율
+    # ⑤(내부 이름 four) 부채비율 + 이자 감당력(2026-11-28 사용자 결정: 이자보상배율 1배 미만 ✗, 1~3배 △, 판정 옆에 숫자 표시)
     d3 = [D.v(y, "debt_ratio") for y in l3]
+    icr, icr_t = interest_cover(D, last)
+    nde_t = nd_ebitda_text(D, last)
     if None not in d3:
         mark = "✓" if d3[-1] <= 100 or d3[-1] < d3[0] else "✗"
         t = "최근 3년 " + " → ".join(f"{v:.0f}" for v in d3) + "% "
         t += ("(100% 이하 = 통제 가능)" if d3[-1] <= 100 else
               "(100% 위지만 3년 전보다 줄어드는 중 — 규칙상 ✓, 수준은 높음)" if d3[-1] < d3[0] else "(100% 위 · 줄지 않음)")
+        if d3[0] < d3[1] < d3[2]:
+            t += " · 3년 연속 상승"
+        if icr is not None and icr < ICR_FAIL:
+            mark = "✗"
+            t += f" · 이자보상배율 {icr:.2f}배 — {ICR_FAIL:g}배 미만이라 부채비율과 관계없이 ✗"
+        elif icr is not None and icr < ICR_WARN and mark == "✓":
+            mark = "△"
+            t += f" · 이자보상배율 {icr:.2f}배 — {ICR_FAIL:g}~{ICR_WARN:g}배라 △"
+        else:
+            t += f" · {icr_t}"
+        t += f" · {nde_t}"
         if man.get("four_note"):
             t += f" · 메모: {man['four_note']}"
-        out["rows"]["four"] = {"mark": mark, "text": t}
+        out["rows"]["four"] = {"mark": mark, "text": t, "icr": icr}
     else:
         out["rows"]["four"] = {"mark": "판정 못 함(부채비율 자료 부족)", "text": "최근 3년 부채비율이 다 있지 않음"}
 
@@ -340,6 +363,33 @@ def good6(conn, code, P):
     out["n_conditions"] = len(SCORED)
     out["last"] = last
     return out
+
+
+ICR_FAIL, ICR_WARN = 1.0, 3.0      # 이자보상배율 기준(사용자 확정 2026-11-28)
+
+
+def interest_cover(D, y):
+    """이자보상배율 = 영업이익 ÷ 이자 지급(현금흐름표 영업·재무 분류 합, 화면 H와 같은 값). (값, 설명)"""
+    op = D.v(y, "acc_op")
+    ip = (D.v(y, "acc_int_paid") or 0) + (D.v(y, "acc_int_paid_fin") or 0)
+    if op is None:
+        return None, "이자보상배율 –(영업이익 없음)"
+    if not ip:
+        return None, "이자보상배율 –(이자 지급 없음: 무차입이거나 자료 없음)"
+    return op / ip, f"이자보상배율 {op / ip:.2f}배({y})"
+
+
+def nd_ebitda_text(D, y):
+    nd, when = D.net_debt()
+    op, dep, am = D.eok(y, "acc_op"), D.eok(y, "acc_dep"), D.eok(y, "acc_amort")
+    if nd is None:
+        return f"순차입금 ÷ EBITDA –({when})"
+    if op is None or dep is None:
+        return f"순차입금 {nd:,.0f}억({when}) · EBITDA –(감가상각비 없음)"
+    ebitda = op + dep + (am or 0)
+    if ebitda <= 0:
+        return f"순차입금 {nd:,.0f}억({when}) · EBITDA {ebitda:,.0f}억(0 이하라 배수 의미 없음)"
+    return f"순차입금 ÷ EBITDA {nd / ebitda:.1f}배(순차입금 {nd:,.0f}억 {when} · EBITDA {ebitda:,.0f}억 {y})"
 
 
 # ---- 화면 N ----

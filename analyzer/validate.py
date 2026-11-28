@@ -77,12 +77,26 @@ def run(conn, code, P):
         elif abs(op / rev * 100 - om) > 0.01:
             add(1, "영업이익률 재계산", y, "op_margin", "ERROR", f"저장값 {om:.2f}% vs 재계산 {op / rev * 100:.2f}%")
     # 2 EPS와 순이익
+    from . import pipeline as _pl
+    conflict = _pl.sign_conflicts(fm, past)
+    for y, msg in conflict.items():
+        add(2, "EPS-순이익 관계", y, "eps", "WARN", msg)
+    fac = _pl.share_factors(conn, code, fm)
+    _pl.ensure_capital(conn)
+    real_issues = [f"{r['ev_date']} {r['kind']}" for r in conn.execute(
+        "SELECT ev_date, kind FROM capital_events WHERE stock_code=? AND qty>0 ORDER BY ev_date", (code,))
+        if not _pl.ADJ_KIND.search(r["kind"] or "") and not _pl.NO_ADJ_KIND.search(r["kind"] or "")]
     implied = {y: v(y, "acc_ni_owner") / v(y, "acc_eps_basic") for y in past
-               if v(y, "acc_ni_owner") is not None and v(y, "acc_eps_basic")}
+               if v(y, "acc_ni_owner") is not None and v(y, "acc_eps_basic") and y not in conflict}
+    for y, (f, _w) in fac.items():          # 무상증자·분할 전 해: 옛 주식 수 기준 EPS면 지금 주식 수 기준으로 바꿔 비교(주식 수 경고가 증자 탓이면 안 뜨게)
+        if y in implied and _pl.eps_needs_adjust(v(y, "acc_ni_owner"), v(y, "acc_eps_basic"), _pl.shares_for_bps(fm, y), f):
+            implied[y] = implied[y] / f
     for y, imp in implied.items():
         sh = None
         if v(y, "shares_common"):
             sh = v(y, "shares_common") + (v(y, "shares_pref") or 0) - (v(y, "treasury_common") or 0) - (v(y, "treasury_pref") or 0)
+        if sh and y in fac:
+            sh = sh / fac[y][0]           # 무상증자·분할 보정 연도: 지금 주식 수 기준끼리 비교
         if sh:
             d = _rel(imp, sh)
             if d > 0.03:
@@ -92,8 +106,14 @@ def run(conn, code, P):
         for y, imp in implied.items():
             d = _rel(imp, med)
             if d > 0.03 and abs(v(y, "acc_eps_basic")) >= 300:   # EPS가 작으면 반올림 오차가 커서 제외
-                add(2, "EPS-순이익 관계", y, "eps", "WARN",
-                    f"순이익/EPS={imp:,.0f}주, 기간 중앙값 {med:,.0f}주와 {d:.1%} 차이(주식 수 변동·우선주·일회성 확인)")
+                later = [e for e in real_issues if int(e[:4]) > y]
+                if later:                     # 그 뒤 유상증자·전환 등 실제 주식 증가가 있었음 → 자료 오류가 아님(2026-11-28)
+                    add(2, "EPS-순이익 관계", y, "eps", "INFO",
+                        f"순이익/EPS={imp:,.0f}주(무상증자·분할 보정 뒤), 기간 중앙값 {med:,.0f}주와 {d:.1%} 차이 — 그 뒤 실제 주식 증가"
+                        f"({'; '.join(later[:2])})로 생긴 차이라 정상")
+                else:
+                    add(2, "EPS-순이익 관계", y, "eps", "WARN",
+                        f"순이익/EPS={imp:,.0f}주, 기간 중앙값 {med:,.0f}주와 {d:.1%} 차이(주식 수 변동·우선주·일회성 확인)")
     if not any(v(y, "shares_common") for y in past):
         add(2, "EPS-순이익 관계", None, "eps", "INFO", "공식 주식 수 미확보 → DART 주식총수 현황 수집 후 정밀 대조")
     # 3 BPS

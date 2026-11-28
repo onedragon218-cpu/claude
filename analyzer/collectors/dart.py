@@ -24,7 +24,12 @@ MAP = {
     "acc_revenue": (("IS", "CIS"), ["ifrs-full_Revenue"], ["매출액", "수익(매출액)", "영업수익"]),
     "acc_op": (("IS", "CIS"), ["dart_OperatingIncomeLoss"], ["영업이익", "영업이익(손실)"]),
     "acc_ni": (("IS", "CIS"), ["ifrs-full_ProfitLoss"], ["당기순이익", "당기순이익(손실)"]),
-    "acc_ni_owner": (("IS", "CIS"), ["ifrs-full_ProfitLossAttributableToOwnersOfParent"], ["지배기업소유주지분", "지배기업의소유주"]),
+    "acc_ni_owner": (("IS", "CIS"), ["ifrs-full_ProfitLossAttributableToOwnersOfParent"],
+                     ["지배기업소유주지분", "지배기업의소유주", "지배기업의소유주지분", "지배주주지분", "지배회사지분", "지배기업소유지분",
+                      "지배기업지분", "지배주주순이익", "지배기업소유주지분순이익", "지배기업소유주지분순손익"]),
+    # 비지배지분 순이익(2026-11-28): 지배순이익 줄이 없으면 당기순이익 − 비지배지분으로 구함
+    "acc_ni_nci": (("IS", "CIS"), ["ifrs-full_ProfitLossAttributableToNoncontrollingInterests"],
+                   ["비지배지분", "비지배주주지분", "비지배지분순이익", "비지배지분순손익"]),
     "acc_eps_basic": (("IS", "CIS"), ["ifrs-full_BasicEarningsLossPerShare"], ["기본주당이익", "기본주당순이익", "기본주당이익(손실)", "기본주당순손익", "보통주기본주당순손익"]),
     "acc_assets": (("BS",), ["ifrs-full_Assets"], ["자산총계"]),
     "acc_liab": (("BS",), ["ifrs-full_Liabilities"], ["부채총계"]),
@@ -67,8 +72,8 @@ ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"
             "acc_da_total"}   # 회사마다 부호 표기가 달라 절댓값 사용
 CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_cfi", "acc_cff", "acc_fx",
            "acc_dep", "acc_amort", "acc_rou_dep", "acc_da_total"}
-FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
-PARSER_VERSION = 4   # 계정을 늘리면 올린다 → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
+FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_ni_nci", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
+PARSER_VERSION = 5   # 계정을 늘리면 올린다(5: 지배·비지배 순이익 귀속 줄 고침, 2026-11-28) → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
 
 
 def _num(s):
@@ -88,7 +93,60 @@ def _norm_id(aid):
     return (aid or "").replace("ifrs_", "ifrs-full_", 1) if (aid or "").startswith("ifrs_") else (aid or "")
 
 
+# 순이익 귀속(지배·비지배) 줄은 '당기순이익의 귀속'과 '총포괄손익의 귀속'에 같은 이름으로 두 번 나온다(단일 포괄손익계산서는 순서도 회사마다 다름).
+# 예전엔 이름만 보고 첫 줄을 골라, 당기순이익 귀속 줄 이름이 목록과 다르면 총포괄손익 귀속 줄(기타포괄손익 포함)을 지배순이익으로 잡을 수 있었음
+# → 순이익과 EPS 부호가 다른 해가 생김(덕산하이메탈 2023, 2026-11-28).
+# 이제: 표준 ID(당기순이익 귀속 전용)가 있으면 그것, 없으면 이름 후보들 중 '지배 + 비지배 = 당기순이익'이 맞는 쌍만 씀. 못 고르면 결측.
+ATTRIB = {"acc_ni_owner": re.compile(r"^지배(기업|회사|주주)"), "acc_ni_nci": re.compile(r"^비지배")}
+
+
+def _is_comprehensive(it):
+    aid = _norm_id(it.get("account_id"))
+    return "ComprehensiveIncome" in aid or "포괄" in (it.get("account_nm") or "")
+
+
+def _attrib_candidates(lst, key, col):
+    sjs, ids, names = MAP[key]
+    out = []
+    for sj in sjs:
+        for it in lst:
+            if it.get("sj_div") != sj or _is_comprehensive(it):
+                continue
+            nm = re.sub(r"\s", "", it.get("account_nm", ""))
+            if key == "acc_ni_owner" and nm.startswith("비지배"):
+                continue
+            if nm in names or ATTRIB[key].search(nm):
+                v = _num(it.get(col))
+                if v is not None:
+                    out.append(v)
+    return out
+
+
+def _find_attrib(lst, key, col):
+    sjs, ids, _ = MAP[key]
+    for sj in sjs:                       # 표준 ID는 당기순이익 귀속 전용(총포괄손익 귀속은 ID가 다름)
+        for it in lst:
+            if it.get("sj_div") == sj and _norm_id(it.get("account_id")) in ids:
+                v = _num(it.get(col))
+                if v is not None:
+                    return v
+    ni = _find(lst, "acc_ni", col)
+    own, nci = _attrib_candidates(lst, "acc_ni_owner", col), _attrib_candidates(lst, "acc_ni_nci", col)
+    if ni is None:
+        return (own if key == "acc_ni_owner" else nci)[0] if len(own if key == "acc_ni_owner" else nci) == 1 else None
+    tol = max(abs(ni) * 0.005, 1e6)      # 0.5% 또는 100만 원
+    for k in range(min(len(own), len(nci))):          # k번째 지배 줄과 k번째 비지배 줄의 합이 당기순이익이면 그 묶음이 '당기순이익의 귀속'
+        if abs(own[k] + nci[k] - ni) <= tol:
+            return own[k] if key == "acc_ni_owner" else nci[k]
+    if not nci and key == "acc_ni_owner":             # 비지배지분 줄이 없음(자회사 없음): 지배 = 당기순이익인 줄
+        hit = [v for v in own if abs(v - ni) <= tol]
+        return hit[0] if hit else None
+    return None
+
+
 def _find(lst, key, col):
+    if key in ATTRIB:
+        return _find_attrib(lst, key, col)
     sjs, ids, names = MAP[key]
     for sj in sjs:                       # 1순위: 표준 계정 ID
         for it in lst:

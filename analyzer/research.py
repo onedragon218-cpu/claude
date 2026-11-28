@@ -11,7 +11,7 @@ import datetime as dt
 
 from . import db
 
-VERSION = "조사양식 v1"
+VERSION = "조사양식 v2"
 TABS = {"J": "J. 성장 조건 분류", "P": "P. 우상향 저평가(ROE 적정가)", "Q": "Q. 적정 PER 주가", "U": "U. 우상향 저평가(10년 최저 PBR 적정가)"}
 
 # 4. 탭별 '이 근거가 무너질 조건' — 먼저 확인할 것
@@ -110,18 +110,42 @@ def industry(induty_code):
     return None, GENERIC_INDUSTRY
 
 
+def _fr(conn, code, y, k, per="FY"):
+    return db.current_fact(conn, code, y, k, per)
+
+
 def _financials(conn, code, cy):
+    """최근 5년 실적 표. 자료 충돌·주식 수 보정·지배순이익 대체 계산은 칸에 표시하고 아래에 이유(2026-11-28)"""
     ys = [y for y in range(cy - 5, cy) if _v(conn, code, y, "acc_revenue") is not None]
     if not ys:
         return ["(DART 실적 없음)"], None
-    head = "| 연도 | 매출(억) | 영업이익(억) | 지배순이익(억) | 영업현금흐름(억) | 설비투자(억) | 감가상각(억) | 영업이익률 | ROE | ROA | 부채비율 | EPS(원) | BPS(원) |"
-    L = [head, "|" + "---|" * 13]
+    head = ("| 연도 | 매출(억) | 영업이익(억) | 지배순이익(억) | 당기순이익(억, 비지배 포함) | 영업현금흐름(억) | 설비투자(억) | 감가상각(억) | "
+            "영업이익률 | ROE(지배 기준) | ROA(당기순이익 기준) | 부채비율 | EPS(원) | BPS(원) |")
+    L, notes = [head, "|" + "---|" * 14], []
     for y in ys:
         g = lambda k: _v(conn, code, y, k)
         dep = (g("acc_dep") or 0) + (g("acc_amort") or 0) if g("acc_dep") is not None else None
-        L.append(f"| {y} | {_n(_eok(g('acc_revenue')))} | {_n(_eok(g('acc_op')))} | {_n(_eok(g('acc_ni_owner') if g('acc_ni_owner') is not None else g('acc_ni')))} | "
-                 f"{_n(_eok(g('acc_ocf')))} | {_n(_eok(g('acc_capex_ppe')))} | {_n(_eok(dep))} | {_n(g('op_margin'), 1, '%')} | {_n(g('roe'), 1, '%')} | "
-                 f"{_n(g('roa'), 1, '%')} | {_n(g('debt_ratio'), 0, '%')} | {_n(g('eps'))} | {_n(g('bps'))} |")
+        nio_r, eps_r, bps_r, roe_r = _fr(conn, code, y, "acc_ni_owner"), _fr(conn, code, y, "eps"), _fr(conn, code, y, "bps"), _fr(conn, code, y, "roe")
+        nio = "–" if nio_r is None or nio_r["value"] is None else _n(_eok(nio_r["value"])) + ("‡" if nio_r["source"] == "derived" else "")
+        conflict = any(r is not None and r["value"] is None and (r["status_note"] or "").startswith("자료 충돌") for r in (eps_r, roe_r))
+        adj = lambda r: r is not None and r["value"] is not None and "주식 수 보정:" in (r["status_note"] or "")
+        eps = "**자료 충돌**" if conflict else _n(g("eps")) + ("†" if adj(eps_r) else "")
+        roe = "**자료 충돌**" if conflict else _n(g("roe"), 1, "%")
+        bps = _n(g("bps")) + ("†" if adj(bps_r) else "")
+        L.append(f"| {y} | {_n(_eok(g('acc_revenue')))} | {_n(_eok(g('acc_op')))} | {nio} | {_n(_eok(g('acc_ni')))} | "
+                 f"{_n(_eok(g('acc_ocf')))} | {_n(_eok(g('acc_capex_ppe')))} | {_n(_eok(dep))} | {_n(g('op_margin'), 1, '%')} | {roe} | "
+                 f"{_n(g('roa'), 1, '%')} | {_n(g('debt_ratio'), 0, '%')} | {eps} | {bps} |")
+        if conflict:
+            r = eps_r if eps_r is not None and (eps_r["status_note"] or "").startswith("자료 충돌") else roe_r
+            notes.append(f"- {y}년 **자료 충돌**: 지배순이익 {_n(_eok(g('acc_ni_owner')))}억원과 보고서 EPS {_n(g('acc_eps_basic'))}원의 부호가 다름 — "
+                         "앱은 이 해의 EPS·ROE를 판정에서 뺐음. DART 원문(연결 손익계산서의 지배기업 소유주지분 순이익·기본주당이익)으로 어느 쪽이 맞는지 확인해 주세요.")
+        if nio_r is not None and nio_r["source"] == "derived" and nio_r["value"] is not None:
+            notes.append(f"- ‡ {y}년 지배순이익: {nio_r['status_note']}")
+        for nm, r in (("EPS", eps_r), ("BPS", bps_r)):
+            if adj(r):
+                notes.append(f"- † {y}년 {nm} {r['status_note'].split('주식 수 보정:', 1)[1].strip()[:160]} (무상증자·분할만 반영, 지금 주식 수 기준)")
+    seen = []
+    L += [""] + [x for x in notes if not (x in seen or seen.append(x))] if notes else []
     part = None
     for per, nm in (("Q3", "3분기 누적"), ("H1", "반기 누적"), ("Q1", "1분기")):
         rv, op = _v(conn, code, cy, "acc_revenue", per), _v(conn, code, cy, "acc_op", per)
@@ -133,22 +157,41 @@ def _financials(conn, code, cy):
     return L, part
 
 
-def _consensus(conn, code, cy):
-    rows = [dict(r) for r in db.latest_consensus(conn, code)]
+def _cons_by_year(conn, code):
     by = {}
-    for r in rows:
+    for r in [dict(x) for x in db.latest_consensus(conn, code)]:
         by.setdefault(r["target_year"], {}).setdefault(r["metric"], r)
+    return by
+
+
+def _consensus(conn, code, P):
+    cy = P["current"]
+    by = _cons_by_year(conn, code)
     ys = [y for y in (cy, cy + 1, cy + 2) if y in by]
     if not ys:
         return ["(증권사 추정치 없음 — 컨센서스가 없는 회사)"]
-    L = ["| 해 | 매출(억) | 영업이익(억) | 순이익(억) | EPS(원) | BPS(원) | ROE | 추정 증권사 수 | 기준일 · 출처 |", "|" + "---|" * 9]
+    try:
+        from . import standards
+        F = standards.factors(conn, code, P)
+    except Exception:          # noqa: BLE001
+        F = {}
+    L = ["| 해 | 매출(억) | 영업이익(억) [보정] | 순이익(억) [보정] | EPS(원) [보정] | BPS(원) | ROE | 추정 증권사 수 | 기준일 · 출처 |", "|" + "---|" * 9]
     for y in ys:
         m = by[y]
         g = lambda k: (m.get(k) or {}).get("value")
+
+        def wf(k):                         # 이익 숫자 옆에 보정값(×0.83, 3개월 급하향이면 ×0.73 — 컨센 실제 달성률 가운데값). 매출·BPS는 보정 안 함
+            v = g(k)
+            f = (F.get((y, k)) or (None,))[0]
+            return _n(v) if v is None or not f else f"{_n(v)} [{_n(v * f)}]"
         anyr = next(iter(m.values()))
-        n_est = max((x.get("n_estimates") or 0) for x in m.values()) or None
-        L.append(f"| {y}E | {_n(g('revenue'))} | {_n(g('op_income'))} | {_n(g('net_income'))} | {_n(g('eps'))} | {_n(g('bps'))} | "
-                 f"{_n(g('roe'), 1, '%')} | {n_est or '–'} | {anyr['as_of']} · {anyr['provider']} |")
+        ns = [x.get("n_estimates") for x in m.values() if x.get("n_estimates") is not None]
+        n_est = max(ns) if ns else None
+        ntxt = f"{n_est}곳" if n_est and n_est > 1 else (f"{n_est}곳 · 원천 1/미상" if n_est == 1 else "미상 · 원천 1/미상")
+        L.append(f"| {y}E | {_n(g('revenue'))} | {wf('op_income')} | {wf('net_income')} | {wf('eps')} | {_n(g('bps'))} | "
+                 f"{_n(g('roe'), 1, '%')} | {ntxt} | {anyr['as_of']} · {anyr['provider']} |")
+    fs = sorted({(F.get((y, 'eps')) or (None, None))[1] for y in ys} - {None})
+    L.append(f"- [보정] = 원래 값 × 앱 보정계수(컨센서스 실제 달성률 가운데값 0.83, 3개월 사이 5% 넘게 하향이면 0.73)" + (f" · {'; '.join(fs)[:200]}" if fs else ""))
     # 변화: 영업이익·EPS 컨센서스가 3·6·12개월 전보다 얼마나 바뀌었나(consensus_history)
     today = dt.date.today()
     ch = []
@@ -171,6 +214,96 @@ def _consensus(conn, code, cy):
     if ch:
         L += ["", "컨센서스 변화(영업이익 억원 · EPS 원):"] + ch
     return L
+
+
+CF_GAP = 30.0      # 보완 B ②: EPS 3개월 수정률 − 영업이익 3개월 수정률이 이 %p 이상이면 경고
+
+
+def consensus_flags(conn, code, P, nd=None):
+    """컨센서스 일회성 경고(2026-11-28 사용자 결정). 반환: [문장]
+    ① 같은 해 컨센 순이익 > 영업이익인데 순차입금 > 0(빚이 있어 이자를 내는 회사가 영업이익보다 많이 번다고 봄) → '영업 밖 이익 전제'
+    ② 3개월 EPS 컨센 변화율 − 영업이익 컨센 변화율 ≥ 30%p → 'EPS 상향이 영업에서 오지 않음'(영업이익 기준값이 0 이하면 계산 안 함)"""
+    cy = P["current"]
+    out = []
+    if nd is None:
+        try:
+            from . import goodco
+            nd = goodco.Data(conn, code, P).net_debt()[0]
+        except Exception:      # noqa: BLE001
+            nd = None
+    by = _cons_by_year(conn, code)
+    for y in (cy, cy + 1, cy + 2):
+        m = by.get(y) or {}
+        ni, op = (m.get("net_income") or {}).get("value"), (m.get("op_income") or {}).get("value")
+        if ni is not None and op is not None and ni > op and nd is not None and nd > 0:
+            out.append(f"영업 밖 이익 전제: {y}E 컨센 순이익 {_n(ni)}억 > 영업이익 {_n(op)}억인데 순차입금 {_n(nd)}억(빚이 있음) — "
+                       "자산 매각·평가이익 같은 일회성을 전제했을 수 있음")
+    try:
+        from .report import consensus_trend
+        tr = {(it["year"], it["metric"]): it for it in consensus_trend(conn, code, P).get("summary", [])}
+    except Exception:          # noqa: BLE001
+        tr = {}
+    for y in (cy, cy + 1):
+        e, o = tr.get((y, "eps")), tr.get((y, "op_income"))
+        if not e or not o:
+            continue
+        ce, co = e["ch"].get(3), o["ch"].get(3)
+        if ce is None or co is None or e["tag"].get(3) or o["tag"].get(3):
+            continue
+        if ce - co >= CF_GAP:
+            out.append(f"EPS 상향이 영업에서 오지 않음: {y}E EPS 컨센 3개월 {ce:+.0f}% vs 영업이익 {co:+.0f}% (차이 {ce - co:.0f}%p ≥ {CF_GAP:.0f}%p)")
+    return out
+
+
+def _survival(conn, code, P):
+    """2절 맨 앞 '생존·빚' 칸(2026-11-28 사용자 결정)"""
+    from . import goodco
+    cy = P["current"]
+    D = goodco.Data(conn, code, P)
+    last = D.years[-1] if D.years else cy - 1
+    L = []
+    nd, when = D.net_debt()
+    L.append(f"- {goodco.nd_ebitda_text(D, last)}")
+    icr, icr_t = goodco.interest_cover(D, last)
+    L.append(f"- {icr_t}" + (" — 1배 미만: 영업이익으로 이자를 다 못 냄" if icr is not None and icr < 1 else ""))
+    fcf = []
+    for y in range(cy - 5, cy):
+        o, c = _v(conn, code, y, "acc_ocf"), _v(conn, code, y, "acc_capex_ppe")
+        if o is not None and c is not None:
+            fcf.append((y, (o - c) / 1e8))
+    if fcf:
+        L.append(f"- 영업현금흐름 − 설비투자(유형자산 취득) {fcf[0][0]}~{fcf[-1][0]} 합 {_n(sum(v for _, v in fcf))}억 "
+                 f"({', '.join(f'{y} {_n(v)}' for y, v in fcf)})" + (f" · {5 - len(fcf)}개 연도 자료 없음" if len(fcf) < 5 else ""))
+    else:
+        L.append("- 영업현금흐름 − 설비투자: 자료 없음")
+    since = (dt.date.today() - dt.timedelta(days=3 * 365)).strftime("%Y%m%d")
+    rx = "유상증자|전환사채|신주인수권|교환사채|주식관련사채"
+    hits = [f"{str(r['d'])[:4]}-{str(r['d'])[4:6]}-{str(r['d'])[6:8]} {r['t']}" for r in conn.execute(
+        "SELECT rcept_dt d, report_nm t FROM disclosures WHERE stock_code=? AND rcept_dt>=? UNION "
+        "SELECT rcept_dt d, title t FROM events WHERE stock_code=? AND rcept_dt>=? ORDER BY d DESC", (code, since, code, since))
+        if __import__("re").search(rx, r["t"] or "")]
+    L.append("- 최근 3년 유상증자·전환사채 등 공시: " + ("; ".join(hits[:6]) if hits else "앱이 받은 공시 목록에는 없음(목록 밖일 수 있으니 확인)"))
+    return L, nd
+
+
+def _remaining(conn, code, P):
+    """남은 분기에 필요한 이익: (올해 컨센 영업이익 − 누적 영업이익)과 필요한 남은 분기 이익률"""
+    cy = P["current"]
+    m = _cons_by_year(conn, code).get(cy) or {}
+    cop, crev = (m.get("op_income") or {}).get("value"), (m.get("revenue") or {}).get("value")
+    for per, nq, nm in (("Q3", 1, "3분기"), ("H1", 2, "반기"), ("Q1", 3, "1분기")):
+        rv, op = _v(conn, code, cy, "acc_revenue", per), _v(conn, code, cy, "acc_op", per)
+        if rv is None or op is None:
+            continue
+        if cop is None or crev is None:
+            return f"- 남은 {nq}개 분기에 필요한 이익: 올해 컨센서스가 없어 계산 못 함"
+        rv, op = rv / 1e8, op / 1e8
+        rem_op, rem_rev = cop - op, crev - rv
+        cm = op / rv * 100 if rv else None
+        need = rem_op / rem_rev * 100 if rem_rev > 0 else None
+        return (f"- 남은 {nq}개 분기에 필요한 이익: 올해 컨센 영업이익 {_n(cop)}억 − {nm} 누적 {_n(op)}억 = **{_n(rem_op)}억**, "
+                f"필요한 이익률 {_n(need, 1, '%')} (남은 매출 {_n(rem_rev)}억 기준) vs {nm} 누적 이익률 {_n(cm, 1, '%')}")
+    return None
 
 
 def _segments(conn, code):
@@ -290,6 +423,9 @@ def build(conn, code, P, tab="P", why="", today=None):
     s6 = (today - dt.timedelta(days=183)).isoformat()
     s3 = (today - dt.timedelta(days=92)).isoformat()
     why = " ".join(str(why or "").split())[:1500]
+    surv, nd = _survival(conn, code, P)
+    flags = consensus_flags(conn, code, P, nd)
+    rem = _remaining(conn, code, P)
 
     L = [f"# 매수 판단 조사 요청 — {name}({code})", "",
          f"요청 번호: {tab}-{code}-{today.isoformat()} · {VERSION} · 만든 곳: 재무분석 앱 화면 {TABS[tab]}", "",
@@ -298,12 +434,13 @@ def build(conn, code, P, tab="P", why="", today=None):
          "회사 소개보다 **앱이 이 회사를 고른 근거가 맞는지 검증하고, 반대 근거를 먼저 찾는 것**이 목적입니다. "
          "매수·매도 추천이 아니라 판단 재료를 원합니다.", "",
          "## 2. 앱이 이미 아는 사실 (다시 찾지 않아도 됨 · 다르면 알려 주세요)",
-         f"- 업종: {ind_label} (업종코드 {ind or '–'})",
-         f"- 주가: {_n(price)}원" + (f" ({str(pr_row['as_of'] or pr_row['collected_at'] or '')[:10]} 기준)" if pr_row else "") +
-         (f" · 시가총액 {_n(mcap)}억원" if mcap else ""),
+         "### 생존·빚 (먼저 확인)"] + surv + [
+         "", f"- 업종: {ind_label} (업종코드 {ind or '–'})",
          f"- 사업부 구성: {_segments(conn, code)}", "",
-         "### 최근 실적 (DART 사업보고서, 연결 기준 우선, 금액 억원)"] + fin + ([f"- {part}"] if part else []) + [
-         "", "### 컨센서스 (증권사 평균, 원래 값)"] + _consensus(conn, code, cy)
+         "### 최근 실적 (DART 사업보고서, 연결 기준 우선, 금액 억원)"] + fin + ([f"- {part}"] if part else []) + ([rem] if rem else []) + [
+         "", "### 컨센서스 (증권사 평균, 원래 값 · [ ] 안은 앱 보정값)"] + _consensus(conn, code, P)
+    if flags:
+        L += ["", "### 컨센서스 경고"] + [f"- ⚠ {x}" for x in flags]
     pe = _peer(conn, code, P)
     if pe:
         L += ["", f"### 업종 안 위치", f"- {pe}"]
@@ -318,6 +455,9 @@ def build(conn, code, P, tab="P", why="", today=None):
     hj = _hanjang(conn, code)
     if hj:
         L += ["", "### 이전 조사(한장조사) 요약 — 이미 조사된 내용이니 반복하지 말고, 그 뒤 바뀐 것만 확인해 주세요"] + [f"- {hj[0]}"] + hj[1:]
+    L += ["", "### 주가 (숫자를 먼저 보고 가격은 마지막에)",
+          f"- 주가: {_n(price)}원" + (f" ({str(pr_row['as_of'] or pr_row['collected_at'] or '')[:10]} 기준)" if pr_row else "") +
+          (f" · 시가총액 {_n(mcap)}억원" if mcap else "")]
     L += ["", "## 3. 이 회사가 뽑힌 이유", f"- 화면 {TABS[tab]}: {why or '(화면에서 이유를 받지 못함)'}", "",
           "## 4. 먼저 확인할 것 — 위 근거가 무너질 조건"] + [f"- {x}" for x in BREAK[tab]] + [
           "", "## 5. 공통 점검 (항목마다 확인)"] + [f"- {a}: {b}" for a, b in CHECKS] + [

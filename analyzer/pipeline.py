@@ -53,6 +53,11 @@ def ingest_statement(conn, code, d, fs_div="CFS", via="OpenDART API", stats=None
     m = p["meta"]
     if not p["values"]:
         return 0
+    # 같은 보고서를 다시 해석하면(해석 규칙 버전이 바뀜) 그 보고서의 예전 해석값을 지우고 새로 넣음(2026-11-28).
+    # 예전엔 INSERT OR IGNORE라 잘못 해석된 값(예: 총포괄손익 귀속 줄을 지배순이익으로)이 고쳐지지 않고 남았음. XBRL 주석 값은 그대로 둠
+    keys = sorted(dart.ALL_KEYS)
+    conn.execute(f"DELETE FROM observations WHERE stock_code=? AND source='DART' AND source_ref=? AND (col IS NULL OR col<>'XBRL주석') "
+                 f"AND metric IN ({','.join('?' * len(keys))})", [code, m["rcept_no"]] + keys)
     for (y, period, key, v, col) in p["values"]:
         db.add_observation(conn, code, y, key, v, period=period, unit=ACC_UNIT[key], basis=fs_div, source="DART",
                            source_ref=m["rcept_no"], report_year=m["bsns_year"], col=col)
@@ -74,6 +79,13 @@ def select_facts(conn, code, y, period, via=None, stats=None):
         # 대표값은 DART 원본에서만 고른다(WiseReport 등 다른 출처는 교차 검증용 관측값)
         obs = [o for o in db.observations(conn, code, y, key, period) if o["source"] == "DART" and o["report_year"] is not None]
         if not obs:
+            cur = db.current_fact(conn, code, y, key, period)
+            if cur is not None and cur["source"] == "DART" and cur["value"] is not None and key in dart.ALL_KEYS:
+                # 다시 해석해 보니 원본에 그 값이 없음(예전 해석이 잘못 잡은 줄) → 추측하지 않고 결측
+                db.put_fact(conn, code, y, key, None, period=period, unit=cur["unit"], basis=cur["basis"], source="DART",
+                            source_ref=cur["source_ref"], status="UNVERIFIED",
+                            status_note="원본 재해석에서 값을 찾지 못함(예전 값은 다른 줄을 잘못 읽은 것일 수 있어 지움)",
+                            change_reason="원본 재해석", clear=True)
             continue
         own = [o for o in obs if o["report_year"] == y]
         if own:
@@ -330,6 +342,23 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
             db.log_fetch(conn, "dart_shares", key, code, False, 0, str(e))
             stats.notes.append(f"{y} 주식 수 미확보: {e}")
             break
+
+    # 3-2) 증자(감자) 현황 — 무상증자·주식분할 보정 계수용(2026-11-28). 최근 사업보고서 한 건에 지난 내역이 같이 실림, 30일마다
+    if has_key and not db.fetched_recently(conn, "dart_capital", code, 30):
+        y_rep = P["current"] - 1
+        try:
+            stats.req("DART")
+            d = dart.get_json("irdsSttus.json", corp_code=_corp(), bsns_year=str(y_rep), reprt_code="11011")
+            if d.get("status") == "013":
+                d = dart.get_json("irdsSttus.json", corp_code=_corp(), bsns_year=str(y_rep - 1), reprt_code="11011")
+            evs = parse_capital(d)
+            ensure_capital(conn)
+            for ev in evs:
+                conn.execute("INSERT OR IGNORE INTO capital_events VALUES (?,?,?,?,?,?,?)", (code,) + ev + (db.now(),))
+            db.log_fetch(conn, "dart_capital", code, code, True, len(evs), None if evs else "증자·감자 내역 없음")
+        except dart.DartUnavailable as e:
+            msg = str(e)
+            db.log_fetch(conn, "dart_capital", code, code, False, 0, ("증자·감자 내역 없음 — " + msg) if "013" in msg else msg)
 
     # 4) 현재 연도 분기·반기 실적(최신 보고서부터)
     if need["interim"] and has_key:
@@ -669,14 +698,114 @@ def shares_for_bps(fm, y):
     return c + (_v(fm, y, "shares_pref") or 0) - (_v(fm, y, "treasury_common") or 0) - (_v(fm, y, "treasury_pref") or 0)
 
 
+def fill_owner_ni(conn, code, fm, years):
+    """지배순이익 줄이 원본에 없을 때(2026-11-28, 덕산하이메탈 2025 ROE 빈칸): 당기순이익 − 비지배지분, 비지배지분이 없는 회사(자본총계 =
+    지배자본)는 당기순이익 = 지배순이익. 둘 다 아니면 비워 둠(추측 금지)"""
+    for y in years:
+        cur = fm.get((y, "acc_ni_owner"))
+        if cur is not None and cur["value"] is not None and cur["source"] != "derived":
+            continue
+        ni, nci, eq, eqo = _v(fm, y, "acc_ni"), _v(fm, y, "acc_ni_nci"), _v(fm, y, "acc_eq"), _v(fm, y, "acc_eq_owner")
+        val = note = None
+        if ni is not None and nci is not None:
+            val, note = ni - nci, "원본에 지배순이익 줄이 없어 당기순이익 − 비지배지분 순이익으로 계산"
+        elif ni is not None and eq and eqo is not None and abs(eq - eqo) <= abs(eq) * 0.005:
+            val, note = ni, "원본에 지배순이익 줄이 없고 비지배지분이 없는 회사(자본총계 = 지배자본) → 당기순이익 = 지배순이익"
+        if val is not None:
+            db.put_fact(conn, code, y, "acc_ni_owner", val, unit="원", basis="CFS", data_type="DERIVED", source="derived",
+                        source_ref="acc_ni-acc_ni_nci" if nci is not None else "acc_ni", status="UNVERIFIED", status_note=note)
+    conn.commit()
+
+
+def sign_conflicts(fm, years):
+    """지배순이익과 기본 EPS의 부호가 다른 해 → {해: 메모}. 같은 해에 둘 다 맞을 수는 없으므로 '자료 충돌'(2026-11-28)"""
+    out = {}
+    for y in years:
+        ni, eps = _v(fm, y, "acc_ni_owner"), _v(fm, y, "acc_eps_basic")
+        if ni is not None and eps is not None and ni != 0 and eps != 0 and (ni > 0) != (eps > 0):
+            out[y] = (f"자료 충돌: 지배순이익 {ni / 1e8:,.0f}억원과 EPS {eps:,.0f}원의 부호가 다름 — 어느 쪽이 맞는지 몰라 EPS·ROE를 비우고 "
+                      "판정에서 뺌(B탭 [다시 받기] dart_report로 원본을 다시 받아 확인)")
+    return out
+
+
+def eps_needs_adjust(nio, eps, sh, f):
+    """보고서 EPS가 아직 옛 주식 수 기준인가(무상증자 뒤 보고서는 과거 EPS를 고쳐 싣기도 함). 순이익 ÷ EPS가 옛 주식 수에 가까우면 보정 필요"""
+    if not nio or not eps or not sh:
+        return True
+    imp = nio / eps
+    return abs(imp - sh) <= abs(imp - sh / f)
+
+
+def ensure_capital(conn):
+    db.ensure_tables(conn, "CREATE TABLE IF NOT EXISTS capital_events (stock_code TEXT NOT NULL, ev_date TEXT, kind TEXT, stock_kind TEXT, "
+                           "qty REAL, rcept_no TEXT, collected_at TEXT, UNIQUE(stock_code, ev_date, kind, stock_kind, qty))")
+
+
+ADJ_KIND = re.compile(r"무상증자|주식분할|액면분할")
+NO_ADJ_KIND = re.compile(r"감자|병합")
+
+
+def share_factors(conn, code, fm):
+    """무상증자·주식분할만으로 과거 주당 값을 지금 주식 수 기준으로 맞추는 계수(2026-11-28 사용자 결정).
+    반환: {해: (계수, 설명)} — 계수 = 그해 말 이후 일어난 (증자 전 주식 수 ÷ 증자 후 주식 수)의 곱.
+    유상증자·합병·전환권 행사는 새 돈·자산이 들어온 것이라 보정하지 않음. 증자 전 주식 수 = 전년 말 보통주 수(DART 주식 총수)."""
+    ensure_capital(conn)
+    evs = conn.execute("SELECT ev_date, kind, stock_kind, qty FROM capital_events WHERE stock_code=? ORDER BY ev_date", (code,)).fetchall()
+    steps = []
+    for e in evs:
+        k, sk = e["kind"] or "", e["stock_kind"] or ""
+        if not ADJ_KIND.search(k) or NO_ADJ_KIND.search(k) or (sk and "보통" not in sk) or not e["qty"] or not e["ev_date"]:
+            continue
+        ey = int(e["ev_date"][:4])
+        before = _v(fm, ey - 1, "shares_common")
+        if not before:
+            continue
+        r = (before + e["qty"]) / before
+        steps.append((ey, r, f"{e['ev_date']} {k} {e['qty']:,.0f}주(전년 말 {before:,.0f}주 → ×{r:.3f})"))
+    out = {}
+    if not steps:
+        return out
+    years = sorted({y for (y, k) in fm})
+    for y in years:
+        f, why = 1.0, []
+        for ey, r, w in steps:
+            if ey > y:
+                f /= r
+                why.append(w)
+        if f < 0.999:
+            out[y] = (f, f"×{f:.4f} — " + "; ".join(why))
+    return out
+
+
+def parse_capital(d):
+    """OpenDART 증자(감자) 현황(irdsSttus) → [(날짜, 형태, 주식 종류, 수량)]"""
+    out = []
+    for it in d.get("list") or []:
+        ds = re.sub(r"\D", "", str(it.get("isu_dcrs_de") or ""))
+        if len(ds) < 8:
+            continue
+        q = str(it.get("isu_dcrs_qy") or "").replace(",", "").strip()
+        try:
+            qty = float(q)
+        except ValueError:
+            continue
+        out.append((f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}", (it.get("isu_dcrs_stle") or "").strip(), (it.get("isu_dcrs_stock_knd") or "").strip(), qty,
+                    it.get("rcept_no")))
+    return out
+
+
 def compute(conn, code, P, stats=None):
     """원천 계정으로 7개 지표를 계산해 facts(source='derived')로 저장한다."""
     fm = db.fact_map(conn, code)
+    fill_owner_ni(conn, code, fm, [P["past"][0] - 1] + P["past"])
+    fm = db.fact_map(conn, code)
+    conflict = sign_conflicts(fm, [P["past"][0] - 1] + P["past"])
+    factor = share_factors(conn, code, fm)
     # 역산 주식수(참고용): 지배순이익 / 기본 EPS
     derived_shares = {}
     for y in [P["past"][0] - 1] + P["past"]:
         ni, eps = _v(fm, y, "acc_ni_owner"), _v(fm, y, "acc_eps_basic")
-        if ni is not None and eps:
+        if ni is not None and eps and y not in conflict:
             derived_shares[y] = ni / eps
             db.put_fact(conn, code, y, "shares_derived", round(ni / eps), unit="주", basis="-", data_type="DERIVED",
                         source="derived", source_ref="acc_ni_owner/acc_eps_basic",
@@ -693,9 +822,11 @@ def compute(conn, code, P, stats=None):
         return med_all, f"역산 주식수 중앙값 {med_all:,.0f}주" if med_all else None
     med = med_all
 
-    def put(y, metric, value, inputs, period="FY", data_type="ACTUAL", extra_note=None):
+    def put(y, metric, value, inputs, period="FY", data_type="ACTUAL", extra_note=None, clear=False):
         sts = [(_st(fmp, y2, k) if per == "FY" else _stp(y2, k, per)) for (y2, k, per) in inputs]
-        if value is None:
+        if value is None and clear:
+            status, note = "CONFLICT", None
+        elif value is None:
             status, note = "MISSING", "입력값 없음: " + ", ".join(f"{y2}:{k}" for (y2, k, per), s in zip(inputs, sts) if s is None)
         elif all(s == "VERIFIED" for s in sts):
             status, note = "VERIFIED", None
@@ -709,7 +840,7 @@ def compute(conn, code, P, stats=None):
         r = db.put_fact(conn, code, y, metric, None if value is None else round(value, 4), period=period, unit=unit,
                         basis="CFS", data_type=data_type, source="derived",
                         source_ref="; ".join(f"{y2}:{k}" for (y2, k, per) in inputs), status=status,
-                        status_note=note, change_reason="입력값 변경으로 재계산")
+                        status_note=note, change_reason="입력값 변경으로 재계산", clear=clear)
         if r == "same":
             cur = db.current_fact(conn, code, y, metric, period)
             if cur and (cur["status"] != status or cur["status_note"] != note) and cur["value"] is not None:
@@ -734,11 +865,20 @@ def compute(conn, code, P, stats=None):
         put(y, "revenue", rev / 1e8 if rev is not None else None, [(y, "acc_revenue", "FY")])
         put(y, "op_margin", op / rev * 100 if rev and op is not None else None,
             [(y, "acc_op", "FY"), (y, "acc_revenue", "FY")])
-        put(y, "eps", _v(fm, y, "acc_eps_basic"), [(y, "acc_eps_basic", "FY")])
+        f, f_note = factor.get(y, (1.0, None))
         eqo, liab, eq = _v(fm, y, "acc_eq_owner"), _v(fm, y, "acc_liab"), _v(fm, y, "acc_eq")
         sh = shares_for_bps(fm, y)
+        eps0 = _v(fm, y, "acc_eps_basic")
+        if y in conflict:                  # 지배순이익과 EPS 부호가 다름 → 어느 쪽이 맞는지 모르므로 EPS·ROE를 비우고 판정에서 뺌
+            put(y, "eps", None, [(y, "acc_eps_basic", "FY")], extra_note=conflict[y], clear=True)
+        elif eps0 is not None and f < 0.999 and eps_needs_adjust(_v(fm, y, "acc_ni_owner"), eps0, sh, f):
+            put(y, "eps", eps0 * f, [(y, "acc_eps_basic", "FY")], extra_note=f"주식 수 보정: {f_note}")
+        else:
+            put(y, "eps", eps0, [(y, "acc_eps_basic", "FY")],
+                extra_note=(f"주식 수 보정 불필요(보고서가 이미 지금 주식 수 기준으로 고쳐 실음 · {f_note})" if eps0 is not None and f < 0.999 else None))
         if sh:
-            put(y, "bps", eqo / sh if eqo is not None else None, [(y, "acc_eq_owner", "FY"), (y, "shares_common", "FY")])
+            put(y, "bps", eqo / sh * f if eqo is not None else None, [(y, "acc_eq_owner", "FY"), (y, "shares_common", "FY")],
+                extra_note=f"주식 수 보정: {f_note}" if f < 0.999 else None)
         elif eqo is not None and med:
             ds, dn = dshares(y)
             put(y, "bps", eqo / ds, [(y, "acc_eq_owner", "FY"), (y, "shares_derived", "FY")],
@@ -747,7 +887,9 @@ def compute(conn, code, P, stats=None):
             put(y, "bps", None, [(y, "acc_eq_owner", "FY"), (y, "shares_common", "FY")])
         prev = _v(fm, y - 1, "acc_eq_owner")
         nio = _v(fm, y, "acc_ni_owner")
-        if prev is not None and eqo is not None and nio is not None:
+        if y in conflict:
+            put(y, "roe", None, [(y, "acc_ni_owner", "FY"), (y, "acc_eq_owner", "FY")], extra_note=conflict[y], clear=True)
+        elif prev is not None and eqo is not None and nio is not None:
             put(y, "roe", nio / ((prev + eqo) / 2) * 100,
                 [(y, "acc_ni_owner", "FY"), (y, "acc_eq_owner", "FY"), (y - 1, "acc_eq_owner", "FY")])
         elif eqo and nio is not None:
@@ -767,8 +909,10 @@ def compute(conn, code, P, stats=None):
         px = _v(fm, y, "price_close")
         c = _v(fm, y, "shares_common")
         if px is not None and c:
-            put(y, "market_cap", px * c / 1e8, [(y, "price_close", "FY"), (y, "shares_common", "FY")],
-                extra_note="보통주 기준(우선주 제외)")
+            # 주가는 수정주가(무상증자·분할 뒤 기준으로 과거를 낮춘 값)라 그 전 해는 주식 수도 지금 기준으로 맞춤(2026-11-28).
+            # 예전엔 낮춘 주가 × 그때 주식 수라 시가총액·연말 PBR(화면 N·U의 10년 최저 PBR)이 작게 나왔음
+            put(y, "market_cap", px * c / f / 1e8, [(y, "price_close", "FY"), (y, "shares_common", "FY")],
+                extra_note="보통주 기준(우선주 제외)" + (f" · 수정주가에 맞춰 주식 수 보정: {f_note}" if f < 0.999 else ""))
         elif px is not None and med:
             ds, dn = dshares(y)
             put(y, "market_cap", px * ds / 1e8, [(y, "price_close", "FY"), (y, "shares_derived", "FY")],
@@ -870,7 +1014,7 @@ def analyze(code, base_year=None, offline=False, conn=None, use_seed=True, fresh
 # B탭 [다시 받기]: 수집 기록의 출처 이름 → 기다리는 기간을 무시할 출처(fetched_recently에 쓰는 이름)
 REFETCH = {"fg_highlight": ["fg_highlight"], "news": ["news"], "price": ["price"], "kiwoom_daily": ["price"], "consensus": ["consensus"], "consensus_src": ["consensus"],
            "consensus_hist": ["consensus_hist"], "segments": ["segments"], "dart_events": ["dart_events"], "dart_disclosures": ["dart_disclosures"],
-           "dart_company": ["dart_company"], "dart_report": ["dart_report"], "dart_shares": ["dart_shares"], "dart_xbrl": ["dart_xbrl"],
+           "dart_company": ["dart_company"], "dart_report": ["dart_report"], "dart_shares": ["dart_shares"], "dart_xbrl": ["dart_xbrl"], "dart_capital": ["dart_capital"],
            "kiwoom_info": ["kiwoom_info"], "kiwoom_flows": ["kiwoom_flows"], "profile_wr": ["profile_wr"], "profile_dart": ["profile_dart"],
            "hj_news": ["hj_news"], "ecos_rf": ["ecos_rf"], "value5_xbrl": ["value5_xbrl"]}
 

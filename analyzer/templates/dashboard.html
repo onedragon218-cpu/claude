@@ -353,7 +353,7 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     </div>
     <p class="muted" id="j-count" style="margin:10px 0"></p>
     <div class="tablewrap"><table id="j-table"></table></div>
-    <p class="muted" style="margin-top:8px">EPS가 기준 연도에 0 이하이면 성장률을 계산하지 않고 '흑자전환'(다음 해 0 초과) 또는 '적자 지속'으로 표시하며, 흑자전환은 EPS 조건을 충족한 것으로 봅니다. 컨센서스 기준일은 표의 칸에 마우스를 올리면 보입니다.</p>
+    <p class="muted" style="margin-top:8px">EPS가 기준 연도에 0 이하이면 성장률을 계산하지 않고 '흑자전환'(다음 해 0 초과) 또는 '적자 지속'으로 표시하며, 흑자전환은 기저 효과라 EPS 조건 통과로 세지 않습니다(2026-11-28 변경, 화면 P·U·Q의 EPS 우상향도 같음). EPS 칸 아래 작은 글씨는 같은 구간 영업이익 증가율입니다(일회성 손익은 대부분 영업이익 아래에서 생기므로 함께 보세요). 컨센서스 기준일은 표의 칸에 마우스를 올리면 보입니다.</p>
   </div>
 </section>
 
@@ -1529,7 +1529,10 @@ function jEval(row, a, b, adj){
   const mode = $('#j-opm-mode').value;
   res.opm = (A.op_margin==null || B.op_margin==null) ? null : mode==='pp' ? B.op_margin - A.op_margin : mode==='lvl' ? B.op_margin : (A.op_margin>0 ? (B.op_margin/A.op_margin-1)*100 : null);
   res.eps = null; res.epsTag = null;
-  if (A.eps!=null && B.eps!=null){ if (A.eps>0) res.eps = (B.eps/A.eps-1)*100; else res.epsTag = B.eps>0 ? '흑자전환' : '적자 지속'; }
+  if (A.eps!=null && B.eps!=null){ if (A.eps>0) res.eps = (B.eps/A.eps-1)*100; else res.epsTag = B.eps>0 ? '흑자전환(기저 효과)' : '적자 지속'; }
+  const opA = A.op_income ?? null, opB = B.op_income ?? null;
+  res.op = (opA!=null && opB!=null && opA>0) ? (opB/opA-1)*100 : null;   // 영업이익 증가율(일회성 손익은 대부분 영업이익 아래에서 생김 — 함께 보여 줌)
+  res.opTag = (opA!=null && opB!=null && opA<=0) ? (opB>0 ? '흑자전환' : '적자 지속') : null;
   res.asof = (row.years[b]||{}).as_of || '';
   return res;
 }
@@ -1541,7 +1544,7 @@ function renderJ(){
   const pairs = jPairs();
   const out = (G.rows||[]).map(row => {
     const per = pairs.map((p,i)=>{ const e = jEval(row, p[0], p[1], adj); if (!e) return {i, e:null, ok:null};
-      const checks = Object.entries(use).map(([k,v]) => k==='eps' && e.eps==null ? (e.epsTag==='흑자전환') : (e[k]!=null && e[k] >= v));
+      const checks = Object.entries(use).map(([k,v]) => k==='eps' && e.eps==null ? false : (e[k]!=null && e[k] >= v));   // 흑자전환은 통과로 세지 않음(2026-11-28)
       const ok = checks.length===0 ? null : (logic==='and' ? checks.every(Boolean) : checks.some(Boolean));
       return {i, e, ok}; });
     const sel = per.filter(p=>pers.includes(p.i) && p.ok!==null);
@@ -1552,9 +1555,10 @@ function renderJ(){
   const nCond = Object.keys(use).length;
   $('#j-count').textContent = nCond ? `조건 충족 ${out.filter(o=>o.pass).length} / ${out.length}개 기업 (${adj?'보정계수 적용':'원래 컨센서스'} 기준)` : '조건을 하나 이상 입력하세요. 지금은 전체 값만 보여 줍니다.';
   const cell = (p, k) => { if (!p.e) return '<td>–</td>'; const v = p.e[k]; const tag = k==='eps' && v==null ? p.e.epsTag : null;
-    const want = use[k]; const hit = want==null ? null : (k==='eps' && v==null ? tag==='흑자전환' : (v!=null && v >= want));
+    const want = use[k]; const hit = want==null ? null : (k==='eps' && v==null ? false : (v!=null && v >= want));
     const txt = tag || (v==null ? '–' : (v>=0?'+':'') + v.toFixed(1) + (k==='opm' && $('#j-opm-mode').value!=='rel' ? ($('#j-opm-mode').value==='pp'?'%p':'%') : '%'));
-    return `<td title="${esc('컨센서스 기준일 ' + (p.e.asof||'–'))}" style="${hit===true?'color:var(--good);font-weight:600':hit===false?'color:var(--text-muted)':''}">${txt}</td>`; };
+    const opLine = k==='eps' ? `<br><span class="muted" style="font-weight:400;font-size:11px" title="영업이익 증가율 — EPS가 영업이 아닌 곳(일회성)에서 오르는지 비교">영업이익 ${p.e.opTag || (p.e.op==null ? '–' : (p.e.op>=0?'+':'') + p.e.op.toFixed(1) + '%')}</span>` : '';
+    return `<td title="${esc('컨센서스 기준일 ' + (p.e.asof||'–'))}" style="${hit===true?'color:var(--good);font-weight:600':hit===false?'color:var(--text-muted)':''}">${txt}${opLine}</td>`; };
   const ry = [G.base_year, G.base_year+1];
   const revCell = r => { const x = (r.rev3m||{}); return ry.map(y=>{ const v = x[y]; return v ? `<td style="${kColor(v.pct, v.tag)}" title="영업이익 컨센서스 3개월 수정률(K탭)">${kPct(v.pct, v.tag)}</td>` : '<td>–</td>'; }).join(''); };
   const head = '<tr><th class="l" rowspan="2">기업</th>' + pairs.map(p=>`<th colspan="3">${p[2]} (${p[0]}${p[0]<G.base_year?'A':'E'}→${p[1]}E)</th>`).join('') + '<th colspan="2" title="영업이익 컨센서스가 3개월 동안 얼마나 올랐는지(+) 내렸는지(−)">영업이익 컨센서스 3개월 수정</th><th class="l" rowspan="2">결과</th></tr><tr>' +
@@ -1892,17 +1896,18 @@ v5fillInputs();
 
 // ---- P. 우상향 저평가 (analyzer/upvalue.py classify()와 같은 식) ----
 const PV = D.upvalue || {error:'자료 없음'};
-function pRising(vals, kind, th){
+function pRising(vals, kind, th, m){
   const miss = ['작년 실적','올해 컨센서스','내년 컨센서스','내후년 컨센서스'].filter((n,i)=>vals[i]==null);
   if (miss.length) return [null, miss.join('·') + ' 없음'];
   for (let i=1;i<vals.length;i++){ const a = vals[i-1], b = vals[i];
+    if (m==='eps' && a <= 0) return [false, b > 0 ? '흑자전환(기저 효과) 구간 — 성장으로 세지 않음' : '적자 구간'];   // 2026-11-28: J·P·U·Q 공통
     if (!(b > a)) return [false, '우상향 아님'];
     if (th){ if (kind==='%'){ if (a > 0 && (b/a-1)*100 < th) return [false, `증가율 ${th}% 미만 구간 있음`]; } else if (b - a < th) return [false, `증가폭 ${th}%p 미만 구간 있음`]; } }
   return [true, null];
 }
 function pClassify(row, use, th, factor){
   const lack = [];
-  for (const m of use){ const [ok, why] = pRising(row.series[m], PV.metrics[m][1], th[m]);
+  for (const m of use){ const [ok, why] = pRising(row.series[m], PV.metrics[m][1], th[m], m);
     if (ok===null) lack.push(`${PV.metrics[m][0]} ${why}`);
     else if (!ok) return {status:'우상향 아님', why:`${PV.metrics[m][0]} ${why}`}; }
   if (lack.length){ const ws = new Set(lack.map(w=>w.slice(w.indexOf(' ')+1)));
@@ -1956,7 +1961,7 @@ function renderP(){
       `<td class="l" style="white-space:nowrap">${prShort(r.code)}</td>` + use.concat(use.includes('roa')?[]:['roa']).map(m=>`<td class="l" style="white-space:nowrap">${ser(r.series[m], m)}${m==='op_margin'||m==='roe'||m==='roa'?'%':''}</td>`).join('') + '</tr>').join('')
     : `<tr><td colspan="${8+use.length}" class="l">${T[PTAB] ? `${T[PTAB].name}에 해당하는 기업이 없습니다. 다른 분류나 '우상향 통과 전체'를 눌러 각 기업의 1·2·3차 적정가를 확인해 보세요.` : '해당 기업이 없습니다.'}</td></tr>`);
   $('#p-rules').innerHTML = `분류는 서로 독립입니다(한 기업이 1·2·3차에 모두 들 수 있음). 적정가 칸: 위 = 적정가(✓ = 현재가보다 높음), 아래 = 현재가 대비 %(안전 여유). 칸에 마우스를 올리면 계산식이 보입니다. 적정가 = ROE × BPS ÷ 10 ≈ 그해 EPS × 10(PER 10배, 요구수익률 10%)${factor?' × 0.83':''}. ` +
-    `작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로. 작년이 적자였다가 오른 경우도 우상향(턴어라운드)으로 보며 그 구간은 증가율(%) 문턱을 적용하지 않습니다. 고른 지표 중 작년 실적이나 컨센서스가 하나라도 없으면 '자료 부족'으로 따로 모읍니다(있는 값으로 이미 우상향이 깨졌으면 '우상향 아님').`;
+    `작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로. 작년이 적자였다가 오른 경우도 우상향(턴어라운드)으로 보며 그 구간은 증가율(%) 문턱을 적용하지 않습니다. 단 <b>EPS는 기준 해가 0 이하인 구간(흑자전환)을 기저 효과로 보고 우상향으로 세지 않습니다</b>(2026-11-28, 화면 J·U·Q도 같음). 고른 지표 중 작년 실적이나 컨센서스가 하나라도 없으면 '자료 부족'으로 따로 모읍니다(있는 값으로 이미 우상향이 깨졌으면 '우상향 아님').`;
 }
 document.querySelectorAll('.p-use').forEach(c=>c.addEventListener('change', renderP));
 ['#p-factor','#p-th-op_margin','#p-th-roe','#p-th-roa','#p-th-revenue','#p-th-eps'].forEach(id=>$(id).addEventListener('input', renderP));
@@ -1964,7 +1969,7 @@ document.querySelectorAll('.p-use').forEach(c=>c.addEventListener('change', rend
 // ---- U. 우상향 저평가 — min PBR 적정가 (화면 P와 같은 우상향 조건, 적정가만 다름 · 화면 P와 서로 독립) ----
 function uClassify(row, use, th){
   const lack = [];
-  for (const m of use){ const [ok, why] = pRising(row.series[m], PV.metrics[m][1], th[m]);
+  for (const m of use){ const [ok, why] = pRising(row.series[m], PV.metrics[m][1], th[m], m);
     if (ok===null) lack.push(`${PV.metrics[m][0]} ${why}`);
     else if (!ok) return {status:'우상향 아님', why:`${PV.metrics[m][0]} ${why}`}; }
   if (lack.length){ const ws = new Set(lack.map(w=>w.slice(w.indexOf(' ')+1)));
@@ -2077,7 +2082,7 @@ function renderQ(){
     const c = qCompute(r.data, p), price = r.data.price;
     const cheapOf = () => c.rows.map(x=>x.tv!=null && !x.wait && price && x.tv > price);   // 탈락 기업도 값은 보여 줌(분류에는 안 넣음)
     for (const m of use){ const pr = PVrow[r.code]; if (!pr) return {r, c, cheap: cheapOf(), st:'자료 부족', why:'우상향 자료 없음'};
-      const [ok, why] = pRising(pr.series[m], PV.metrics[m][1], th[m]);
+      const [ok, why] = pRising(pr.series[m], PV.metrics[m][1], th[m], m);
       if (ok===null) return {r, c, cheap: cheapOf(), st:'자료 부족', why:`${PV.metrics[m][0]} ${why}`};
       if (!ok) return {r, c, cheap: cheapOf(), st:'우상향 아님', why:`${PV.metrics[m][0]} ${why}`}; }
     if (!r.data.price) return {r, c, st:'자료 부족', why:'현재 주가 없음'};

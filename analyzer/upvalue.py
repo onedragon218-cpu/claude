@@ -4,6 +4,7 @@
    - 작년 값은 DART 실적(앱 계산), 올해~내후년은 컨센서스 원래 값 그대로.
    - 최소 증가폭은 선택 입력(매출·EPS는 %, 영업이익률·ROE는 %p). 비우면 조금이라도 오르면 통과.
    - 작년이 적자(0 이하)였다가 오른 경우도 우상향(턴어라운드)으로 본다. 이때 %로 재는 문턱은 적용하지 않는다.
+     단 EPS는 2026-11-28부터 기준 해가 0 이하인 구간을 '흑자전환(기저 효과)'으로 보고 우상향으로 세지 않는다(사용자 결정).
    - 고른 지표의 작년 실적이나 컨센서스가 하나라도 없으면 '자료 부족'으로 따로 모아 보여 준다(2026-11-13 변경, 예전에는 제외).
 2) 가격 판정: 적정가 = ROE(%) × 1/10 × 보정(앱 공통 규칙 ×0.83, 급하향 ×0.73, 기본 켬) × BPS(컨센서스 그해 값) > 현재 주가
    1차 = 내후년 기준, 2차 = 내년 기준, 3차 = 올해 기준. 화면에는 '몇 년 뒤 기준부터 싼가' 한 칸과 안전 여유(적정가 ÷ 주가 − 1)를 함께 보여 준다.
@@ -58,12 +59,15 @@ def rows(conn, P):
             "disclaimer": "리서치 참고자료이며 투자자문이 아님 · 주가 예측이 아님"}
 
 
-def rising(vals, kind, th=None):
-    """vals = [작년, 올해, 내년, 내후년]. kind '%'면 증가율, '%p'면 증가폭으로 문턱 비교. 반환: (통과?, 사유)"""
+def rising(vals, kind, th=None, metric=None):
+    """vals = [작년, 올해, 내년, 내후년]. kind '%'면 증가율, '%p'면 증가폭으로 문턱 비교. 반환: (통과?, 사유)
+    EPS는 기준 해가 0 이하인 구간(흑자전환)을 성장으로 세지 않음 — 기저 효과(2026-11-28 사용자 결정, 화면 J·P·U·Q 공통)"""
     miss = [n for n, v in zip(SLOTS, vals) if v is None]
     if miss:
         return None, "·".join(miss) + " 없음"
     for a, b in zip(vals, vals[1:]):
+        if metric == "eps" and a <= 0:
+            return False, "흑자전환(기저 효과) 구간 — 성장으로 세지 않음" if b > 0 else "적자 구간"
         if not b > a:
             return False, "우상향 아님"
         if th:
@@ -86,7 +90,7 @@ def classify(row, use=("op_margin", "roe", "revenue", "eps"), th=None, factor=Tr
     th = th or {}
     lack = []
     for m in use:          # 자료가 있는 지표에서 '우상향 아님'이 나오면 그것이 먼저(빈칸을 채워도 탈락이므로)
-        ok, why = rising(row["series"][m], METRICS[m][1], th.get(m))
+        ok, why = rising(row["series"][m], METRICS[m][1], th.get(m), m)
         if ok is None:
             lack.append(f"{METRICS[m][0]} {why}")
         elif not ok:

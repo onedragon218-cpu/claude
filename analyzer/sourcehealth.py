@@ -15,7 +15,7 @@ CANARY = "005930"
 # 이름 → (수집 기록 출처, 대상 조건 SQL 또는 None)
 SOURCES = [
     ("DART 공시", [("dart_disclosures", None), ("dart_events", None)]),
-    ("DART 재무제표", [("dart_report", None), ("dart_xbrl", None)]),
+    ("DART 재무제표", [("dart_report", None), ("dart_xbrl", None), ("dart_capital", None)]),
     ("WiseReport 컨센서스", [("consensus_src", "key LIKE '%:WiseReport'"), ("consensus_hist", None)]),
     ("FnGuide", [("fg_highlight", None), ("consensus_src", "key LIKE '%:FnGuide'")]),
     ("주가(키움·네이버)", [("price", None), ("kiwoom_daily", None)]),
