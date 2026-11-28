@@ -29,8 +29,8 @@ CHECKS = [
     ("B3", "새 계산 규칙 미적용", "오류", "설치 뒤 '새 버전 준비'(원본 재해석·다시 계산)가 아직 안 된 회사"),
     ("C1", "연말 주가 출처 혼재", "참고", "연말 종가가 해마다 다른 출처(키움·네이버 등)에서 옴 — 수정주가 기준이 섞일 수 있음"),
     ("C2", "기준일 주가가 오래됨·없음", "확인", "기준일 주가가 없거나 7일 넘게 지난 값"),
-    ("C3", "주식 수 급변 + 수정주가", "확인", "연말 보통주 수가 전년보다 5% 넘게 늘었는데 무상증자·분할 보정 계수가 없음 — 과거 시가총액·연말 PBR이 수정주가 × 그때 주식 수로 어긋날 수 있음"),
-    ("C4", "증자 내역 수집 상태", "참고", "DART 증자(감자) 현황 수집 결과(없음·못 읽음·실패)"),
+    ("C3", "주식 수 급변 + 당시 종가 없음", "확인", "연말 보통주 수가 전년보다 5% 넘게 바뀌었는데 그 전 해의 당시 실제 종가(수정 전)가 없음 — 시가총액·연말 PBR이 수정주가로 계산돼 어긋날 수 있음"),
+    ("C4", "10년 주가 기록 상태", "참고", "키움 10년 주가 기록(수정주가·수정 전) 수집 실패 또는 당시 실제 종가가 빠진 해"),
     ("D1", "차입금 미식별", "참고", "최근 결산에서 본문 차입금이 실제 차입을 못 담음 → 순차입금·DCF 계산 안 함"),
     ("E1", "컨센서스 두 출처 차이", "참고", "WiseReport와 FnGuide 추정이 매출 10%·영업이익·EPS 15% 넘게 다름"),
 ]
@@ -59,6 +59,12 @@ def run(conn, P=None, progress=None):
     def hit(cid, code, msg):
         found[cid].setdefault(code, []).append(msg)
 
+    def evidence(code, y, metric, pat):
+        """그 값이 나온 DART 보고서 원본에서 관련 줄(계정 이름·ID·당기/전기 값, 억원) — 원인 확인용(4단계)"""
+        r = conn.execute("SELECT source_ref FROM facts WHERE stock_code=? AND fiscal_year=? AND period='FY' AND metric=? AND is_current=1",
+                         (code, y, metric)).fetchone()
+        return raw_lines(code, r["source_ref"] if r else None, pat)
+
     # A1 — 전체를 SQL 한 번으로
     for r in conn.execute(
             "SELECT f.stock_code, f.fiscal_year y, f.period p, f.metric m, f.value v FROM facts f WHERE f.is_current=1 AND f.source='DART' "
@@ -69,8 +75,9 @@ def run(conn, P=None, progress=None):
     checked["A1"] = len(comps)
     recalc_done = {r[0] for r in conn.execute("SELECT DISTINCT stock_code FROM fetch_log WHERE source=? AND key LIKE ?",
                                               (pipeline.RECALC_KEY, f"%:v{__import__('analyzer.collectors.dart', fromlist=['x']).PARSER_VERSION}.{pipeline.RECALC_VER}"))}
-    cap_log = {r["stock_code"]: r for r in conn.execute(
-        "SELECT stock_code, ok, n_items, note FROM fetch_log WHERE id IN (SELECT MAX(id) FROM fetch_log WHERE source='dart_capital' GROUP BY stock_code)")}
+    hist_log = {r["stock_code"]: r for r in conn.execute(
+        "SELECT stock_code, ok, n_items, note FROM fetch_log WHERE id IN (SELECT MAX(id) FROM fetch_log WHERE source='price_hist' GROUP BY stock_code)")}
+    induty = {r["stock_code"]: str(r["induty_code"] or "") for r in conn.execute("SELECT stock_code, induty_code FROM companies")}
     now = dt.date.today()
     for i, (code, name) in enumerate(comps):
         if progress:
@@ -87,17 +94,18 @@ def run(conn, P=None, progress=None):
             if None not in (a, l, e) and a:
                 checked["A2"] += 1
                 if abs(a - (l + e)) > abs(a) * 0.005:
-                    hit("A2", code, f"{y} 자산 {a / 1e8:,.0f}억 vs 부채 + 자본 {(l + e) / 1e8:,.0f}억")
+                    hit("A2", code, f"{y} 자산 {a / 1e8:,.0f}억 vs 부채 + 자본 {(l + e) / 1e8:,.0f}억" + evidence(code, y, "acc_eq", r"(자산|부채|자본)총계"))
             ni, nio, nci = v(y, "acc_ni"), v(y, "acc_ni_owner"), v(y, "acc_ni_nci")
             if None not in (ni, nio, nci):
                 checked["A3"] += 1
                 if abs(nio + nci - ni) > max(abs(ni) * 0.005, 1e8):
-                    hit("A3", code, f"{y} 지배 {nio / 1e8:,.0f}억 + 비지배 {nci / 1e8:,.0f}억 ≠ 당기순이익 {ni / 1e8:,.0f}억")
+                    hit("A3", code, f"{y} 지배 {nio / 1e8:,.0f}억 + 비지배 {nci / 1e8:,.0f}억 ≠ 당기순이익 {ni / 1e8:,.0f}억" +
+                        evidence(code, y, "acc_ni", r"순이익|순손실|순손익|지배|중단|계속"))
             eps = v(y, "acc_eps_basic")
             if nio is not None and eps is not None:
                 checked["A4"] += 1
                 if y in conflict:
-                    hit("A4", code, f"{y} 지배순이익 {nio / 1e8:,.0f}억 · EPS {eps:,.0f}원")
+                    hit("A4", code, f"{y} 지배순이익 {nio / 1e8:,.0f}억 · EPS {eps:,.0f}원" + evidence(code, y, "acc_eps_basic", r"순이익|순손실|지배|주당|중단|계속"))
                 sh = pipeline.shares_for_bps(fm, y)
                 if sh and eps and y not in conflict and abs(eps) >= 100:
                     checked["A5"] += 1
@@ -126,8 +134,8 @@ def run(conn, P=None, progress=None):
             exp["roa"] = (ni / ((asset + passet) / 2) * 100 if ni is not None and asset and passet else ni / asset * 100 if ni is not None and asset else None)
             sh = pipeline.shares_for_bps(fm, y)
             exp["bps"] = eqo / sh * f if sh and eqo is not None else "skip"
-            px, c = v(y, "price_close"), v(y, "shares_common")
-            exp["market_cap"] = px * c / f / 1e8 if px is not None and c else "skip"
+            px, pxr, c = v(y, "price_close"), v(y, "price_close_raw"), v(y, "shares_common")
+            exp["market_cap"] = pxr * c / 1e8 if pxr is not None and c else (px * c / 1e8 if px is not None and c else "skip")
             for m, ev in exp.items():
                 if ev == "skip":
                     continue
@@ -192,26 +200,27 @@ def run(conn, P=None, progress=None):
             c0, c1 = v(y - 1, "shares_common"), v(y, "shares_common")
             if c0 and c1:
                 checked["C3"] += 1
-                if c1 > c0 * 1.05 and not fac.get(y - 1):
-                    hit("C3", code, f"{y - 1}→{y} 보통주 {c0:,.0f} → {c1:,.0f}주(+{(c1 / c0 - 1):.0%}) · 보정 계수 없음")
+                if abs(c1 / c0 - 1) > 0.05 and v(y - 1, "price_close_raw") is None:
+                    hit("C3", code, f"{y - 1}→{y} 보통주 {c0:,.0f} → {c1:,.0f}주({(c1 / c0 - 1):+.0%}) · {y - 1}년 당시 실제 종가 없음")
         # C4
-        lg = cap_log.get(code)
+        lg = hist_log.get(code)
         checked["C4"] += 1
+        miss = [y for y in years[-8:] if v(y, "shares_common") and v(y, "price_close_raw") is None]
         if lg is None:
-            hit("C4", code, "증자 내역 수집 기록 없음")
+            hit("C4", code, "10년 주가 기록을 아직 받지 않음")
         elif not lg["ok"]:
             hit("C4", code, f"실패: {str(lg['note'] or '')[:160]}")
-        elif not lg["n_items"]:
-            hit("C4", code, f"0건: {str(lg['note'] or '')[:120]}")
+        elif miss:
+            hit("C4", code, f"당시 실제 종가가 빠진 해: {', '.join(map(str, miss))}")
         # D1
         if years:
             ly = max((y for y in years if v(y, "acc_assets") is not None), default=None)
-            if ly:
+            if ly and not induty.get(code, "")[:2] in ("64", "65", "66"):     # 금융사는 차입금 계산 대상이 아님
                 checked["D1"] += 1
                 ip = (v(ly, "acc_int_paid") or 0) + (v(ly, "acc_int_paid_fin") or 0)
                 hid, why = standards.hidden_debt(v(ly, "acc_debt"), v(ly - 1, "acc_debt"), ip, v(ly, "acc_assets"))
                 if hid:
-                    hit("D1", code, f"{ly} {why}")
+                    hit("D1", code, f"{ly} {why}" + evidence(code, ly, "acc_debt", r"차입|사채|금융부채|리스부채|부채총계"))
         # E1 컨센서스 두 출처
         cons = {(r["target_year"], r["metric"]): r["value"] for r in db.latest_consensus(conn, code)}
         for y in (cy, cy + 1, cy + 2):
@@ -237,6 +246,37 @@ def run(conn, P=None, progress=None):
     except OSError:
         pass
     return out
+
+
+def raw_lines(code, rcept, pat, limit=10):
+    """보관된 DART 원본(raw/<코드>/dart_*_<접수번호>.json, seed 포함)에서 이름이 pat에 맞는 줄. 없으면 ''"""
+    import glob
+    import re
+    if not rcept:
+        return ""
+    from . import pipeline
+    files = glob.glob(os.path.join(pipeline.RAW_DIR, code, f"dart_*_{rcept}.json")) + \
+        glob.glob(os.path.join(config.SEED_DIR, code, f"dart_*_{rcept}.json"))
+    if not files:
+        return " · [원본 파일 없음]"
+    try:
+        with open(files[0], encoding="utf-8") as f:
+            lst = json.load(f).get("list") or []
+    except (OSError, ValueError):
+        return " · [원본 파일을 읽지 못함]"
+    rx = re.compile(pat)
+    eok = lambda x: "–" if x in (None, "", "-") else (lambda n: f"{n / 1e8:,.0f}")(float(str(x).replace(",", "")))
+    out = []
+    for it in lst:
+        nm = it.get("account_nm") or ""
+        if rx.search(nm.replace(" ", "")):
+            try:
+                out.append(f"{it.get('sj_div')} {nm} [{(it.get('account_id') or '')[:60]}] 당기 {eok(it.get('thstrm_amount'))} 전기 {eok(it.get('frmtrm_amount'))}")
+            except ValueError:
+                continue
+        if len(out) >= limit:
+            break
+    return (" · 원본 줄(억원, 보고서 " + rcept + "): " + " | ".join(out)) if out else " · [원본에 맞는 줄 없음]"
 
 
 def latest():

@@ -114,9 +114,10 @@ def stock_info(code):
             "bps": num(_g(d, "bps", "BPS")), "eps": num(_g(d, "eps", "EPS"))}
 
 
-def daily(code, date, pages=1):
-    """수정주가 일봉(ka10081). 반환: {'source','basis','ref','rows': [(YYYYMMDD, 종가, 메모)]}"""
-    d = _call(["domestic", "candles", "daily", "--code", code, "--date", date, "--adjusted", "1", "--pages", str(pages)])
+def daily(code, date, pages=1, adjusted=True):
+    """일봉(ka10081). adjusted=True면 수정주가, False면 수정 전 가격(당시 실제 거래된 종가 — 2026-11-28, 시가총액용).
+    반환: {'source','basis','ref','rows': [(YYYYMMDD, 종가, 메모)]}"""
+    d = _call(["domestic", "candles", "daily", "--code", code, "--date", date, "--adjusted", "1" if adjusted else "0", "--pages", str(pages)])
     rows = []
     for r in _list(d, "stk_dt_pole_chart_qry", "주식일봉차트조회"):
         dt, c = str(_g(r, "dt", "일자") or ""), num(_g(r, "cur_prc", "현재가"), True)
@@ -124,7 +125,8 @@ def daily(code, date, pages=1):
             rows.append((dt, c, None))
     if not rows:
         raise KiwoomUnavailable("일봉 응답에 값이 없음")
-    return {"source": "Kiwoom", "basis": "보통주 종가(키움 수정주가)", "ref": f"키움 REST ka10081 {code}", "rows": rows}
+    return {"source": "Kiwoom", "basis": "보통주 종가(키움 수정주가)" if adjusted else "보통주 종가(키움 수정 전 — 당시 실제 종가)",
+            "ref": f"키움 REST ka10081 {code}" + ("" if adjusted else " 수정 전"), "rows": rows}
 
 
 def flows(code, date, pages=1):

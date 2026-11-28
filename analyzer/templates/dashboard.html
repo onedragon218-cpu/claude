@@ -698,7 +698,7 @@ const MET = D.metrics;
 MET.forEach((m,i)=>{ m.color = COLORS[i]; m.ps = 'circle'; });
 // 가치평가 지표(화면 G의 계산 결과)를 통합 그래프에 함께 겹치기 위한 정의
 const VMET = [
-  {key:'v_price',  name:'주가',          unit:'원', val:true, color:'--text-primary', ps:'crossRot', f:r=>r.price},
+  {key:'v_price',  name:'주가(수정주가)', unit:'원', val:true, color:'--text-primary', ps:'crossRot', f:r=>r.price},
   {key:'v_srim',   name:'S-RIM(ω 0.9) 주당가치', unit:'원', val:true, color:'--s8', ps:'triangle', f:r=>(r.values||{}).srim},
   {key:'v_dcf',    name:'DCF 주당가치', unit:'원', val:true, color:'--text-secondary', ps:'rect', f:r=>(r.values||{}).dcf},
   {key:'v_dcf_e',  name:'NOPAT÷WACC(무성장) 주당가치', unit:'원', val:true, color:'--s7', ps:'rect', f:r=>(r.values||{}).dcf_e},

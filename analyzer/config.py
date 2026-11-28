@@ -105,7 +105,8 @@ ACCOUNTS = {
     "treasury_common": "보통주 자기주식수(주, 연말)",
     "treasury_pref": "우선주 자기주식수(주, 연말)",
     "shares_derived": "역산 주식수(지배순이익/EPS, 참고용)",
-    "price_close": "보통주 종가(원)",
+    "price_close": "보통주 종가(원, 수정주가)",
+    "price_close_raw": "보통주 종가(원, 수정 전 — 당시 실제 종가)",
 }
 
 STATUSES = ["UNVERIFIED", "VERIFIED", "CONFLICT", "CORRECTED", "STALE", "MISSING"]

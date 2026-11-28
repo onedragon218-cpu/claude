@@ -62,7 +62,7 @@ MAP.update({
 })
 # 여러 줄을 더해야 하는 계정(재무상태표): 이름 규칙으로 찾는다
 SUM = {
-    "acc_debt": re.compile(r"(차입금|사채|리스부채|유동성장기부채)"),
+    "acc_debt": re.compile(r"(차입금|차입부채|사채|리스부채|유동성장기부채)"),     # 차입부채(2026-11-28, 전수 점검 D1)
     "acc_cash": re.compile(r"^(현금및현금성자산|단기금융상품)$"),
     "acc_lease_face": re.compile(r"리스부채"),
 }
@@ -73,7 +73,7 @@ ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"
 CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_cfi", "acc_cff", "acc_fx",
            "acc_dep", "acc_amort", "acc_rou_dep", "acc_da_total"}
 FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_ni_nci", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
-PARSER_VERSION = 5   # 계정을 늘리면 올린다(5: 지배·비지배 순이익 귀속 줄 고침, 2026-11-28) → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
+PARSER_VERSION = 6   # 계정을 늘리면 올린다(5: 지배·비지배 순이익 귀속 줄 고침, 6: 차입부채 줄, 2026-11-28) → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
 
 
 def _num(s):

@@ -796,10 +796,10 @@ class T(unittest.TestCase):
         self.assertFalse(g["rows"]["rel"]["mark"].startswith("실력 개선"))
         # 3 ⑤ 이자보상배율 0.37 → ✗, 숫자 표시
         self.assertEqual(g["rows"]["four"]["mark"], "✗"); self.assertIn("0.37배", g["rows"]["four"]["text"]); self.assertIn("EBITDA", g["rows"]["four"]["text"])
-        # 5 무상증자(100%)만 보정: 2021 BPS 12,274 → 6,137, 유상증자는 보정 안 함. 시가총액은 수정주가 × 지금 기준 주식 수
+        # 5 거래소 수정 계수(수정주가 ÷ 당시 종가 = 0.5)로 보정: 2021 BPS 12,274 → 6,137. 시가총액은 당시 실제 종가 × 그해 주식 수
         self.assertAlmostEqual(fv(2021, "bps")["value"], 6137, delta=1); self.assertIn("주식 수 보정", fv(2021, "bps")["status_note"])
         self.assertAlmostEqual(fv(2021, "eps")["value"], 751, delta=1)
-        self.assertAlmostEqual(fv(2021, "market_cap")["value"], 20000 * 21_213_373 * 2 / 1e8, delta=1)
+        self.assertAlmostEqual(fv(2021, "market_cap")["value"], 20000 * 21_213_373 / 1e8, delta=1)       # 당시 실제 종가 × 그해 주식 수
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM validation WHERE stock_code=? AND check_no=2 AND level='WARN' AND message LIKE '순이익/EPS%'",
                                       (code,)).fetchone()[0], 0)
         # A 흑자전환은 EPS 우상향으로 세지 않음(다른 지표는 그대로)
@@ -875,6 +875,50 @@ class T(unittest.TestCase):
         self.assertIn(code, by["C2"])                                                                 # 기준일 주가 없음/오래됨 또는
         self.assertIn("# 전수 점검 결과", res["text"])
         conn.close()
+
+    def test_restated_first_and_price_history(self):
+        """2026-11-28 사용자 결정: 대표값은 나중에 고쳐 실은 숫자(처음 보고한 숫자는 메모) · 시가총액 = 당시 실제 종가 × 그해 주식 수 ·
+        주당 값 = 거래소 수정 계수(수정주가 ÷ 당시 종가) · 과거 수정주가가 바뀌면 다시 받을 표시"""
+        import shutil
+        from unittest import mock
+        from analyzer.collectors import kiwoom
+        tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "t.db")
+        shutil.copy(os.path.join(config.DATA_DIR, "analyzer.db"), path)
+        conn = db.connect(path); P = config.periods(2026); code = "TRS001"
+        db.ensure_company(conn, code, "가상재작성")
+        for ry, rc, col, v in ((2022, "R2022", "당기", 100e8), (2023, "R2023", "전기", 80e8)):
+            db.add_observation(conn, code, 2022, "acc_revenue", v, unit="원", basis="CFS", source="DART", source_ref=rc, report_year=ry, col=col)
+        pipeline.select_facts(conn, code, 2022, "FY")
+        r = db.current_fact(conn, code, 2022, "acc_revenue")
+        self.assertEqual(r["value"], 80e8); self.assertIn("처음 보고한 숫자 10,000,000,000", r["status_note"])
+        # 10년 주가 기록(키움 가짜): 2020 연말 수정주가 1,000 · 당시 종가 5,000(그 뒤 5:1 분할)
+        rows_a = [("20201230", 1000, None), ("20211230", 1200, None), ("20261127", 1500, None)]
+        rows_r = [("20201230", 5000, None), ("20211230", 1200, None), ("20261127", 1500, None)]
+        fake = lambda c, d, pages=1, adjusted=True: {"source": "Kiwoom", "basis": "b", "ref": "k" + ("" if adjusted else "r"),
+                                                     "rows": rows_a if adjusted else rows_r}
+        with mock.patch.object(kiwoom, "daily", fake):
+            self.assertTrue(pipeline.refresh_price_history(conn, code, P))
+        fm = db.fact_map(conn, code)
+        self.assertEqual(fm[(2020, "price_close")]["value"], 1000); self.assertEqual(fm[(2020, "price_close_raw")]["value"], 5000)
+        fac = pipeline.share_factors(conn, code, fm)
+        self.assertAlmostEqual(fac[2020][0], 0.2); self.assertNotIn(2021, fac)
+        # 과거 수정주가가 바뀌면 바뀐 해를 돌려줌(→ 10년 기록 다시 받음)
+        self.assertEqual(pipeline.ingest_prices(conn, code, {"source": "Kiwoom", "basis": "b", "ref": "k", "rows": [("20201230", 500, None)]}, 2026), [2020])
+        conn.close()
+
+    def test_audit_raw_lines_evidence(self):
+        from analyzer import audit
+        from unittest import mock
+        tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(tmp, "TEV001"))
+        with open(os.path.join(tmp, "TEV001", "dart_2024_11011_CFS_R1.json"), "w", encoding="utf-8") as f:
+            json.dump({"list": [{"sj_div": "BS", "account_nm": "단기차입부채", "account_id": "x", "thstrm_amount": "1000000000000", "frmtrm_amount": "-"},
+                                {"sj_div": "BS", "account_nm": "자산총계", "account_id": "ifrs-full_Assets", "thstrm_amount": "5", "frmtrm_amount": "5"}]}, f)
+        with mock.patch.object(pipeline, "RAW_DIR", tmp):
+            t = audit.raw_lines("TEV001", "R1", r"차입|사채")
+        self.assertIn("단기차입부채", t); self.assertIn("10,000", t); self.assertNotIn("자산총계", t)
+        from analyzer.collectors import dart
+        self.assertTrue(dart.SUM["acc_debt"].search("단기차입부채"))
 
     def test_recalc_once_after_install(self):
         """2026-11-28: 새 해석·계산 규칙은 설치 뒤 '새 버전 준비'에서 회사마다 한 번 적용(예전엔 그 회사가 다시 수집될 때까지 옛 값이 남았음)"""
@@ -1783,7 +1827,8 @@ def _make_fake077(path):
         put("acc_ocf", 60 * E); put("acc_capex_ppe", 155.6 * E); put("acc_dep", 80 * E)
         put("acc_int_paid_fin", 100 * E if y == 2025 else 20 * E)
         db.put_fact(conn, code, y, "shares_common", d["sh"], unit="주", basis="-", source="DART", source_ref=f"S{y}")
-        db.put_fact(conn, code, y, "price_close", 20000 if y < 2022 else 9000, unit="원", basis="-", source="Kiwoom", source_ref="adj")
+        db.put_fact(conn, code, y, "price_close", 10000 if y < 2022 else 9000, unit="원", basis="-", source="Kiwoom", source_ref="adj")   # 수정주가
+        db.put_fact(conn, code, y, "price_close_raw", 20000 if y < 2022 else 9000, unit="원", basis="-", source="Kiwoom", source_ref="raw")  # 당시 실제 종가
     pipeline.ensure_capital(conn)
     # 2022-03 무상증자 100%(21,213,373주) + 2022-08 유상증자(보정 안 함)
     conn.execute("INSERT INTO capital_events VALUES (?,?,?,?,?,?,?)", (code, "2022-03-15", "무상증자", "보통주", 21_213_373, "X1", db.now()))

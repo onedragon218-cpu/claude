@@ -87,14 +87,19 @@ def select_facts(conn, code, y, period, via=None, stats=None):
                             status_note="원본 재해석에서 값을 찾지 못함(예전 값은 다른 줄을 잘못 읽은 것일 수 있어 지움)",
                             change_reason="원본 재해석", clear=True)
             continue
+        # 2026-11-28 사용자 결정 '가': 그 해를 담은 **가장 최근 보고서**의 값(나중에 고쳐 실은 숫자 — 중단사업·합병 등을 반영해 다음 해와 같은 기준).
+        # 처음 보고한 숫자는 관측값으로 남기고, 다르면 메모에 함께 적음. 예전엔 그해 자신의 보고서(처음 보고한 숫자)를 썼음
+        latest_year = max(o["report_year"] for o in obs)
+        best = max([o for o in obs if o["report_year"] == latest_year], key=lambda o: o["source_ref"])
         own = [o for o in obs if o["report_year"] == y]
-        if own:
-            best = max(own, key=lambda o: o["source_ref"])
-            note = None
-        else:
-            first_year = min(o["report_year"] for o in obs)
-            best = max([o for o in obs if o["report_year"] == first_year], key=lambda o: o["source_ref"])
-            note = f"{best['report_year']}년 보고서의 {best['col']} 열 값(당해 보고서 미수집)"
+        first = max(own, key=lambda o: o["source_ref"]) if own else \
+            max([o for o in obs if o["report_year"] == min(x["report_year"] for x in obs)], key=lambda o: o["source_ref"])
+        note = None
+        if best["report_year"] != y:
+            note = f"{best['report_year']}년 보고서의 {best['col']} 열(나중에 고쳐 실은 숫자)"
+            if first["source_ref"] != best["source_ref"] and best["value"] is not None and first["value"] is not None and \
+                    abs(first["value"] - best["value"]) > max(abs(best["value"]) * 0.005, 1):
+                note += f" · 처음 보고한 숫자 {first['value']:,.0f}({first['report_year']}년 보고서)"
         cur = db.current_fact(conn, code, y, key, period)
         reason = None
         status = "UNVERIFIED"
@@ -139,12 +144,17 @@ def ingest_shares(conn, code, year, parsed, stats=None):
 
 
 def ingest_prices(conn, code, pdata, base_year, stats=None):
+    """반환: 이미 있던 연말 수정주가가 0.5% 넘게 바뀐 해 목록 — 새 분할·증자로 과거 수정주가가 바뀐 것(그러면 10년 기록을 다시 받아 기준을 맞춤)"""
     ye = prices.year_end(pdata["rows"])
+    changed = []
     for y, (d, c, note) in ye.items():
         date = f"{d[:4]}-{d[4:6]}-{d[6:]}"
         if y < base_year:
             if int(d[4:]) < 1220:      # 연말 거래일이 아니면 연말 종가로 쓰지 않는다
                 continue
+            cur = db.current_fact(conn, code, y, "price_close")
+            if cur is not None and cur["value"] and cur["source"] == pdata["source"] and abs(c / cur["value"] - 1) > 0.005:
+                changed.append(y)
             r = db.put_fact(conn, code, y, "price_close", c, unit="원", basis=pdata["basis"], source=pdata["source"],
                             source_ref=pdata["ref"], as_of=date, status_note=note)
         elif y == base_year:
@@ -157,6 +167,7 @@ def ingest_prices(conn, code, pdata, base_year, stats=None):
         if stats:
             stats.put(r)
     conn.commit()
+    return changed
 
 
 def ingest_consensus(conn, code, items, provider, as_of, source_ref):
@@ -343,10 +354,6 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
             stats.notes.append(f"{y} 주식 수 미확보: {e}")
             break
 
-    # 3-2) 증자(감자) 현황 — 무상증자·주식분할 보정 계수용(2026-11-28). 최근 사업보고서 한 건에 지난 내역이 같이 실림, 30일마다
-    if has_key:
-        fetch_capital(conn, code, P, stats, _corp)
-
     # 4) 현재 연도 분기·반기 실적(최신 보고서부터)
     if need["interim"] and has_key:
         for reprt in ("11014", "11012", "11013"):
@@ -373,6 +380,10 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
         except dart.DartUnavailable as e:
             stats.notes.append(f"XBRL 원본 미확보: {e}")
 
+    # 5-0) 10년 연말 주가 — 키움 한 출처로 수정주가·수정 전 가격을 함께(2026-11-28 전수 점검 C1·C3). 한 달마다, 또는 수정 전 가격이 빠진 해가 있으면
+    if not offline and price_history_due(conn, code, P):
+        refresh_price_history(conn, code, P, stats)
+
     # 5) 주가: 빠진 연말 종가 또는 기준일 주가
     if need["price_years"] or need["asof_price"]:
         got = False
@@ -384,7 +395,8 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
                 pages = min(6, 2 + (P["current"] - min(old_years)) // 2) if old_years else 1     # 한 쪽 약 600거래일
                 import datetime as _d
                 pdata = kiwoom.daily(code, _d.date.today().strftime("%Y%m%d"), pages=pages)
-                ingest_prices(conn, code, pdata, P["current"], stats)
+                if ingest_prices(conn, code, pdata, P["current"], stats):
+                    refresh_price_history(conn, code, P, stats)     # 새 분할·증자로 과거 수정주가가 바뀜 → 10년을 한 기준으로
                 db.log_fetch(conn, "price", f"{code}:asof", code, True, len(pdata["rows"]), "키움")
                 db.log_fetch(conn, "kiwoom_daily", code, code, True, len(pdata["rows"]))
                 got = True
@@ -732,7 +744,74 @@ ADJ_KIND = re.compile(r"무상증자|주식분할|액면분할")
 NO_ADJ_KIND = re.compile(r"감자|병합")
 
 
+PRICE_HIST_PAGES = 5          # 키움 일봉 한 쪽 약 600거래일 → 5쪽 ≈ 12년
+PRICE_HIST_DAYS = 30
+
+
+def price_history_due(conn, code, P):
+    """10년 주가 기록을 다시 받을 때인가: 키움이 있고, 한 달이 지났거나 주식 수가 있는 해 중 수정 전 가격이 없는 해가 있으면"""
+    from .collectors import kiwoom
+    if not kiwoom.find_cli():
+        return False
+    if not db.fetched_recently(conn, "price_hist", code, PRICE_HIST_DAYS, ok_only=True):
+        return True
+    fm = db.fact_map(conn, code)
+    return any(fm.get((y, "shares_common")) and not fm.get((y, "price_close_raw")) for y in P["past"][-8:])
+
+
+def refresh_price_history(conn, code, P, stats=None):
+    """키움에서 10년치 수정주가·수정 전 가격 일봉을 받아 연말 종가를 한 출처·한 기준으로 다시 씀.
+    price_close = 수정주가(그래프·비교용), price_close_raw = 수정 전 가격(당시 실제 종가 — 시가총액용).
+    두 값의 비 = 거래소 수정 계수(분할·무상증자·병합·유상증자 권리락이 모두 반영). 반환: 성공?"""
+    import datetime as _d
+    from .collectors import kiwoom
+    today = _d.date.today().strftime("%Y%m%d")
+    try:
+        if stats:
+            stats.req("Kiwoom")
+        adj = kiwoom.daily(code, today, pages=PRICE_HIST_PAGES, adjusted=True)
+        if stats:
+            stats.req("Kiwoom")
+        raw = kiwoom.daily(code, today, pages=PRICE_HIST_PAGES, adjusted=False)
+    except kiwoom.KiwoomUnavailable as e:
+        db.log_fetch(conn, "price_hist", code, code, False, 0, str(e)[:200])
+        return False
+    ye_a, ye_r = prices.year_end(adj["rows"]), prices.year_end(raw["rows"])
+    n = 0
+    for y, (d, c, note) in ye_a.items():
+        if y >= P["current"] or int(d[4:]) < 1220:
+            continue
+        date = f"{d[:4]}-{d[4:6]}-{d[6:]}"
+        db.put_fact(conn, code, y, "price_close", c, unit="원", basis=adj["basis"], source="Kiwoom", source_ref=adj["ref"], as_of=date,
+                    status_note="10년 주가 기록(한 출처·수정주가)", change_reason="수정주가 다시 받음(한 출처로 맞춤)")
+        r = ye_r.get(y)
+        if r and r[0] == d:
+            db.put_fact(conn, code, y, "price_close_raw", r[1], unit="원", basis=raw["basis"], source="Kiwoom", source_ref=raw["ref"],
+                        as_of=date, status_note="당시 실제 종가(수정 전) — 시가총액 = 이 값 × 그해 보통주 수")
+        n += 1
+    ingest_prices(conn, code, adj, P["current"], stats)          # 기준일 주가
+    db.log_fetch(conn, "price_hist", code, code, n > 0, n, f"연말 {n}개 연도(수정주가·수정 전)")
+    conn.commit()
+    return n > 0
+
+
 def share_factors(conn, code, fm):
+    """과거 주당 값(EPS·BPS)을 지금 주식 수 기준으로 맞추는 계수 = 그해 연말 수정주가 ÷ 수정 전 가격(거래소 수정 계수, 2026-11-28 사용자 결정 '가').
+    반환: {해: (계수, 설명)} — 수정이 없던 해(계수 1)는 넣지 않음. 수정 전 가격이 없으면(키움 없음) 빈 dict"""
+    out = {}
+    for (y, k), r in fm.items():
+        if k != "price_close_raw" or not r["value"]:
+            continue
+        a = fm.get((y, "price_close"))
+        if not a or not a["value"] or a["source"] != "Kiwoom":
+            continue
+        f = a["value"] / r["value"]
+        if abs(f - 1) > 0.002:
+            out[y] = (f, f"×{f:.4f} — 거래소 수정 계수({y} 연말 수정주가 {a['value']:,.0f} ÷ 당시 종가 {r['value']:,.0f})")
+    return out
+
+
+def share_factors_capital(conn, code, fm):
     """무상증자·주식분할만으로 과거 주당 값을 지금 주식 수 기준으로 맞추는 계수(2026-11-28 사용자 결정).
     반환: {해: (계수, 설명)} — 계수 = 그해 말 이후 일어난 (증자 전 주식 수 ÷ 증자 후 주식 수)의 곱.
     유상증자·합병·전환권 행사는 새 돈·자산이 들어온 것이라 보정하지 않음. 증자 전 주식 수 = 전년 말 보통주 수(DART 주식 총수)."""
@@ -842,7 +921,7 @@ def fetch_capital(conn, code, P, stats=None, corp=None):
 
 
 RECALC_KEY = "recalc"        # 새 계산 규칙을 설치한 뒤 회사마다 한 번(키 = 해석 규칙 버전 + 계산 판)
-RECALC_VER = 2               # 2(2026-11-28): 증자 내역 수집 고침 → 다시 받고 다시 계산
+RECALC_VER = 3               # 3(2026-11-28): 나중에 고쳐 실은 숫자 우선·10년 주가 기록(수정 전 가격)·거래소 수정 계수
 
 
 def recalc_todo(conn):
@@ -855,13 +934,16 @@ def recalc_todo(conn):
 
 
 def recalc_one(conn, code, P, has_key=None):
-    """보관 원본 다시 해석(인터넷 없음) → 증자 내역(키가 있으면 DART 1번) → 지표·검증 다시 계산"""
+    """보관 원본 다시 해석(인터넷 없음) → 대표값 다시 고르기(나중에 고쳐 실은 숫자) → 10년 주가 기록(키움 2번) → 지표·검증 다시 계산"""
     from . import validate
     if has_key is None:
         has_key = dart.has_key()
     reparse_cached(conn, code)
-    if has_key:
-        fetch_capital(conn, code, P)
+    for r in conn.execute("SELECT DISTINCT fiscal_year, period FROM observations WHERE stock_code=? AND source='DART'", (code,)).fetchall():
+        select_facts(conn, code, r["fiscal_year"], r["period"], via="새 기준으로 대표값 다시 고름")   # 나중에 고쳐 실은 숫자 우선(2026-11-28)
+    conn.commit()
+    if price_history_due(conn, code, P):
+        refresh_price_history(conn, code, P)
     validate.validate_accounts(conn, code, P)
     compute(conn, code, P)
     validate.run(conn, code, P)
@@ -982,12 +1064,16 @@ def compute(conn, code, P, stats=None):
         put(y, "debt_ratio", liab / eq * 100 if eq and liab is not None else None,
             [(y, "acc_liab", "FY"), (y, "acc_eq", "FY")])
         px = _v(fm, y, "price_close")
+        pxr = _v(fm, y, "price_close_raw")
         c = _v(fm, y, "shares_common")
-        if px is not None and c:
-            # 주가는 수정주가(무상증자·분할 뒤 기준으로 과거를 낮춘 값)라 그 전 해는 주식 수도 지금 기준으로 맞춤(2026-11-28).
-            # 예전엔 낮춘 주가 × 그때 주식 수라 시가총액·연말 PBR(화면 N·U의 10년 최저 PBR)이 작게 나왔음
-            put(y, "market_cap", px * c / f / 1e8, [(y, "price_close", "FY"), (y, "shares_common", "FY")],
-                extra_note="보통주 기준(우선주 제외)" + (f" · 수정주가에 맞춰 주식 수 보정: {f_note}" if f < 0.999 else ""))
+        if pxr is not None and c:
+            # 시가총액 = 당시 실제 종가(수정 전) × 그해 보통주 수 — 보정 계수 없이 정확(2026-11-28). 예전엔 수정주가 × 그때 주식 수라
+            # 분할·증자 전 해의 시가총액·연말 PBR(화면 N·U의 10년 최저 PBR)이 어긋났음
+            put(y, "market_cap", pxr * c / 1e8, [(y, "price_close_raw", "FY"), (y, "shares_common", "FY")],
+                extra_note="당시 실제 종가 × 그해 보통주 수(우선주 제외)", clear=False)
+        elif px is not None and c:
+            put(y, "market_cap", px * c / 1e8, [(y, "price_close", "FY"), (y, "shares_common", "FY")],
+                extra_note="보통주 기준(우선주 제외) · 당시 실제 종가가 없어 수정주가로 계산 — 그 뒤 분할·증자가 있었으면 어긋남")
         elif px is not None and med:
             ds, dn = dshares(y)
             put(y, "market_cap", px * ds / 1e8, [(y, "price_close", "FY"), (y, "shares_derived", "FY")],
@@ -1209,7 +1295,8 @@ def update_price(code, base_year=None, conn=None):
             try:
                 stats.req("Kiwoom")
                 pdata = kiwoom.daily(code, _d.date.today().strftime("%Y%m%d"), pages=1)
-                ingest_prices(conn, code, pdata, P["current"], stats)
+                if ingest_prices(conn, code, pdata, P["current"], stats):
+                    refresh_price_history(conn, code, P, stats)     # 새 분할·증자로 과거 수정주가가 바뀜 → 10년을 한 기준으로
                 db.log_fetch(conn, "price", f"{code}:asof", code, True, len(pdata["rows"]), "키움(주가만)")
                 db.log_fetch(conn, "kiwoom_daily", code, code, True, len(pdata["rows"]))
                 got = True

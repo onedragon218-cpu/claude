@@ -141,9 +141,19 @@ def _financials(conn, code, cy):
                          "앱은 이 해의 EPS·ROE를 판정에서 뺐음. DART 원문(연결 손익계산서의 지배기업 소유주지분 순이익·기본주당이익)으로 어느 쪽이 맞는지 확인해 주세요.")
         if nio_r is not None and nio_r["source"] == "derived" and nio_r["value"] is not None:
             notes.append(f"- ‡ {y}년 지배순이익: {nio_r['status_note']}")
+        for k, nm in (("acc_revenue", "매출"), ("acc_op", "영업이익"), ("acc_ni_owner", "지배순이익")):
+            fr = _fr(conn, code, y, k)
+            if fr is not None and "처음 보고한 숫자" in (fr["status_note"] or ""):
+                first = fr["status_note"].split("처음 보고한 숫자", 1)[1].split("·")[0].strip()
+                try:
+                    num, rest = first.split("(", 1)
+                    first = f"{float(num.replace(',', '')) / 1e8:,.0f}억({rest}"
+                except ValueError:
+                    pass
+                notes.append(f"- {y}년 {nm}: 표는 나중에 고쳐 실은 숫자, 처음 보고한 숫자는 {first}")
         for nm, r in (("EPS", eps_r), ("BPS", bps_r)):
             if adj(r):
-                notes.append(f"- † {y}년 {nm} {r['status_note'].split('주식 수 보정:', 1)[1].strip()[:160]} (무상증자·분할만 반영, 지금 주식 수 기준)")
+                notes.append(f"- † {y}년 {nm} {r['status_note'].split('주식 수 보정:', 1)[1].strip()[:160]} (지금 주식 수 기준)")
     seen = []
     L += [""] + [x for x in notes if not (x in seen or seen.append(x))] if notes else []
     part = None
@@ -437,7 +447,7 @@ def build(conn, code, P, tab="P", why="", today=None):
          "### 생존·빚 (먼저 확인)"] + surv + [
          "", f"- 업종: {ind_label} (업종코드 {ind or '–'})",
          f"- 사업부 구성: {_segments(conn, code)}", "",
-         "### 최근 실적 (DART 사업보고서, 연결 기준 우선, 금액 억원)"] + fin + ([f"- {part}"] if part else []) + ([rem] if rem else []) + [
+         "### 최근 실적 (DART 사업보고서, 연결 기준 우선, 나중에 고쳐 실은 숫자 · EPS·BPS는 지금 주식 수 기준, 금액 억원)"] + fin + ([f"- {part}"] if part else []) + ([rem] if rem else []) + [
          "", "### 컨센서스 (증권사 평균, 원래 값 · [ ] 안은 앱 보정값)"] + _consensus(conn, code, P)
     if flags:
         L += ["", "### 컨센서스 경고"] + [f"- ⚠ {x}" for x in flags]
