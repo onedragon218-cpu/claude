@@ -2785,8 +2785,8 @@ let PREP_SEEN = false;
 let COLL = null;
 function renderPrep(P){
   if (!P) return;
-  if (P.running){ PREP_SEEN = true; $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--accent)"><b>ROA·FnGuide 추정 채우는 중</b> — ${P.done} / ${P.total}곳 (새 버전 설치 뒤 한 번: 실적 ROA 계산 + FnGuide 추정(ROE·ROA·매출·영업이익·EPS) 받기). 화면은 그대로 쓰셔도 됩니다.</div>`; }
-  else if (PREP_SEEN && P.finished_at) $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">ROA·FnGuide 추정을 채웠습니다(${P.done}곳). <button onclick="location.reload()">새로 고침</button></div>`;
+  if (P.running){ PREP_SEEN = true; $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--accent)"><b>새 버전 준비 중</b> — ${P.done} / ${P.total}곳 (설치 뒤 한 번: 보관된 DART 원본을 새 규칙으로 다시 해석·증자 내역 받기·지표 다시 계산, ROA·FnGuide 추정 채우기). 화면은 그대로 쓰셔도 되며, 끝난 회사부터 새 값이 보입니다.</div>`; }
+  else if (PREP_SEEN && P.finished_at) $('#prepstatus').innerHTML = `<div class="warnbox" style="border-left-color:var(--good);background:var(--good-bg)">새 버전 준비를 마쳤습니다(${P.done}곳 — 다시 계산·ROA·FnGuide 추정). <button onclick="location.reload()">새로 고침</button></div>`;
 }
 function renderBg(C){
   if (!C) return;

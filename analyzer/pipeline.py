@@ -344,21 +344,8 @@ def collect(conn, code, P, stats, offline=False, fresh=False):
             break
 
     # 3-2) 증자(감자) 현황 — 무상증자·주식분할 보정 계수용(2026-11-28). 최근 사업보고서 한 건에 지난 내역이 같이 실림, 30일마다
-    if has_key and not db.fetched_recently(conn, "dart_capital", code, 30):
-        y_rep = P["current"] - 1
-        try:
-            stats.req("DART")
-            d = dart.get_json("irdsSttus.json", corp_code=_corp(), bsns_year=str(y_rep), reprt_code="11011")
-            if d.get("status") == "013":
-                d = dart.get_json("irdsSttus.json", corp_code=_corp(), bsns_year=str(y_rep - 1), reprt_code="11011")
-            evs = parse_capital(d)
-            ensure_capital(conn)
-            for ev in evs:
-                conn.execute("INSERT OR IGNORE INTO capital_events VALUES (?,?,?,?,?,?,?)", (code,) + ev + (db.now(),))
-            db.log_fetch(conn, "dart_capital", code, code, True, len(evs), None if evs else "증자·감자 내역 없음")
-        except dart.DartUnavailable as e:
-            msg = str(e)
-            db.log_fetch(conn, "dart_capital", code, code, False, 0, ("증자·감자 내역 없음 — " + msg) if "013" in msg else msg)
+    if has_key:
+        fetch_capital(conn, code, P, stats, _corp)
 
     # 4) 현재 연도 분기·반기 실적(최신 보고서부터)
     if need["interim"] and has_key:
@@ -794,6 +781,55 @@ def parse_capital(d):
     return out
 
 
+def fetch_capital(conn, code, P, stats=None, corp=None):
+    """OpenDART 증자(감자) 현황을 받아 capital_events에 저장(30일마다). corp = 회사 고유번호를 돌려주는 함수(없으면 찾음)"""
+    if db.fetched_recently(conn, "dart_capital", code, 30):
+        return
+    y_rep = P["current"] - 1
+    try:
+        if stats:
+            stats.req("DART")
+        cc = corp() if corp else dart.corp_code(code)
+        d = dart.get_json("irdsSttus.json", corp_code=cc, bsns_year=str(y_rep), reprt_code="11011")
+        if d.get("status") == "013":
+            d = dart.get_json("irdsSttus.json", corp_code=cc, bsns_year=str(y_rep - 1), reprt_code="11011")
+        evs = parse_capital(d)
+        ensure_capital(conn)
+        for ev in evs:
+            conn.execute("INSERT OR IGNORE INTO capital_events VALUES (?,?,?,?,?,?,?)", (code,) + ev + (db.now(),))
+        db.log_fetch(conn, "dart_capital", code, code, True, len(evs), None if evs else "증자·감자 내역 없음")
+    except dart.DartUnavailable as e:
+        msg = str(e)
+        db.log_fetch(conn, "dart_capital", code, code, False, 0, ("증자·감자 내역 없음 — " + msg) if "013" in msg else msg)
+
+
+RECALC_KEY = "recalc"        # 새 계산 규칙을 설치한 뒤 회사마다 한 번(키 = 해석 규칙 버전)
+
+
+def recalc_todo(conn):
+    """새 해석·계산 규칙(지배순이익 줄·자료 충돌·무상증자 보정 등, 2026-11-28)이 아직 적용되지 않은 회사"""
+    done = {r[0] for r in conn.execute("SELECT DISTINCT stock_code FROM fetch_log WHERE source=? AND key LIKE ?",
+                                       (RECALC_KEY, f"%:v{dart.PARSER_VERSION}"))}
+    return [r["stock_code"] for r in conn.execute(
+        "SELECT c.stock_code FROM companies c WHERE EXISTS (SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code) ORDER BY c.stock_code")
+        if r["stock_code"] not in done]
+
+
+def recalc_one(conn, code, P, has_key=None):
+    """보관 원본 다시 해석(인터넷 없음) → 증자 내역(키가 있으면 DART 1번) → 지표·검증 다시 계산"""
+    from . import validate
+    if has_key is None:
+        has_key = dart.has_key()
+    reparse_cached(conn, code)
+    if has_key:
+        fetch_capital(conn, code, P)
+    validate.validate_accounts(conn, code, P)
+    compute(conn, code, P)
+    validate.run(conn, code, P)
+    db.log_fetch(conn, RECALC_KEY, f"{code}:v{dart.PARSER_VERSION}", code, True, 1, "새 계산 규칙 적용")
+    conn.commit()
+
+
 def compute(conn, code, P, stats=None):
     """원천 계정으로 7개 지표를 계산해 facts(source='derived')로 저장한다."""
     fm = db.fact_map(conn, code)
@@ -1045,7 +1081,8 @@ PREP = {"running": False, "done": 0, "total": 0, "current": None, "finished_at":
 
 
 def prepare_roa(base_year=None, wait=None):
-    """새 버전 설치 뒤 한 번: ROA가 아직 없는 회사의 파생값을 다시 계산(인터넷 없이)하고, FnGuide ROE·ROA 추정을 받음.
+    """새 버전 설치 뒤 한 번: 새 해석·계산 규칙이 아직 적용 안 된 회사는 원본 재해석·증자 내역·다시 계산(2026-11-28),
+    ROA가 아직 없는 회사의 파생값을 다시 계산(인터넷 없이)하고, FnGuide ROE·ROA 추정을 받음.
     백그라운드 수집과 겹치지 않게 수집 잠금을 잡고, 잠금이 있으면 기다림. 반환: 처리한 회사 수"""
     import time
     from . import collectlock
@@ -1063,26 +1100,35 @@ def prepare_roa(base_year=None, wait=None):
                                               "AND fetched_at >= '2026-11-26'")}
         need_fg = [c for c in need_fg if c not in none_ok or not db.fetched_recently(conn, "fg_highlight", c, config.TTL_DAYS["consensus"])]
     finally:
+        pass
+    try:
+        recalc = recalc_todo(conn)
+    except Exception:          # noqa: BLE001
+        recalc = []
+    finally:
         conn.close()
-    codes = list(dict.fromkeys(todo + need_fg))
+    codes = list(dict.fromkeys(recalc + todo + need_fg))
     if not codes:
         return 0
     t0 = time.time()
-    while not collectlock.acquire("server", kind="ROA 준비", total=len(codes)):
+    while not collectlock.acquire("server", kind="새 버전 준비(다시 계산·ROA)", total=len(codes)):
         if wait is not None and time.time() - t0 > wait:
             return 0
         time.sleep(30)
     PREP.update(running=True, done=0, total=len(codes), current=None, finished_at=None)
+    has_key = dart.has_key()
     n = 0
     ka = collectlock.keepalive().__enter__()
     try:
         conn = db.connect()
         for i, code in enumerate(codes):
-            if not collectlock.heartbeat(current=code, done=i, total=len(codes), kind="ROA 준비"):
+            if not collectlock.heartbeat(current=code, done=i, total=len(codes), kind="새 버전 준비(다시 계산·ROA)"):
                 break
             PREP.update(done=i, current=code)
             try:
-                if code in todo:
+                if code in recalc:                               # 새 해석·계산 규칙(2026-11-28): 원본 재해석 + 증자 내역 + 다시 계산
+                    recalc_one(conn, code, P, has_key)
+                elif code in todo:
                     compute(conn, code, P)                       # ROA 실적(인터넷 없이)
                 if code in need_fg:
                     try:

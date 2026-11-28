@@ -812,6 +812,21 @@ class T(unittest.TestCase):
         self.assertIn("-478억", t); self.assertIn("**143억**", t); self.assertIn("ROA(당기순이익 기준)", t)
         conn.close()
 
+    def test_recalc_once_after_install(self):
+        """2026-11-28: 새 해석·계산 규칙은 설치 뒤 '새 버전 준비'에서 회사마다 한 번 적용(예전엔 그 회사가 다시 수집될 때까지 옛 값이 남았음)"""
+        import shutil
+        tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "t.db")
+        shutil.copy(os.path.join(config.DATA_DIR, "analyzer.db"), path)
+        conn, code = _make_fake077(path)
+        P = config.periods(2026)
+        db.put_fact(conn, code, 2023, "eps", 125, unit="원", basis="CFS", source="derived", source_ref="옛 계산")     # 옛 버전이 계산해 둔 값
+        self.assertIn(code, pipeline.recalc_todo(conn))
+        self.assertEqual(db.current_fact(conn, code, 2023, "eps")["value"], 125)          # 아직 옛 값
+        pipeline.recalc_one(conn, code, P, has_key=False)
+        self.assertIsNone(db.current_fact(conn, code, 2023, "eps")["value"])              # 자료 충돌 반영
+        self.assertNotIn(code, pipeline.recalc_todo(conn))                              # 한 번만
+        conn.close()
+
     def test_fairper_formula_guards_and_payload(self):
         from analyzer import fairper
         # 1) 공식 값
