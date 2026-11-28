@@ -75,6 +75,12 @@ def select_facts(conn, code, y, period, via=None, stats=None):
     """같은 연도·계정의 여러 관측값 중 대표값을 고른다.
     1순위: 그 연도 자신의 보고서(정정 공시가 있으면 가장 최근 접수번호)
     2순위: 그 연도를 처음으로 담은 후속 보고서(원래 숫자에 가장 가까움)"""
+    # 2026-11-28 전수 점검 A3·A4: 계정마다 '가장 최근 보고서'를 따로 고르면, 어떤 계정은 그 보고서에 없어서 다른 보고서 값이 섞였음
+    # (예: 지배순이익은 2년 뒤 보고서, 당기순이익은 1년 뒤 보고서 → 지배 + 비지배 ≠ 당기순이익). 그 해의 기준 보고서를 하나 정하고
+    # (매출·당기순이익·자산이 실린 가장 최근 보고서) 모든 계정을 그 보고서에서 먼저 찾음. 그 보고서에 없는 계정만 계정별로 고름
+    core = [o for k in ("acc_revenue", "acc_ni", "acc_assets") for o in db.observations(conn, code, y, k, period)
+            if o["source"] == "DART" and o["report_year"] is not None and (o["col"] or "") != "XBRL주석"]
+    base_ref = max(core, key=lambda o: (o["report_year"], o["source_ref"]))["source_ref"] if core else None
     for key in dart.ALL_KEYS + XBRL_ONLY_KEYS:
         # 대표값은 DART 원본에서만 고른다(WiseReport 등 다른 출처는 교차 검증용 관측값)
         obs = [o for o in db.observations(conn, code, y, key, period) if o["source"] == "DART" and o["report_year"] is not None]
@@ -89,8 +95,12 @@ def select_facts(conn, code, y, period, via=None, stats=None):
             continue
         # 2026-11-28 사용자 결정 '가': 그 해를 담은 **가장 최근 보고서**의 값(나중에 고쳐 실은 숫자 — 중단사업·합병 등을 반영해 다음 해와 같은 기준).
         # 처음 보고한 숫자는 관측값으로 남기고, 다르면 메모에 함께 적음. 예전엔 그해 자신의 보고서(처음 보고한 숫자)를 썼음
-        latest_year = max(o["report_year"] for o in obs)
-        best = max([o for o in obs if o["report_year"] == latest_year], key=lambda o: o["source_ref"])
+        in_base = [o for o in obs if o["source_ref"] == base_ref]
+        if in_base:
+            best = max(in_base, key=lambda o: (o["col"] or "") != "XBRL주석")
+        else:
+            latest_year = max(o["report_year"] for o in obs)
+            best = max([o for o in obs if o["report_year"] == latest_year], key=lambda o: o["source_ref"])
         own = [o for o in obs if o["report_year"] == y]
         first = max(own, key=lambda o: o["source_ref"]) if own else \
             max([o for o in obs if o["report_year"] == min(x["report_year"] for x in obs)], key=lambda o: o["source_ref"])
@@ -921,7 +931,7 @@ def fetch_capital(conn, code, P, stats=None, corp=None):
 
 
 RECALC_KEY = "recalc"        # 새 계산 규칙을 설치한 뒤 회사마다 한 번(키 = 해석 규칙 버전 + 계산 판)
-RECALC_VER = 3               # 3(2026-11-28): 나중에 고쳐 실은 숫자 우선·10년 주가 기록(수정 전 가격)·거래소 수정 계수
+RECALC_VER = 4               # 3: 나중에 고쳐 실은 숫자·10년 주가 기록·거래소 수정 계수, 4: 한 해는 한 보고서·중단영업 귀속 줄(2026-11-28)
 
 
 def recalc_todo(conn):

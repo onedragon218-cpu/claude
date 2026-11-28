@@ -920,6 +920,41 @@ class T(unittest.TestCase):
         from analyzer.collectors import dart
         self.assertTrue(dart.SUM["acc_debt"].search("단기차입부채"))
 
+    def test_attrib_split_discontinued(self):
+        """2026-11-28 전수 점검 원본 줄로 확인한 실제 모양: 중단영업이 있으면 지배 귀속을 계속·중단으로 나눠 싣고 표준 ID를 계속영업분에만 붙임"""
+        from analyzer.collectors import dart
+        E = 1e8
+        R = lambda sj, nm, v, aid="-표준계정코드 미사용-": {"sj_div": sj, "account_nm": nm, "account_id": aid, "thstrm_amount": str(v * E)}
+        PL, OW, NC = "ifrs-full_ProfitLoss", "ifrs-full_ProfitLossAttributableToOwnersOfParent", "ifrs-full_ProfitLossAttributableToNoncontrollingInterests"
+        cases = {
+            "삼성전기 2019": ([R("CIS", "계속영업이익", 6195), R("CIS", "세후중단영업손익", -914), R("CIS", "당기순손익", 5280, PL),
+                            R("CIS", "지배기업 소유주지분", 6057, OW), R("CIS", "비지배지분", 138, NC), R("CIS", "지배기업 소유주지분", 5143)], 5143),
+            "LG이노텍 2020": ([R("IS", "계속영업 당기순이익", 3309, "ifrs-full_ProfitLossFromContinuingOperations"), R("IS", "당기순이익", 2361, PL),
+                             R("IS", "지배기업의 소유주지분", 3309, OW), R("IS", "비지배지분", 0, NC), R("IS", "지배기업의 소유주지분", -948)], 2361),
+            "덕산하이메탈 2023": ([R("CIS", "지배지분포괄이익", 51, "ifrs-full_ComprehensiveIncomeAttributableToOwnersOfParent"), R("CIS", "당기순이익(손실)", 33, PL),
+                              R("CIS", "지배지분순이익(중단영업)", 153), R("CIS", "비지배지분순이익(손실)", -23, NC), R("CIS", "지배지분순이익(계속영업)", -97, OW)], 56),
+            "ISC 2018": ([R("CIS", "중단영업이익(손실)", -4, "ifrs_ProfitLossFromDiscontinuedOperations"), R("CIS", "당기순이익", 122, "ifrs_ProfitLoss"),
+                         R("CIS", "계속영업손익", 138, "ifrs_ProfitLossAttributableToOwnersOfParent"), R("CIS", "중단영업손익", -4),
+                         R("CIS", "비지배지분 귀속 당기순이익", -12, "ifrs_ProfitLossAttributableToNoncontrollingInterests")], 134),
+        }
+        for k, (L, exp) in cases.items():
+            v = dart._find(L, "acc_ni_owner", "thstrm_amount")
+            self.assertIsNotNone(v, k); self.assertAlmostEqual(v / E, exp, delta=0.5, msg=k)
+
+    def test_one_report_per_year(self):
+        """2026-11-28 전수 점검: 한 해의 계정은 한 보고서(기준 보고서)에서 — 계정마다 다른 보고서가 섞여 지배 + 비지배 ≠ 당기순이익이 되지 않게"""
+        import shutil
+        tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "t.db")
+        shutil.copy(os.path.join(config.DATA_DIR, "analyzer.db"), path)
+        conn = db.connect(path); code = "TOR001"
+        db.ensure_company(conn, code, "가상기준보고서")
+        add = lambda k, v, ry, rc, col: db.add_observation(conn, code, 2018, k, v, unit="원", basis="CFS", source="DART", source_ref=rc, report_year=ry, col=col)
+        add("acc_revenue", 500e8, 2019, "R2019", "전기"); add("acc_ni", 16990e8, 2019, "R2019", "전기"); add("acc_ni_owner", 16511e8, 2019, "R2019", "전기")
+        add("acc_ni_owner", 16515e8, 2020, "R2020", "전전기")           # 더 최근 보고서에 지배순이익만 실림
+        pipeline.select_facts(conn, code, 2018, "FY")
+        self.assertEqual(db.current_fact(conn, code, 2018, "acc_ni_owner")["value"], 16511e8)
+        conn.close()
+
     def test_recalc_once_after_install(self):
         """2026-11-28: 새 해석·계산 규칙은 설치 뒤 '새 버전 준비'에서 회사마다 한 번 적용(예전엔 그 회사가 다시 수집될 때까지 옛 값이 남았음)"""
         import shutil

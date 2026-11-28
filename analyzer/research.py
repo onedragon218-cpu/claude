@@ -274,6 +274,18 @@ def _survival(conn, code, P):
     L = []
     nd, when = D.net_debt()
     L.append(f"- {goodco.nd_ebitda_text(D, last)}")
+    if nd is None and "미식별" in (when or ""):
+        # 차입금이 '금융부채' 묶음 줄에 들어 있는 회사: 원본 줄을 그대로 보여 줌(차입금만 따로 표시되지 않아 순차입금은 만들지 않음, 2026-11-28 전수 점검 D1)
+        try:
+            from . import audit
+            r = conn.execute("SELECT source_ref FROM facts WHERE stock_code=? AND fiscal_year=? AND period='FY' AND metric='acc_liab' AND is_current=1",
+                             (code, last)).fetchone()
+            ev = audit.raw_lines(code, r["source_ref"] if r else None, r"금융부채$|차입|사채$")
+            if ev and "없음" not in ev[:20]:
+                L.append(f"- 참고 — 본문의 금융부채·차입 줄{ev.split('원본 줄', 1)[1] if '원본 줄' in ev else ev} "
+                         "(차입금이 금융부채 묶음 안에 있어 따로 알 수 없음 — 주석의 차입금 명세로 확인해 주세요)")
+        except Exception:      # noqa: BLE001
+            pass
     icr, icr_t = goodco.interest_cover(D, last)
     L.append(f"- {icr_t}" + (" — 1배 미만: 영업이익으로 이자를 다 못 냄" if icr is not None and icr < 1 else ""))
     fcf = []

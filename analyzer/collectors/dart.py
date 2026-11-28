@@ -73,7 +73,7 @@ ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"
 CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_cfi", "acc_cff", "acc_fx",
            "acc_dep", "acc_amort", "acc_rou_dep", "acc_da_total"}
 FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_ni_nci", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
-PARSER_VERSION = 6   # 계정을 늘리면 올린다(5: 지배·비지배 순이익 귀속 줄 고침, 6: 차입부채 줄, 2026-11-28) → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
+PARSER_VERSION = 7   # 계정을 늘리면 올린다(5: 지배·비지배 순이익 귀속 줄, 6: 차입부채 줄, 7: 중단영업으로 나눠 실은 귀속 줄 — 2026-11-28) → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
 
 
 def _num(s):
@@ -97,7 +97,7 @@ def _norm_id(aid):
 # 예전엔 이름만 보고 첫 줄을 골라, 당기순이익 귀속 줄 이름이 목록과 다르면 총포괄손익 귀속 줄(기타포괄손익 포함)을 지배순이익으로 잡을 수 있었음
 # → 순이익과 EPS 부호가 다른 해가 생김(덕산하이메탈 2023, 2026-11-28).
 # 이제: 표준 ID(당기순이익 귀속 전용)가 있으면 그것, 없으면 이름 후보들 중 '지배 + 비지배 = 당기순이익'이 맞는 쌍만 씀. 못 고르면 결측.
-ATTRIB = {"acc_ni_owner": re.compile(r"^지배(기업|회사|주주)"), "acc_ni_nci": re.compile(r"^비지배")}
+ATTRIB = {"acc_ni_owner": re.compile(r"^지배(기업|회사|주주|지분)"), "acc_ni_nci": re.compile(r"^비지배")}
 
 
 def _is_comprehensive(it):
@@ -122,26 +122,66 @@ def _attrib_candidates(lst, key, col):
     return out
 
 
-def _find_attrib(lst, key, col):
+def _std_rows(lst, key, col):
     sjs, ids, _ = MAP[key]
-    for sj in sjs:                       # 표준 ID는 당기순이익 귀속 전용(총포괄손익 귀속은 ID가 다름)
-        for it in lst:
-            if it.get("sj_div") == sj and _norm_id(it.get("account_id")) in ids:
-                v = _num(it.get(col))
-                if v is not None:
-                    return v
+    return [_num(it.get(col)) for sj in sjs for it in lst
+            if it.get("sj_div") == sj and _norm_id(it.get("account_id")) in ids and _num(it.get(col)) is not None]
+
+
+def _find_attrib(lst, key, col):
+    """지배·비지배 순이익. 중단영업이 있는 회사는 귀속 줄을 '계속영업분'·'중단영업분'으로 나눠 싣고, 표준 ID를 계속영업분에만 붙이기도 함
+    (삼성전기·LG이노텍·덕산하이메탈 등 — 2026-11-28 전수 점검 A3·A4). 그래서 표준 ID 줄도 그대로 믿지 않고 **지배 + 비지배 = 당기순이익**이
+    맞는 조합만 씀: 한 줄씩 → 이웃한 두 줄의 합 → 전부의 합 순서. 당기순이익을 모르면 표준 ID 줄, 그것도 없으면 이름 후보가 하나일 때만. 못 고르면 결측"""
     ni = _find(lst, "acc_ni", col)
-    own, nci = _attrib_candidates(lst, "acc_ni_owner", col), _attrib_candidates(lst, "acc_ni_nci", col)
+    all_o, all_n = _attrib_candidates_all(lst, "acc_ni_owner", col), _attrib_candidates_all(lst, "acc_ni_nci", col)
     if ni is None:
-        return (own if key == "acc_ni_owner" else nci)[0] if len(own if key == "acc_ni_owner" else nci) == 1 else None
-    tol = max(abs(ni) * 0.005, 1e6)      # 0.5% 또는 100만 원
-    for k in range(min(len(own), len(nci))):          # k번째 지배 줄과 k번째 비지배 줄의 합이 당기순이익이면 그 묶음이 '당기순이익의 귀속'
-        if abs(own[k] + nci[k] - ni) <= tol:
-            return own[k] if key == "acc_ni_owner" else nci[k]
-    if not nci and key == "acc_ni_owner":             # 비지배지분 줄이 없음(자회사 없음): 지배 = 당기순이익인 줄
-        hit = [v for v in own if abs(v - ni) <= tol]
-        return hit[0] if hit else None
+        std = _std_rows(lst, key, col)
+        xs = all_o if key == "acc_ni_owner" else all_n
+        return std[0] if std else (xs[0] if len(xs) == 1 else None)
+    tol = max(abs(ni) * 0.01, 1e7)              # 1% 또는 1천만 원(나눠 실은 줄의 반올림)
+
+    def opts(xs, zero_ok):
+        o = list(xs)
+        o += [xs[i] + xs[i + 1] for i in range(len(xs) - 1)]
+        if len(xs) > 2:
+            o.append(sum(xs))
+        if zero_ok:
+            o.append(0.0)
+        return o
+    for O in opts(all_o, False):
+        for N in opts(all_n, True):
+            if abs(O + N - ni) <= tol:
+                return O if key == "acc_ni_owner" else N
     return None
+
+
+SPLIT_NM = re.compile(r"^(계속|중단)영업(손익|이익|손실|순이익|순손실|이익\(손실\))$")
+
+
+def _attrib_candidates_all(lst, key, col):
+    """귀속 줄 후보를 표에 나온 순서대로: 표준 ID 줄 + 이름 후보 + (지배 쪽만) 당기순이익 줄 **뒤에** 나오는 ID 없는 '계속/중단영업손익' 줄
+    (ISC처럼 지배 귀속을 '계속영업손익·중단영업손익'으로 적은 경우). 총포괄손익 귀속 줄은 뺌"""
+    sjs, ids, names = MAP[key]
+    out = []
+    for sj in sjs:
+        after_ni = False
+        for it in lst:
+            if it.get("sj_div") != sj:
+                continue
+            aid = _norm_id(it.get("account_id"))
+            nm = re.sub(r"\s", "", it.get("account_nm", ""))
+            if aid == "ifrs-full_ProfitLoss":
+                after_ni = True
+                continue
+            if _is_comprehensive(it) or (key == "acc_ni_owner" and nm.startswith("비지배")):
+                continue
+            hit = aid in ids or nm in names or ATTRIB[key].search(nm) or \
+                (key == "acc_ni_owner" and after_ni and SPLIT_NM.match(nm) and not aid.startswith("ifrs-full_ProfitLossFrom"))
+            if hit:
+                v = _num(it.get(col))
+                if v is not None and v not in out:
+                    out.append(v)
+    return out
 
 
 def _find(lst, key, col):
