@@ -73,7 +73,7 @@ ABS_KEYS = {"acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin"
 CF_KEYS = {"acc_ocf", "acc_capex_ppe", "acc_capex_int", "acc_int_paid", "acc_int_paid_fin", "acc_cfi", "acc_cff", "acc_fx",
            "acc_dep", "acc_amort", "acc_rou_dep", "acc_da_total"}
 FLOW = {"acc_revenue", "acc_op", "acc_ni", "acc_ni_owner", "acc_ni_nci", "acc_eps_basic", "acc_pretax", "acc_tax"} | CF_KEYS
-PARSER_VERSION = 7   # 계정을 늘리면 올린다(5: 지배·비지배 순이익 귀속 줄, 6: 차입부채 줄, 7: 중단영업으로 나눠 실은 귀속 줄 — 2026-11-28) → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
+PARSER_VERSION = 8   # 계정을 늘리면 올린다(5: 지배·비지배 순이익 귀속 줄, 6: 차입부채 줄, 7: 중단영업으로 나눠 실은 귀속 줄, 8: 귀속 줄 허용 오차 — 2026-11-29) → 저장해 둔 원본 응답을 네트워크 없이 다시 해석
 
 
 def _num(s):
@@ -138,14 +138,14 @@ def _find_attrib(lst, key, col):
         std = _std_rows(lst, key, col)
         xs = all_o if key == "acc_ni_owner" else all_n
         return std[0] if std else (xs[0] if len(xs) == 1 else None)
-    tol = max(abs(ni) * 0.01, 1e7)              # 1% 또는 1천만 원(나눠 실은 줄의 반올림)
+    tol = max(abs(ni) * 0.002, 1e7)             # 0.2% 또는 1천만 원 — 원 단위 원본이라 맞는 조합은 거의 정확히 맞음(2026-11-29: 1%는 우연한 조합을 받아들였음)
 
     def opts(xs, zero_ok):
         o = list(xs)
         o += [xs[i] + xs[i + 1] for i in range(len(xs) - 1)]
         if len(xs) > 2:
             o.append(sum(xs))
-        if zero_ok:
+        if zero_ok and not xs:                  # 비지배지분 줄이 아예 없을 때만 0으로 봄(줄이 있는데 0으로 두면 셀트리온 2022처럼 비지배 몫이 사라짐)
             o.append(0.0)
         return o
     for O in opts(all_o, False):

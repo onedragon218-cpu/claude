@@ -200,12 +200,12 @@ def run(conn, P=None, progress=None):
             c0, c1 = v(y - 1, "shares_common"), v(y, "shares_common")
             if c0 and c1:
                 checked["C3"] += 1
-                if abs(c1 / c0 - 1) > 0.05 and v(y - 1, "price_close_raw") is None:
+                if abs(c1 / c0 - 1) > 0.05 and v(y - 1, "price_close_raw") is None and v(y - 1, "price_close") is not None:   # 상장 전 해(주가 없음)는 빼기
                     hit("C3", code, f"{y - 1}→{y} 보통주 {c0:,.0f} → {c1:,.0f}주({(c1 / c0 - 1):+.0%}) · {y - 1}년 당시 실제 종가 없음")
         # C4
         lg = hist_log.get(code)
         checked["C4"] += 1
-        miss = [y for y in years[-8:] if v(y, "shares_common") and v(y, "price_close_raw") is None]
+        miss = [y for y in years[-8:] if v(y, "shares_common") and v(y, "price_close") is not None and v(y, "price_close_raw") is None]
         if lg is None:
             hit("C4", code, "10년 주가 기록을 아직 받지 않음")
         elif not lg["ok"]:

@@ -78,9 +78,16 @@ def select_facts(conn, code, y, period, via=None, stats=None):
     # 2026-11-28 전수 점검 A3·A4: 계정마다 '가장 최근 보고서'를 따로 고르면, 어떤 계정은 그 보고서에 없어서 다른 보고서 값이 섞였음
     # (예: 지배순이익은 2년 뒤 보고서, 당기순이익은 1년 뒤 보고서 → 지배 + 비지배 ≠ 당기순이익). 그 해의 기준 보고서를 하나 정하고
     # (매출·당기순이익·자산이 실린 가장 최근 보고서) 모든 계정을 그 보고서에서 먼저 찾음. 그 보고서에 없는 계정만 계정별로 고름
-    core = [o for k in ("acc_revenue", "acc_ni", "acc_assets") for o in db.observations(conn, code, y, k, period)
-            if o["source"] == "DART" and o["report_year"] is not None and (o["col"] or "") != "XBRL주석"]
-    base_ref = max(core, key=lambda o: (o["report_year"], o["source_ref"]))["source_ref"] if core else None
+    # 기준 보고서 = 핵심 계정(매출·당기순이익·자산·부채·자본)이 **가장 많이** 실린 보고서 중 가장 최근 것(2026-11-29: 최근 보고서에 일부만 있으면
+    # 나머지가 다른 보고서에서 와서 자산 ≠ 부채 + 자본이 됐음 — SFA 2017)
+    CORE = ("acc_revenue", "acc_ni", "acc_assets", "acc_liab", "acc_eq")
+    cnt = {}
+    for k in CORE:
+        for o in db.observations(conn, code, y, k, period):
+            if o["source"] == "DART" and o["report_year"] is not None and (o["col"] or "") != "XBRL주석":
+                c = cnt.setdefault(o["source_ref"], [0, o["report_year"]])
+                c[0] += 1
+    base_ref = max(cnt, key=lambda r: (cnt[r][0], cnt[r][1], r)) if cnt else None
     for key in dart.ALL_KEYS + XBRL_ONLY_KEYS:
         # 대표값은 DART 원본에서만 고른다(WiseReport 등 다른 출처는 교차 검증용 관측값)
         obs = [o for o in db.observations(conn, code, y, key, period) if o["source"] == "DART" and o["report_year"] is not None]
@@ -98,6 +105,15 @@ def select_facts(conn, code, y, period, via=None, stats=None):
         in_base = [o for o in obs if o["source_ref"] == base_ref]
         if in_base:
             best = max(in_base, key=lambda o: (o["col"] or "") != "XBRL주석")
+        elif key in ("acc_ni_owner", "acc_ni_nci") and base_ref is not None:
+            # 지배·비지배 순이익은 당기순이익과 같은 보고서에서만(다른 보고서 값을 섞으면 합이 안 맞음 — 이노션 2020, LX하우시스 2016).
+            # 기준 보고서에 없으면 비워 두고, 비지배지분이 없는 회사면 계산 단계에서 당기순이익으로 채움
+            cur = db.current_fact(conn, code, y, key, period)
+            if cur is not None and cur["value"] is not None and cur["source"] == "DART":
+                db.put_fact(conn, code, y, key, None, period=period, unit=cur["unit"], basis=cur["basis"], source="DART", source_ref=base_ref,
+                            status="UNVERIFIED", status_note="기준 보고서(당기순이익이 실린 보고서)에 이 줄이 없어 다른 보고서 값을 쓰지 않음",
+                            change_reason="한 해는 한 보고서", clear=True)
+            continue
         else:
             latest_year = max(o["report_year"] for o in obs)
             best = max([o for o in obs if o["report_year"] == latest_year], key=lambda o: o["source_ref"])
@@ -931,7 +947,7 @@ def fetch_capital(conn, code, P, stats=None, corp=None):
 
 
 RECALC_KEY = "recalc"        # 새 계산 규칙을 설치한 뒤 회사마다 한 번(키 = 해석 규칙 버전 + 계산 판)
-RECALC_VER = 4               # 3: 나중에 고쳐 실은 숫자·10년 주가 기록·거래소 수정 계수, 4: 한 해는 한 보고서·중단영업 귀속 줄(2026-11-28)
+RECALC_VER = 5               # 3: 나중에 고쳐 실은 숫자·10년 주가 기록·거래소 수정 계수, 4: 한 해는 한 보고서·중단영업 귀속 줄, 5: 기준 보고서 고르기·귀속 줄 허용 오차(2026-11-29)
 
 
 def recalc_todo(conn):

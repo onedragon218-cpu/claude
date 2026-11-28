@@ -955,6 +955,31 @@ class T(unittest.TestCase):
         self.assertEqual(db.current_fact(conn, code, 2018, "acc_ni_owner")["value"], 16511e8)
         conn.close()
 
+    def test_base_report_and_attrib_rules_v8(self):
+        """2026-11-29 전수 점검: 기준 보고서는 핵심 계정이 가장 많이 실린 것 · 지배·비지배는 그 보고서에서만 · 비지배 줄이 있으면 0으로 보지 않음"""
+        import shutil
+        from analyzer.collectors import dart
+        E = 1e8
+        R = lambda nm, v, aid="-표준계정코드 미사용-": {"sj_div": "IS", "account_nm": nm, "account_id": aid, "thstrm_amount": str(v * E)}
+        L = [R("당기순이익", 5426, "ifrs-full_ProfitLoss"), R("지배기업소유주지분", 5378, "ifrs-full_ProfitLossAttributableToOwnersOfParent"),
+             R("비지배지분", 48, "ifrs-full_ProfitLossAttributableToNoncontrollingInterests")]
+        self.assertAlmostEqual(dart._find(L, "acc_ni_owner", "thstrm_amount") / E, 5378)
+        L2 = [R("당기순이익", 5426, "ifrs-full_ProfitLoss"), R("지배기업소유주지분", 5378, "ifrs-full_ProfitLossAttributableToOwnersOfParent"),
+              R("비지배지분", 300, "ifrs-full_ProfitLossAttributableToNoncontrollingInterests")]        # 합이 안 맞음 — 비지배를 0으로 보고 받아들이지 않음
+        self.assertIsNone(dart._find(L2, "acc_ni_owner", "thstrm_amount"))
+        tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "t.db")
+        shutil.copy(os.path.join(config.DATA_DIR, "analyzer.db"), path)
+        conn = db.connect(path); code = "TBR001"
+        db.ensure_company(conn, code, "가상기준보고서2")
+        add = lambda k, v, ry, rc, col: db.add_observation(conn, code, 2017, k, v, unit="원", basis="CFS", source="DART", source_ref=rc, report_year=ry, col=col)
+        for k, v in (("acc_revenue", 100), ("acc_ni", 10), ("acc_assets", 300), ("acc_liab", 100), ("acc_eq", 200), ("acc_ni_owner", 9)):
+            add(k, v * E, 2018, "R2018", "전기")
+        add("acc_assets", 301 * E, 2019, "R2019", "전전기"); add("acc_ni_owner", 7 * E, 2019, "R2019", "전전기")   # 더 최근이지만 일부만
+        pipeline.select_facts(conn, code, 2017, "FY")
+        f = lambda k: db.current_fact(conn, code, 2017, k)["value"]
+        self.assertEqual((f("acc_assets"), f("acc_liab"), f("acc_eq"), f("acc_ni_owner")), (300 * E, 100 * E, 200 * E, 9 * E))
+        conn.close()
+
     def test_recalc_once_after_install(self):
         """2026-11-28: 새 해석·계산 규칙은 설치 뒤 '새 버전 준비'에서 회사마다 한 번 적용(예전엔 그 회사가 다시 수집될 때까지 옛 값이 남았음)"""
         import shutil
