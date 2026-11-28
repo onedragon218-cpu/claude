@@ -851,6 +851,31 @@ class T(unittest.TestCase):
         self.assertEqual(len(pipeline.parse_capital({"list": [{"x_de": "20220315", "x_stle": "무상증자", "x_knd": "보통주", "x_qy": "5"}]})), 1)
         conn.close()
 
+    def test_audit_full_check(self):
+        """2026-11-28 전수 점검: 읽기만 하고, 계산 빠짐·자료 충돌·저장값 불일치·주식 수 급변을 찾아냄"""
+        import shutil
+        from unittest import mock
+        from analyzer import audit
+        tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "t.db")
+        shutil.copy(os.path.join(config.DATA_DIR, "analyzer.db"), path)
+        conn, code = _make_fake077(path)
+        P = config.periods(2026)
+        pipeline.compute(conn, code, P)
+        db.put_fact(conn, code, 2024, "op_margin", 99.0, unit="%", basis="CFS", source="derived", source_ref="틀린 값")   # 일부러 틀린 저장값
+        conn.commit()
+        n_facts = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        with mock.patch.object(config, "DATA_DIR", tmp):
+            res = audit.run(conn, P)
+            self.assertIsNotNone(audit.latest())
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0], n_facts)          # 아무것도 고치지 않음
+        by = {c["id"]: {x["code"]: x["items"] for x in c["companies"]} for c in res["checks"]}
+        self.assertIn(code, by["A4"])                                                                 # 2023 부호 다름
+        self.assertTrue(any("영업이익률" in m and "99.00" in m for m in by["B1"].get(code, [])))       # 저장값 ≠ 다시 계산
+        self.assertNotIn(code, by["B2"])                                                              # 방금 계산했으니 빠짐 없음
+        self.assertIn(code, by["C2"])                                                                 # 기준일 주가 없음/오래됨 또는
+        self.assertIn("# 전수 점검 결과", res["text"])
+        conn.close()
+
     def test_recalc_once_after_install(self):
         """2026-11-28: 새 해석·계산 규칙은 설치 뒤 '새 버전 준비'에서 회사마다 한 번 적용(예전엔 그 회사가 다시 수집될 때까지 옛 값이 남았음)"""
         import shutil

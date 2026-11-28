@@ -217,6 +217,10 @@ code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12.
     <p class="muted">칸 안의 기호: ● 실적(검증 완료) ◐ 실적(미검증·주의) ◇ 전망(컨센서스) △ 현재 연도 부분 실적 · 빈칸 = 미확보</p>
     <div class="tablewrap"><table id="coverage"></table></div>
   </div>
+  <div class="card" id="audit-card"><h2>전수 점검 <span class="muted" style="font-size:14px;font-weight:400">DB의 모든 회사를 대조 — 원본을 그대로 보여 주는가, 계산식대로 계산했는가(읽기만, 아무것도 고치지 않음)</span></h2>
+    <div class="row"><button id="audit-run">전수 점검 실행</button> <button id="audit-copy">결과 복사</button> <span class="muted" id="audit-msg"></span></div>
+    <p class="muted" style="margin:6px 0">등급: <b>오류</b> = 앱이 원본이나 자기 계산식과 다른 값을 들고 있음(앱이 고칠 것) · <b>확인</b> = 원본끼리·출처끼리 안 맞음(사람이 확인) · <b>참고</b> = 판정에 영향 줄 수 있는 상태. [결과 복사]로 붙여 보내 주시면 유형별로 고칩니다.</p>
+    <div class="tablewrap"><table id="audit-table"></table></div><div id="audit-detail"></div></div>
   <div class="card"><h2>출처 상태 <span class="muted" style="font-size:14px;font-weight:400">출처가 조용히 고장 나면 바로 알기 위한 표</span></h2><div class="tablewrap"><table id="b-src"></table></div><p class="muted" id="b-srcnote" style="margin:6px 0 0"></p></div>
   <div class="card"><h2>화면 불러오기 시간</h2><p class="muted" id="b-perf"></p></div>
   <div class="card"><h2>최근 수집 기록</h2><p class="muted">같은 자료를 다시 요청하지 않았는지 이 기록으로 확인할 수 있습니다. 실패한 출처는 [다시 받기]로 기다리는 기간(뉴스 3일 등)을 무시하고 지금 다시 받을 수 있습니다(기록은 지우지 않고 새 줄이 위에 생김).</p>
@@ -1517,6 +1521,29 @@ document.addEventListener('click', async e => { const b = e.target.closest('.rp-
     const j = await r.json().catch(()=>({error:'응답을 읽지 못함('+r.status+')'})); if (j.error) throw new Error(j.error);
     rpOpen(`매수 판단 조사 프롬프트 — ${b.closest('tr').querySelector('a') ? b.closest('tr').querySelector('a').textContent : b.dataset.code}`, j.text); }
   catch(err){ rpOpen('만들지 못했습니다: ' + err.message, ''); } });
+
+// ---- B탭 전수 점검 (analyzer/audit.py, 2026-11-28) ----
+let AUD = null;
+function renderAudit(res){ AUD = res; if (!res){ $('#audit-table').innerHTML = '<tr><td class="l muted">아직 점검한 적이 없습니다. [전수 점검 실행]을 누르세요(수십 초~몇 분).</td></tr>'; return; }
+  $('#audit-msg').textContent = `마지막 점검 ${res.at} · 앱 ${res.version} · ${res.n_companies}곳`;
+  const col = l => l==='오류' ? 'var(--bad)' : l==='확인' ? 'var(--warn)' : 'var(--text-secondary)';
+  $('#audit-table').innerHTML = '<tr><th>번호</th><th class="l">점검</th><th>등급</th><th>대조 건수</th><th>걸린 회사</th><th>걸린 항목</th><th class="l">무엇을 보나</th></tr>' +
+    res.checks.map(c=>`<tr><td>${c.id}</td><td class="l">${esc(c.name)}</td><td style="color:${col(c.level)};font-weight:600">${c.level}</td><td>${c.n_checked}</td>` +
+      `<td>${c.n_companies ? `<a href="#" data-aud="${c.id}">${c.n_companies}</a>` : '0'}</td><td>${c.n_items}</td><td class="l muted" style="font-size:12px">${esc(c.desc)}</td></tr>`).join('');
+  document.querySelectorAll('[data-aud]').forEach(a=>a.onclick = e => { e.preventDefault(); const c = res.checks.find(x=>x.id===a.dataset.aud);
+    $('#audit-detail').innerHTML = `<h3 style="margin:12px 0 4px">${c.id} ${esc(c.name)} — ${c.n_companies}곳</h3><div class="tablewrap" style="max-height:420px;overflow:auto"><table>` +
+      c.companies.map(x=>`<tr><td class="l" style="white-space:nowrap"><a href="${companyUrl(x.code)}">${esc(x.name)}</a> <span class="muted">${esc(x.code)}</span></td><td class="l" style="font-size:12px">${x.items.map(esc).join('<br>')}</td></tr>`).join('') + '</table></div>'; });
+}
+async function auditPoll(){ try { const j = await (await fetch('/api/audit')).json();
+    if (j.job.running){ $('#audit-msg').textContent = `점검 중… ${j.job.done} / ${j.job.total || '?'}곳 ${j.job.current ? '· ' + j.job.current : ''}`; $('#audit-run').disabled = true; setTimeout(auditPoll, 1500); return; }
+    $('#audit-run').disabled = false; if (j.job.error) $('#audit-msg').textContent = '점검 실패: ' + j.job.error; renderAudit(j.latest); } catch(e){ $('#audit-msg').textContent = '점검 상태를 읽지 못함'; } }
+$('#audit-run').onclick = async () => { if (!SERVED){ alert('「재무분석 열기」로 연 화면에서 쓰세요.'); return; }
+  $('#audit-run').disabled = true; $('#audit-msg').textContent = '점검을 시작합니다…';
+  try { await fetch('/api/audit/run', {method:'POST'}); } catch(e){} setTimeout(auditPoll, 800); };
+$('#audit-copy').onclick = async () => { if (!AUD){ alert('먼저 [전수 점검 실행]을 누르세요.'); return; }
+  try { await navigator.clipboard.writeText(AUD.text); $('#audit-msg').textContent = '결과를 복사했습니다 — 붙여 보내 주세요.'; }
+  catch(e){ rpOpen('전수 점검 결과(복사해 보내 주세요)', AUD.text); } };
+if (SERVED) auditPoll(); else renderAudit(null);
 
 // ---- J. 성장 조건 분류 ----
 const G = D.growth || {rows:[], years:[]};

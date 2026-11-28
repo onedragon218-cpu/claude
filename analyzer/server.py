@@ -15,6 +15,24 @@ JOB = {"running": False, "total": 0, "done": 0, "current": None, "results": [], 
 JOB_LOCK = threading.Lock()
 
 
+AUDIT = {"running": False, "done": 0, "total": 0, "current": None, "error": None}
+AUDIT_LOCK = threading.Lock()
+
+
+def _audit_job(base_year=None):
+    from . import audit
+    try:
+        conn = db.connect(timeout=30)
+        try:
+            audit.run(conn, config.periods(base_year), progress=lambda i, n, nm: AUDIT.update(done=i, total=n, current=nm))
+        finally:
+            conn.close()
+    except Exception as e:      # noqa: BLE001
+        AUDIT["error"] = f"{type(e).__name__}: {e}"[:300]
+    finally:
+        AUDIT.update(running=False, current=None)
+
+
 def _update_all(codes, base_year, fresh, mode="full"):
     import contextlib
     from . import pcache, collectlock
@@ -244,6 +262,11 @@ class H(BaseHTTPRequestHandler):
                 remote = getattr(self.server, "is_tls", False) and not lan.is_local(self.client_address[0])
                 return self._send(200, json.dumps({"remote": bool(remote), "readonly": bool(remote and not lan.allow_write())}),
                                   "application/json")
+            if u.path == "/api/audit":
+                from . import audit
+                with AUDIT_LOCK:
+                    st = dict(AUDIT)
+                return self._send(200, json.dumps({"job": st, "latest": None if st["running"] else audit.latest()}, ensure_ascii=False), "application/json")
             if u.path == "/api/version":
                 from . import __version__
                 return self._send(200, json.dumps({"version": __version__, "root": config.ROOT, "data": config.DATA_DIR},
@@ -411,6 +434,19 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:     # noqa: BLE001
                 return self._send(200, json.dumps({"error": f"{type(e).__name__}: {e}"[:200]}, ensure_ascii=False), "application/json")
             return self._send(200, json.dumps({"ok": True, "result": res}, ensure_ascii=False), "application/json")
+        if u.path == "/api/audit/run":
+            # B탭 [전수 점검]: 모든 회사를 대조(읽기만, 2026-11-28). 백그라운드로 돌고 진행은 GET /api/audit
+            self._drain()
+            aby = int(q["base_year"][0]) if q.get("base_year") else None
+            with AUDIT_LOCK:
+                if AUDIT["running"]:
+                    return self._send(200, json.dumps(dict(AUDIT, already=True), ensure_ascii=False), "application/json")
+                AUDIT.update(running=True, done=0, total=0, current=None, error=None)
+                try:
+                    threading.Thread(target=_audit_job, args=(aby,), daemon=True).start()
+                except Exception as e:      # noqa: BLE001  시작 못 하면 '도는 중'으로 남지 않게
+                    AUDIT.update(running=False, error=f"시작 실패: {e}")
+            return self._send(200, json.dumps(AUDIT, ensure_ascii=False), "application/json")
         if u.path == "/api/hj/calib":
             # 화면 T 점검: 앱 참고 판정을 Claude 판정에 맞추기 — 진단·배우기·검증(검증만, 화면 판정은 바꾸지 않음)
             from . import hj_calib, lan
