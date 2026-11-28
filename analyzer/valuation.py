@@ -192,21 +192,18 @@ def _one_year(A, bk, y, flows, stocks, prev_stocks, price, mcap, roe_hist, eps, 
     #    (예: 스튜디오드래곤 2019~2021, 리스 이자 등 소액만 있음)
     #  - 이자지급이 크면 차입금이 다른 금융부채 줄에 묶여 있는 것이므로 값을 지어내지 않고 빈칸으로 둔다(예: 메디톡스)
     assets = stocks.get("acc_assets")
-    hidden_limit = 0.05 * assets if assets else 0
 
-    def _hidden(d):
-        if d != 0 or not int_paid:
-            return False
-        return int_paid / (rf + A["타인자본비용_가산"]) > hidden_limit
-
-    if _hidden(debt):
-        notes.append(f"재무상태표 본문에 차입금 줄이 없는데 이자지급({_eok(int_paid)})이 커서 차입금이 다른 금융부채에 "
-                     "묶여 있는 것으로 보임 → 차입금 미식별(값을 만들지 않음)")
+    from . import standards
+    pdebt = prev_stocks.get("acc_debt") if prev_stocks else None
+    hid, why = standards.hidden_debt(debt, pdebt, int_paid, assets, rf, A["타인자본비용_가산"])
+    if hid:
+        # 2026-11-28: 본문 차입금이 0일 때만 보던 것을, 작게 잡힌 경우(이자 ÷ 평균 차입금 > 50%)도 같은 '미식별'로 — 예전엔 그 작은 값으로
+        # 계산하며 '이자지급/평균차입금 554% 비정상'을 따로 냈음(차입금 미식별 경고와 앞뒤가 안 맞음)
+        notes.append(f"{why} 차입금이 다른 금융부채에 묶여 있는 것으로 보임 → 차입금 미식별(값을 만들지 않음)")
         debt = None
     elif debt == 0 and int_paid:
         notes.append(f"차입금·사채 줄 없음, 이자지급 {_eok(int_paid)}은 리스 등 소액 → 원본대로 차입금 0")
-    pdebt = prev_stocks.get("acc_debt") if prev_stocks else None
-    if _hidden(pdebt):
+    if pdebt == 0 and standards.hidden_debt(0, None, int_paid, assets, rf, A["타인자본비용_가산"])[0]:
         pdebt = None
     avg_debt = (debt + pdebt) / 2 if debt is not None and pdebt is not None else debt
     kd = None

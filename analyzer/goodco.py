@@ -108,6 +108,12 @@ class Data:
         except Exception:      # noqa: BLE001
             xn = {}
         get = lambda y, k, per="FY": self.v(y, k, per)
+        if self.years:                     # 최근 결산에서 본문 차입금이 실제를 못 담으면(2026-11-28) 순차입금을 만들지 않음
+            ly = self.years[-1]
+            ip = (self.v(ly, "acc_int_paid") or 0) + (self.v(ly, "acc_int_paid_fin") or 0)
+            hid, why = standards.hidden_debt(self.v(ly, "acc_debt"), self.v(ly - 1, "acc_debt"), ip, self.v(ly, "acc_assets"))
+            if hid:
+                return None, f"차입금 미식별 — {why} 차입금이 다른 금융부채 줄에 묶여 있는 것으로 보임({ly})"
         per = self.latest_interim()
         if per and self.v(self.cy, "acc_debt", per) is not None:
             nd = standards.net_debt(get, self.cy, per, xn.get(self.cy - 1))
@@ -280,9 +286,14 @@ def good6(conn, code, P):
                     eq += ni * 0.75
             src = "컨센 추정(해석 — FnGuide 추정 없음)"
         mark = rule_three(r3, list(est.values()), hist[py])
+        actual = rule_three(r3, [], hist[py])        # 실적만으로 본 판정(2026-11-28: 컨센서스 덕에 ✓인지 드러나게)
+        if mark == "✓" and actual != "✓":
+            mark = "✓(컨센 기준)"
         t = f"과거 정점 {hist[py]:.1f}%({py}) · 최근 3년 " + " → ".join("충돌" if hist.get(y) is None else f"{hist[y]:.1f}" for y in l3) + "%" + gap_note
         t += (f" · {src} " + " → ".join(f"{_e(y)} {v:.1f}" for y, v in est.items()) + "%") if est else f" · 추정 없음"
-        return {"mark": mark, "text": t}, r3
+        if mark.startswith("✓(컨센"):
+            t += f" · 실적만으로는 {actual}(추정이 과거 정점 {hist[py]:.1f}%를 넘어 ✓)"
+        return {"mark": mark, "text": t, "actual": actual, "last": r3[-1] if not gap_note else hist[l3[2]]}, r3
     out["rows"]["three"], roe3 = ratio_rule("roe", "roe_fg", "ROE")
     out["rows"]["roa"], roa3 = ratio_rule("roa", "roa", "ROA")
     # 참고: ROE와 ROA의 관계(점수 아님) — 레버리지 = 평균 자산 ÷ 평균 지배자본(ROE÷ROA는 지배/전체 기준이 섞여 직접 계산)
@@ -291,9 +302,14 @@ def good6(conn, code, P):
         a, pa, e, pe = D.eok(y, "acc_assets"), D.eok(y - 1, "acc_assets"), D.eok(y, "acc_eq_owner"), D.eok(y - 1, "acc_eq_owner")
         lev.append((a + pa) / (e + pe) if a and pa and e and pe and (e + pe) > 0 else (a / e if a and e and e > 0 else None))
     up = lambda m: m.startswith("✓") or m.startswith("△")
-    m3, m4 = out["rows"]["three"]["mark"], out["rows"]["roa"]["mark"]
+    r3o, r4o = out["rows"]["three"], out["rows"]["roa"]
+    # 관계는 실적 기준 판정으로만(2026-11-28: 컨센서스 덕의 ✓로 '실력 개선'이라 쓰지 않게)
+    m3, m4 = r3o.get("actual", r3o["mark"]), r4o.get("actual", r4o["mark"])
+    neg = r3o.get("last") is not None and r3o["last"] <= 0
     if m3.startswith("판정 못 함") or m4.startswith("판정 못 함"):
         rel = "판정 못 함"
+    elif up(m3) and up(m4) and neg:
+        rel = "적자 축소(ROE·ROA 함께 오르지만 ROE가 아직 0 이하)"
     elif up(m3) and up(m4):
         rel = "실력 개선(ROE·ROA 함께 오름)"
     elif up(m3):

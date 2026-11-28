@@ -86,6 +86,26 @@ def shares(get, y, per="FY"):
     return None, "주식수 없음", True
 
 
+KD_HIDDEN = 0.5      # 이자 지급 ÷ 평균 차입금이 이보다 크면 본문 차입금이 실제보다 훨씬 작게 잡힌 것(2026-11-28, 예스티 237~554%)
+
+
+def hidden_debt(debt, prev_debt, int_paid, assets, rf=0.035, spread=0.015):
+    """재무상태표 본문 차입금이 실제 차입을 다 담지 못했는가. 반환: (True/False, 이유)
+    ① 본문 차입금 0인데 이자 지급이 큼(이자 ÷ (rf+가산) > 총자산 5%)  ② 이자 ÷ 평균 차입금 > 50% (차입금이 다른 금융부채 줄에 묶여 있음)"""
+    if not int_paid:
+        return False, None
+    if debt == 0:
+        if assets and int_paid / (rf + spread) > 0.05 * assets:
+            return True, f"재무상태표 본문에 차입금 줄이 없는데 이자지급({int_paid / 1e8:,.0f}억)이 커서"
+        return False, None
+    if debt is None:
+        return False, None
+    avg = (debt + prev_debt) / 2 if prev_debt is not None else debt
+    if avg > 0 and int_paid / avg > KD_HIDDEN:
+        return True, (f"본문 차입금 {avg / 1e8:,.0f}억(평균)에 비해 이자지급 {int_paid / 1e8:,.0f}억이 너무 커서(이자율로 환산 {int_paid / avg:.0%})")
+    return False, None
+
+
 def net_debt(get, y, per="FY", notes_y=None):
     """반환: dict(debt, cash, nd, lease, lease_added, stfin_added). 리스는 본문에 없으면 XBRL 주석 값을 더한다."""
     debt, cash = get(y, "acc_debt", per), get(y, "acc_cash", per)

@@ -791,6 +791,9 @@ class T(unittest.TestCase):
         self.assertAlmostEqual(fv(2025, "roe")["value"], -44.5, delta=0.3)
         g = goodco.good6(conn, code, P)
         self.assertFalse(g["rows"]["three"]["mark"].startswith("판정 못 함"))
+        # B(2026-11-28): 컨센서스 덕의 ✓는 표시하고, 실적 판정을 함께 · 관계 판정은 실적 기준
+        self.assertEqual(g["rows"]["three"]["mark"], "✓(컨센 기준)"); self.assertIn("실적만으로는 ✗", g["rows"]["three"]["text"])
+        self.assertFalse(g["rows"]["rel"]["mark"].startswith("실력 개선"))
         # 3 ⑤ 이자보상배율 0.37 → ✗, 숫자 표시
         self.assertEqual(g["rows"]["four"]["mark"], "✗"); self.assertIn("0.37배", g["rows"]["four"]["text"]); self.assertIn("EBITDA", g["rows"]["four"]["text"])
         # 5 무상증자(100%)만 보정: 2021 BPS 12,274 → 6,137, 유상증자는 보정 안 함. 시가총액은 수정주가 × 지금 기준 주식 수
@@ -811,6 +814,15 @@ class T(unittest.TestCase):
         self.assertLess(t.index("### 생존·빚"), t.index("### 최근 실적")); self.assertGreater(t.index("### 주가"), t.index("### 최근 3개월 뉴스"))
         self.assertIn("-478억", t); self.assertIn("**143억**", t); self.assertIn("ROA(당기순이익 기준)", t)
         conn.close()
+
+    def test_hidden_debt_small_identified(self):
+        """2026-11-28(예스티): 본문 차입금이 0이거나 이자에 비해 너무 작으면 '미식별' — 작은 값으로 계산하지 않음"""
+        from analyzer import standards
+        E = 1e8
+        self.assertTrue(standards.hidden_debt(0, None, 5 * E, 100 * E)[0])                 # 0인데 이자 큼
+        self.assertFalse(standards.hidden_debt(0, None, 0.1 * E, 1000 * E)[0])             # 0이고 이자 소액(리스 등)
+        self.assertTrue(standards.hidden_debt(1 * E, 1 * E, 5 * E, 1000 * E)[0])           # 이자율 환산 500%
+        self.assertFalse(standards.hidden_debt(100 * E, 100 * E, 5 * E, 1000 * E)[0])      # 5% — 정상
 
     def test_recalc_once_after_install(self):
         """2026-11-28: 새 해석·계산 규칙은 설치 뒤 '새 버전 준비'에서 회사마다 한 번 적용(예전엔 그 회사가 다시 수집될 때까지 옛 값이 남았음)"""
