@@ -307,7 +307,11 @@ class H(BaseHTTPRequestHandler):
                 code = u.path.split("/")[2]
                 return self._send(200, report.render(report.payload(conn, code, by)))
             if u.path == "/":
-                row = conn.execute("SELECT stock_code FROM companies ORDER BY updated_at DESC LIMIT 1").fetchone()
+                # 앱을 열면 늘 삼성전자(2026-11-28 사용자 요청). 예전엔 '가장 최근에 갱신된 회사'라 수집이 돌 때마다 첫 화면 종목이 바뀌었음.
+                # 삼성전자가 DB에 없으면(재무 자료 없음) 예전처럼 최근 갱신 회사
+                row = conn.execute("SELECT stock_code FROM companies c WHERE stock_code=? AND EXISTS "
+                                   "(SELECT 1 FROM facts f WHERE f.stock_code=c.stock_code)", (config.HOME_CODE,)).fetchone() or \
+                    conn.execute("SELECT stock_code FROM companies ORDER BY updated_at DESC LIMIT 1").fetchone()
                 if row:
                     return self._send(200, report.render(report.payload(conn, row["stock_code"], by)))
                 return self._send(200, "<p>DB가 비어 있습니다. <code>python -m analyzer analyze 213500</code>을 먼저 실행하세요.</p>")

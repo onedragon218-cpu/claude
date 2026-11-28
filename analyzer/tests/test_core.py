@@ -724,6 +724,38 @@ class T(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0], n_before)
         conn.close()
 
+    def test_profile_wr_none_not_alarm_and_home_code(self):
+        """2026-11-28: 기업개요 칸이 원래 없는 회사(리츠 등)는 실패·경보로 세지 않고 30일 뒤 다시 / 앱 첫 화면 종목은 config.HOME_CODE"""
+        import datetime as _dt, http.client, threading
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+        from analyzer import profile, sourcehealth, server
+        conn = db.connect()
+        conn.execute("DELETE FROM fetch_log WHERE source='profile_wr' AND key LIKE 'TST%'")
+        self.assertTrue(profile._wr_due(conn, "TST001"))                                     # 기록 없음 → 받음
+        db.log_fetch(conn, "profile_wr", "TST001", "TST001", False, 0, profile.WR_NONE)
+        self.assertFalse(profile._wr_due(conn, "TST001"))                                    # 개요 없음 → 30일 기다림
+        old = (_dt.datetime.now() - _dt.timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("INSERT INTO fetch_log (source,key,stock_code,fetched_at,ok,n_items,note) VALUES ('profile_wr','TST002','TST002',?,0,0,'URLError: x')", (old,))
+        self.assertTrue(profile._wr_due(conn, "TST002"))                                     # 접속 오류 → 하루 뒤 다시
+        self.assertFalse(sourcehealth._is_fail({"ok": 0, "note": profile.WR_NONE, "src": "profile_wr"}))
+        self.assertFalse(sourcehealth._is_fail({"ok": 0, "note": None, "src": "profile_wr"}))   # 예전 메모 없는 기록
+        self.assertTrue(sourcehealth._is_fail({"ok": 0, "note": "URLError: x", "src": "profile_wr"}))
+        conn.execute("DELETE FROM fetch_log WHERE source='profile_wr' AND key LIKE 'TST%'"); conn.commit()
+        self.assertEqual(config.HOME_CODE, "005930")
+        code = conn.execute("SELECT stock_code FROM companies ORDER BY updated_at ASC LIMIT 1").fetchone()[0]   # 가장 오래 전에 갱신된 회사
+        name = conn.execute("SELECT name FROM companies WHERE stock_code=?", (code,)).fetchone()[0]
+        conn.close()
+        with mock.patch.object(config, "HOME_CODE", code):
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), server.H)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                c = http.client.HTTPConnection("127.0.0.1", srv.server_port, timeout=120)
+                c.request("GET", "/"); body = c.getresponse().read().decode("utf-8"); c.close()
+                self.assertIn(f"<title>{name} 재무 분석", body)                              # 최근 갱신 회사가 아니라 정한 종목
+            finally:
+                srv.shutdown(); srv.server_close()
+
     def test_fairper_formula_guards_and_payload(self):
         from analyzer import fairper
         # 1) 공식 값

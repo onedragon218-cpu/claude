@@ -28,6 +28,8 @@ NOT_FAIL = re.compile(r"없음|아직|미공시|추정치|해당 없|공시 전|
 
 
 def _is_fail(r):
+    if not r["ok"] and r.get("src") == "profile_wr" and not r["note"]:
+        return False      # 예전 기록: 기업개요 칸이 원래 없는 회사(리츠 등)를 메모 없이 실패로 적었음(2026-11-28 고침)
     return not r["ok"] and not NOT_FAIL.search(str(r["note"] or ""))
 
 
@@ -76,7 +78,7 @@ def status(conn, now=None):
         recs = []
         for src, cond in parts:
             recs += [dict(r) for r in conn.execute(
-                f"SELECT ok, note, fetched_at FROM fetch_log WHERE source=? AND fetched_at>=? {('AND ' + cond) if cond else ''}", (src, d7))]
+                f"SELECT ok, note, fetched_at, source src FROM fetch_log WHERE source=? AND fetched_at>=? {('AND ' + cond) if cond else ''}", (src, d7))]
         r1 = [r for r in recs if r["fetched_at"] >= d1]
         f1 = sum(1 for r in r1 if _is_fail(r))
         f7 = sum(1 for r in recs if _is_fail(r))

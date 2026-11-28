@@ -110,3 +110,6 @@ ACCOUNTS = {
 STATUSES = ["UNVERIFIED", "VERIFIED", "CONFLICT", "CORRECTED", "STALE", "MISSING"]
 
 SOURCE_RANK = {"DART": 1, "FnGuide": 2, "KRX": 3, "KIS": 3, "Naver": 4, "manual": 5, "derived": 9}
+
+# 앱을 열 때 첫 화면 종목(2026-11-28 사용자 요청: 삼성전자로 고정). DB에 없으면 최근 갱신 회사
+HOME_CODE = "005930"

@@ -167,10 +167,26 @@ def fetch_dart_doc(rcept_no):
 
 
 # ---------------------------------------------------------------- 수집(분석·갱신 때)
+# 리츠·인프라펀드처럼 WiseReport 페이지에 「기업개요」 칸이 원래 없는 회사(2026-11-28): 예전엔 실패로 적고(메모 없음) 수집 때마다 다시 시도해
+# '출처 고장 경보(최근 24시간 N번 모두 실패)'가 떴음. 이제 '없음'으로 적어 실패로 세지 않고 30일 뒤에 다시 확인. 접속 오류는 하루 뒤 다시.
+WR_NONE = "기업개요 없음(리츠·인프라펀드 등 페이지에 개요 칸이 없음)"
+
+
+def _wr_due(conn, code):
+    import datetime as dt
+    if db.fetched_recently(conn, "profile_wr", code, 30, ok_only=True):
+        return False
+    last = db.last_fetch(conn, "profile_wr", code)
+    if last is None or "profile_wr" in db.FORCE:
+        return True
+    age = (dt.datetime.now() - dt.datetime.fromisoformat(last["fetched_at"])).days
+    return age >= (30 if (last["note"] or "").startswith("기업개요 없음") else 1)
+
+
 def collect(conn, code, has_key, stats=None):
     ensure(conn)
     row = conn.execute("SELECT * FROM company_profile WHERE stock_code=?", (code,)).fetchone()
-    if not db.fetched_recently(conn, "profile_wr", code, 30, ok_only=True):
+    if _wr_due(conn, code):
         try:
             if stats:
                 stats.req("WiseReport")
@@ -178,7 +194,7 @@ def collect(conn, code, has_key, stats=None):
             conn.execute("INSERT INTO company_profile(stock_code, wr_lines, wics, wr_url, wr_at) VALUES (?,?,?,?,?) "
                          "ON CONFLICT(stock_code) DO UPDATE SET wr_lines=excluded.wr_lines, wics=excluded.wics, wr_url=excluded.wr_url, wr_at=excluded.wr_at",
                          (code, json.dumps(w["lines"], ensure_ascii=False), w["wics"], w["url"], db.now()))
-            db.log_fetch(conn, "profile_wr", code, code, bool(w["lines"]), len(w["lines"]))
+            db.log_fetch(conn, "profile_wr", code, code, bool(w["lines"]), len(w["lines"]), None if w["lines"] else WR_NONE)
         except Exception as e:      # noqa: BLE001
             db.log_fetch(conn, "profile_wr", code, code, False, 0, str(e)[:200])
     if has_key:
@@ -199,7 +215,10 @@ def collect(conn, code, has_key, stats=None):
                               b["note"], db.now()))
                 db.log_fetch(conn, "profile_dart", f"{code}:{rep['rcept_no']}", code, True, len(b["products"]), b["note"])
             except Exception as e:      # noqa: BLE001
-                db.log_fetch(conn, "profile_dart", f"{code}:{rep['rcept_no']}", code, False, 0, str(e)[:200])
+                msg = str(e)[:200]
+                if re.search(r'"status"\s*:\s*"01[34]"|조회된 데이타가 없|파일이 존재하지 않', msg):
+                    msg = "사업보고서 원문 없음(DART가 원문 파일을 주지 않음) — " + msg[:120]    # 원래 없는 자료: 출처 고장으로 세지 않음
+                db.log_fetch(conn, "profile_dart", f"{code}:{rep['rcept_no']}", code, False, 0, msg)
     conn.commit()
 
 
