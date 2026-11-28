@@ -216,7 +216,7 @@ def collect(conn, code, has_key, stats=None):
                 db.log_fetch(conn, "profile_dart", f"{code}:{rep['rcept_no']}", code, True, len(b["products"]), b["note"])
             except Exception as e:      # noqa: BLE001
                 msg = str(e)[:200]
-                if re.search(r'"status"\s*:\s*"01[34]"|조회된 데이타가 없|파일이 존재하지 않', msg):
+                if re.search(r'"status"\s*:\s*"01[34]"|<status>01[34]</status>|조회된 데이타가 없|파일이 존재하지 않', msg):
                     msg = "사업보고서 원문 없음(DART가 원문 파일을 주지 않음) — " + msg[:120]    # 원래 없는 자료: 출처 고장으로 세지 않음
                 db.log_fetch(conn, "profile_dart", f"{code}:{rep['rcept_no']}", code, False, 0, msg)
     conn.commit()

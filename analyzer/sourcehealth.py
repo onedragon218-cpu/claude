@@ -24,7 +24,7 @@ SOURCES = [
     ("기업개요(WiseReport·DART)", [("profile_wr", None), ("profile_dart", None)]),
 ]
 # 실패로 세지 않을 메모(자료가 원래 없는 경우)
-NOT_FAIL = re.compile(r"없음|아직|미공시|추정치|해당 없|공시 전|재무제표가 없는|오늘은")
+NOT_FAIL = re.compile(r"없음|아직|미공시|추정치|해당 없|공시 전|재무제표가 없는|오늘은|파일이 존재하지 않|조회된 데이타가 없|<status>01[34]</status>")
 
 
 def _is_fail(r):

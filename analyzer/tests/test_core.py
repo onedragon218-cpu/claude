@@ -741,6 +741,10 @@ class T(unittest.TestCase):
         self.assertFalse(sourcehealth._is_fail({"ok": 0, "note": profile.WR_NONE, "src": "profile_wr"}))
         self.assertFalse(sourcehealth._is_fail({"ok": 0, "note": None, "src": "profile_wr"}))   # 예전 메모 없는 기록
         self.assertTrue(sourcehealth._is_fail({"ok": 0, "note": "URLError: x", "src": "profile_wr"}))
+        # 2026-11-28 실제 화면: DART 원문 014(XML 응답)도 '원래 없음' — 예전 기록 그대로의 문구로 확인
+        old014 = '사업보고서 원문이 아님(응답: <?xml version="1.0" encoding="UTF-8" standalone="yes"?><result><status>014</status><message>파일이 존재하지 않습니다.</message></result>)'
+        self.assertFalse(sourcehealth._is_fail({"ok": 0, "note": old014, "src": "profile_dart"}))
+        self.assertTrue(sourcehealth._is_fail({"ok": 0, "note": "사업보고서 원문 접속 실패: URLError", "src": "profile_dart"}))
         conn.execute("DELETE FROM fetch_log WHERE source='profile_wr' AND key LIKE 'TST%'"); conn.commit()
         self.assertEqual(config.HOME_CODE, "005930")
         code = conn.execute("SELECT stock_code FROM companies ORDER BY updated_at ASC LIMIT 1").fetchone()[0]   # 가장 오래 전에 갱신된 회사
